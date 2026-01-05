@@ -144,7 +144,7 @@ export function ImageLibraryModal({
               <p className="text-sm text-red-600 font-semibold mb-2">{error}</p>
               <p className="text-xs text-gray-500 mb-4">Please check your connection and try again</p>
               <Button
-                onClick={fetchImages}
+                onClick={() => fetchImages(page)}
                 variant="outline"
                 size="sm"
                 className="gap-2 border-red-200 text-red-700 hover:bg-red-50"
