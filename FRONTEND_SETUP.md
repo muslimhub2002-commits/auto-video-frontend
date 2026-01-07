@@ -143,6 +143,10 @@ npm install
 Create `.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:3000
+
+# Unsigned Cloudinary uploads (used to avoid huge multipart uploads to the backend)
+NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=your_cloud_name
+NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET=your_unsigned_upload_preset
 ```
 
 ### **3. Start Development Server**

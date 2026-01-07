@@ -32,6 +32,10 @@ import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
+import {
+  mapWithConcurrency,
+  uploadToCloudinaryUnsigned,
+} from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 
 const API_URL =
@@ -458,78 +462,70 @@ export function GeneratePageInner() {
 
     setIsGenerating(true);
     try {
-      const form = new FormData();
-      form.append('voiceOver', voiceOver);
+      const sentencePayload = sentences.map((s) => ({ text: s.text }));
 
-      const sentencePayload = sentences.map((s) => ({
-        text: s.text,
-      }));
-      form.append('sentences', JSON.stringify(sentencePayload));
-      form.append('scriptLength', scriptLength);
-      if (voiceDuration && voiceDuration > 0) {
-        form.append('audioDurationSeconds', String(voiceDuration));
-      }
+      // 1) Upload voiceOver to Cloudinary (unsigned) so the backend request stays tiny.
+      const audioUrl = await uploadToCloudinaryUnsigned(voiceOver, {
+        resourceType: 'video',
+        folder: 'auto-video-generator/render-inputs/audio',
+      });
 
-      // Render configuration flags
-      form.append('useLowerFps', useLowerFps ? 'true' : 'false');
-      form.append(
-        'useLowerResolution',
-        useLowerResolution ? 'true' : 'false',
-      );
-      form.append(
-        'enableGlitchTransitions',
-        enableGlitchTransitions ? 'true' : 'false',
-      );
-      form.append(
-        'enableZoomRotateTransitions',
-        enableZoomRotateTransitions ? 'true' : 'false',
-      );
+      // 2) Build aligned image URLs per sentence. Subscribe sentence uses built-in video.
+      const imageUrls = await mapWithConcurrency(
+        sentences,
+        3,
+        async (s, index) => {
+          const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
+          if (isSubscribe) return null;
 
-      // Prepare image files for each sentence, including library images with URLs
-      const imageFiles = await Promise.all(
-        sentences.map(async (s, index) => {
           if (s.image) {
-            return s.image;
+            return await uploadToCloudinaryUnsigned(s.image, {
+              resourceType: 'image',
+              folder: 'auto-video-generator/render-inputs/images',
+            });
           }
 
           if (s.imageUrl?.startsWith('data:')) {
-            // AI-generated base64 image
-            return dataUrlToFile(
-              s.imageUrl,
-              `sentence-${index + 1}.png`,
-            );
+            const file = dataUrlToFile(s.imageUrl, `sentence-${index + 1}.png`);
+            return await uploadToCloudinaryUnsigned(file, {
+              resourceType: 'image',
+              folder: 'auto-video-generator/render-inputs/images',
+            });
           }
 
-          if (s.imageUrl) {
-            // Image selected from library (Cloudinary or remote URL) – download to a File
-            try {
-              const res = await fetch(s.imageUrl);
-              if (!res.ok) return null;
-              const blob = await res.blob();
-              return new File(
-                [blob],
-                `sentence-${index + 1}.png`,
-                { type: blob.type || 'image/png' },
-              );
-            } catch {
-              return null;
-            }
-          }
+          // If the sentence already references a hosted image URL, use it directly.
+          if (s.imageUrl) return s.imageUrl;
 
           return null;
-        }),
+        },
       );
 
-      // Append images in the same order as sentences
-      imageFiles.forEach((file) => {
-        if (file) {
-          form.append('images', file);
-        }
+      const hasMissingImage = sentences.some((s, i) => {
+        const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
+        return !isSubscribe && !imageUrls[i];
       });
+      if (hasMissingImage) {
+        throw new Error('Missing image for one or more sentences');
+      }
 
-      const res = await fetch(`${API_URL}/videos`, {
+      const res = await fetch(`${API_URL}/videos/url`, {
         method: 'POST',
-        body: form,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          sentences: sentencePayload,
+          scriptLength,
+          audioDurationSeconds:
+            voiceDuration && voiceDuration > 0 ? voiceDuration : undefined,
+          useLowerFps,
+          useLowerResolution,
+          enableGlitchTransitions,
+          enableZoomRotateTransitions,
+          audioUrl,
+          imageUrls,
+        }),
       });
 
       if (!res.ok) {

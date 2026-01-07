@@ -217,25 +217,6 @@ export function ScriptSection(props: ScriptSectionProps) {
                 </>
               )}
             </Button>
-            <Button
-              type="button"
-              size="default"
-              onClick={onSplitScript}
-              disabled={isSplitting || !script.trim() || isRandomScriptLoading}
-              className="gap-2 bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-md hover:shadow-lg transition-all"
-            >
-              {isSplitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Splitting...
-                </>
-              ) : (
-                <>
-                  <FileText className="h-4 w-4" />
-                  Split into Sentences
-                </>
-              )}
-            </Button>
             {shouldShowEnhanceButton && (
               <Button
                 type="button"
@@ -257,6 +238,25 @@ export function ScriptSection(props: ScriptSectionProps) {
                 )}
               </Button>
             )}
+            <Button
+              type="button"
+              size="default"
+              onClick={onSplitScript}
+              disabled={isSplitting || !script.trim() || isRandomScriptLoading}
+              className="gap-2 bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-md hover:shadow-lg transition-all"
+            >
+              {isSplitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Splitting...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4" />
+                  Split into Sentences
+                </>
+              )}
+            </Button>
             <Button
               type="button"
               size="default"
