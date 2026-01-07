@@ -3,6 +3,12 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  turbopack: {
+    resolveAlias: {
+      tailwindcss: "tailwindcss/index.css",
+      "tw-animate-css": "tw-animate-css/dist/tw-animate.css",
+    },
+  },
   webpack: (config) => {
     config.resolve = config.resolve ?? {};
     config.resolve.alias = {
