@@ -72,8 +72,21 @@ export function VideoStatusCard({
         setUploadedYoutubeUrl(null);
         setIsConnectingYouTube(true);
         try {
-            const res = await api.get('/youtube/auth-url');
-            const url = res.data?.url as string | undefined;
+            const token = localStorage.getItem('token');
+            const response = await fetch('https://auto-video-backend.vercel.app/youtube/auth-url', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': token ? `Bearer ${token}` : '',
+                },
+                credentials: 'include',
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => null);
+                throw new Error(errData?.message || 'Failed to get YouTube auth url');
+            }
+            const data = await response.json();
+            const url = data?.url as string | undefined;
             if (!url) {
                 throw new Error('Missing YouTube auth url');
             }
@@ -107,15 +120,37 @@ export function VideoStatusCard({
                 .map((tag) => tag.trim())
                 .filter(Boolean);
 
-            const res = await api.post('/youtube/upload', {
-                videoUrl,
-                title: youtubeTitle,
-                description: youtubeDescription,
-                tags,
-                privacyStatus: 'unlisted',
+            const token = localStorage.getItem('token');
+
+            // 1) Save generation to chats/messages BEFORE uploading to YouTube (use api baseURL)
+            await api.post('/messages/save-generation', {
+                script,
+                video_url: videoUrl,
             });
 
-            const videoId = res.data?.videoId as string | undefined;
+            // 2) Proceed to YouTube upload
+            const response = await fetch('https://auto-video-backend.vercel.app/youtube/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': token ? `Bearer ${token}` : '',
+                },
+                body: JSON.stringify({
+                    videoUrl,
+                    title: youtubeTitle,
+                    description: youtubeDescription,
+                    tags,
+                    privacyStatus: 'unlisted',
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Upload failed');
+            }
+
+            const data = await response.json();
+            const videoId = data?.videoId as string | undefined;
             if (!videoId) {
                 throw new Error('Upload succeeded but missing videoId');
             }

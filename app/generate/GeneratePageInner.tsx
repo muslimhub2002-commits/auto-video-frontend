@@ -32,10 +32,6 @@ import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
-import {
-  mapWithConcurrency,
-  uploadToCloudinaryUnsigned,
-} from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 
 const API_URL =
@@ -138,22 +134,22 @@ export function GeneratePageInner() {
   );
   const [selectedChatMessages, setSelectedChatMessages] = useState<
     | {
+      id: string;
+      created_at: string;
+      video?: { video: string } | null;
+      voice?: { voice: string } | null;
+      scripts?: {
         id: string;
-        created_at: string;
-        video?: { video: string } | null;
-        voice?: { voice: string } | null;
-        scripts?: {
+        title: string | null;
+        script: string;
+        sentences?: {
           id: string;
-          title: string | null;
-          script: string;
-          sentences?: {
-            id: string;
-            text: string;
-            index: number;
-            image?: { id: string; image: string } | null;
-          }[];
+          text: string;
+          index: number;
+          image?: { id: string; image: string } | null;
         }[];
-      }[]
+      }[];
+    }[]
     | null
   >(null);
   const [isScriptLibraryOpen, setIsScriptLibraryOpen] = useState(false);
@@ -462,70 +458,78 @@ export function GeneratePageInner() {
 
     setIsGenerating(true);
     try {
-      const sentencePayload = sentences.map((s) => ({ text: s.text }));
+      const form = new FormData();
+      form.append('voiceOver', voiceOver);
 
-      // 1) Upload voiceOver to Cloudinary (unsigned) so the backend request stays tiny.
-      const audioUrl = await uploadToCloudinaryUnsigned(voiceOver, {
-        resourceType: 'video',
-        folder: 'auto-video-generator/render-inputs/audio',
-      });
+      const sentencePayload = sentences.map((s) => ({
+        text: s.text,
+      }));
+      form.append('sentences', JSON.stringify(sentencePayload));
+      form.append('scriptLength', scriptLength);
+      if (voiceDuration && voiceDuration > 0) {
+        form.append('audioDurationSeconds', String(voiceDuration));
+      }
 
-      // 2) Build aligned image URLs per sentence. Subscribe sentence uses built-in video.
-      const imageUrls = await mapWithConcurrency(
-        sentences,
-        3,
-        async (s, index) => {
-          const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
-          if (isSubscribe) return null;
+      // Render configuration flags
+      form.append('useLowerFps', useLowerFps ? 'true' : 'false');
+      form.append(
+        'useLowerResolution',
+        useLowerResolution ? 'true' : 'false',
+      );
+      form.append(
+        'enableGlitchTransitions',
+        enableGlitchTransitions ? 'true' : 'false',
+      );
+      form.append(
+        'enableZoomRotateTransitions',
+        enableZoomRotateTransitions ? 'true' : 'false',
+      );
 
+      // Prepare image files for each sentence, including library images with URLs
+      const imageFiles = await Promise.all(
+        sentences.map(async (s, index) => {
           if (s.image) {
-            return await uploadToCloudinaryUnsigned(s.image, {
-              resourceType: 'image',
-              folder: 'auto-video-generator/render-inputs/images',
-            });
+            return s.image;
           }
 
           if (s.imageUrl?.startsWith('data:')) {
-            const file = dataUrlToFile(s.imageUrl, `sentence-${index + 1}.png`);
-            return await uploadToCloudinaryUnsigned(file, {
-              resourceType: 'image',
-              folder: 'auto-video-generator/render-inputs/images',
-            });
+            // AI-generated base64 image
+            return dataUrlToFile(
+              s.imageUrl,
+              `sentence-${index + 1}.png`,
+            );
           }
 
-          // If the sentence already references a hosted image URL, use it directly.
-          if (s.imageUrl) return s.imageUrl;
+          if (s.imageUrl) {
+            // Image selected from library (Cloudinary or remote URL) – download to a File
+            try {
+              const res = await fetch(s.imageUrl);
+              if (!res.ok) return null;
+              const blob = await res.blob();
+              return new File(
+                [blob],
+                `sentence-${index + 1}.png`,
+                { type: blob.type || 'image/png' },
+              );
+            } catch {
+              return null;
+            }
+          }
 
           return null;
-        },
+        }),
       );
 
-      const hasMissingImage = sentences.some((s, i) => {
-        const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
-        return !isSubscribe && !imageUrls[i];
+      // Append images in the same order as sentences
+      imageFiles.forEach((file) => {
+        if (file) {
+          form.append('images', file);
+        }
       });
-      if (hasMissingImage) {
-        throw new Error('Missing image for one or more sentences');
-      }
 
-      const res = await fetch(`${API_URL}/videos/url`, {
+      const res = await fetch(`${API_URL}/videos`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          sentences: sentencePayload,
-          scriptLength,
-          audioDurationSeconds:
-            voiceDuration && voiceDuration > 0 ? voiceDuration : undefined,
-          useLowerFps,
-          useLowerResolution,
-          enableGlitchTransitions,
-          enableZoomRotateTransitions,
-          audioUrl,
-          imageUrls,
-        }),
+        body: form,
       });
 
       if (!res.ok) {
@@ -842,12 +846,12 @@ export function GeneratePageInner() {
       prev.map((item, i) =>
         i === index
           ? {
-              ...item,
-              image: isVideo ? null : file,
-              imageUrl: isVideo ? item.imageUrl : item.imageUrl,
-              video: isVideo ? file : null,
-              videoUrl: isVideo ? null : item.videoUrl,
-            }
+            ...item,
+            image: isVideo ? null : file,
+            imageUrl: isVideo ? item.imageUrl : item.imageUrl,
+            video: isVideo ? file : null,
+            videoUrl: isVideo ? null : item.videoUrl,
+          }
           : item,
       ),
     );
@@ -858,14 +862,14 @@ export function GeneratePageInner() {
       prev.map((item, i) =>
         i === index
           ? {
-              ...item,
-              image: null,
-              imageUrl: null,
-              video: null,
-              videoUrl: null,
-              imagePrompt: null,
-              isFromLibrary: false,
-            }
+            ...item,
+            image: null,
+            imageUrl: null,
+            video: null,
+            videoUrl: null,
+            imagePrompt: null,
+            isFromLibrary: false,
+          }
           : item,
       ),
     );
@@ -919,12 +923,12 @@ export function GeneratePageInner() {
         prev.map((item, i) =>
           i === index
             ? {
-                ...item,
-                imageUrl,
-                imagePrompt: data.prompt,
-                isGeneratingImage: false,
-                isFromLibrary: false,
-              }
+              ...item,
+              imageUrl,
+              imagePrompt: data.prompt,
+              isGeneratingImage: false,
+              isFromLibrary: false,
+            }
             : item,
         ),
       );
@@ -1042,13 +1046,13 @@ export function GeneratePageInner() {
       prev.map((item, i) =>
         i === libraryTargetIndex
           ? {
-              ...item,
-              imageUrl,
-              image: null,
-              imagePrompt: null,
-              isFromLibrary: true,
-              savedImageId: id,
-            }
+            ...item,
+            imageUrl,
+            image: null,
+            imagePrompt: null,
+            isFromLibrary: true,
+            savedImageId: id,
+          }
           : item,
       ),
     );
@@ -1489,8 +1493,8 @@ export function GeneratePageInner() {
 
             {/* Generate Form */}
             <div className="bg-linear-to-br from-white to-gray-50 rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
-                <Accordion type="multiple" defaultValue={['script', 'sentences', 'voice']} className="w-full">
-                  <ScriptSection
+              <Accordion type="multiple" defaultValue={['script', 'sentences', 'voice']} className="w-full">
+                <ScriptSection
                   script={script}
                   onScriptChange={setScript}
                   hasSentences={sentences.length > 0}
@@ -1518,9 +1522,9 @@ export function GeneratePageInner() {
                   originalScriptSubjectContent={originalScriptSubjectContent}
                   isEnhancingScript={isEnhancingScript}
                   onEnhanceScript={handleEnhanceScript}
-                  />
+                />
 
-                  <SentencesImagesSection
+                <SentencesImagesSection
                   sentences={sentences}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
@@ -1530,9 +1534,9 @@ export function GeneratePageInner() {
                   onSentenceTextChange={handleSentenceTextChange}
                   onSaveSentenceImage={handleSaveSentenceImage}
                   onSelectFromLibrary={handleSelectFromLibrary}
-                  />
+                />
 
-                  <VoiceOverSection
+                <VoiceOverSection
                   script={script}
                   voiceOver={voiceOver}
                   voiceDuration={voiceDuration}
@@ -1551,130 +1555,124 @@ export function GeneratePageInner() {
                   onRemoveVoice={removeVoice}
                   onSaveVoice={handleSaveVoice}
                   onOpenLibrary={handleOpenVoiceLibrary}
-                  />
-                </Accordion>
-                {/* Render Settings */}
-                <div className="px-6 pb-5 pt-5 border-t border-gray-200 bg-linear-to-br from-gray-50 to-white">
-                  <div className="flex items-center gap-3 mb-5">
-                    <div className="relative">
-                      <div className="absolute inset-0 bg-linear-to-br from-indigo-400 to-purple-500 blur-md opacity-40 rounded-xl"></div>
-                      <div className="relative p-2.5 bg-linear-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg">
-                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-lg font-bold bg-linear-to-r from-gray-900 via-indigo-900 to-purple-900 bg-clip-text text-transparent">Render Configuration</h3>
-                      <p className="text-sm text-gray-600">Fine-tune quality and performance</p>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {/* Lower FPS Option */}
-                    <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${
-                      useLowerFps
-                        ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                        : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
-                    }`}>
-                      <div className="relative mt-0.5">
-                        <input
-                          type="checkbox"
-                          className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
-                          checked={useLowerFps}
-                          onChange={(e) => setUseLowerFps(e.target.checked)}
-                        />
-                        <div className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${
-                          useLowerFps ? 'animate-ping' : ''
-                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">Lower FPS</span>
-                          <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Faster</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">24 fps instead of 30 fps (~20% faster)</p>
-                      </div>
-                    </label>
-
-                    {/* Lower Resolution Option */}
-                    <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${
-                      useLowerResolution
-                        ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                        : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
-                    }`}>
-                      <div className="relative mt-0.5">
-                        <input
-                          type="checkbox"
-                          className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
-                          checked={useLowerResolution}
-                          onChange={(e) =>
-                            setUseLowerResolution(e.target.checked)
-                          }
-                        />
-                        <div className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${
-                          useLowerResolution ? 'animate-ping' : ''
-                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">720p Resolution</span>
-                          <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Faster</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">Use 720p instead of 1080p (~50% faster)</p>
-                      </div>
-                    </label>
-
-                    {/* Glitch Transitions Option */}
-                    <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${
-                      enableGlitchTransitions
-                        ? 'border-purple-400 shadow-lg shadow-purple-100'
-                        : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
-                    }`}>
-                      <div className="relative mt-0.5">
-                        <input
-                          type="checkbox"
-                          className="peer h-5 w-5 rounded border-2 border-gray-300 text-purple-600 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-purple-500"
-                          checked={enableGlitchTransitions}
-                          onChange={(e) =>
-                            setEnableGlitchTransitions(e.target.checked)
-                          }
-                        />
-                        <div className={`absolute inset-0 rounded bg-purple-500 opacity-0 transition-opacity duration-300 pointer-events-none ${
-                          enableGlitchTransitions ? 'animate-ping' : ''
-                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">Glitch Effect</span>
-                          <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">1x per video</span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">RGB channel split effect on middle scene</p>
-                      </div>
-                    </label>
-                  </div>
-
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      <svg className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                />
+              </Accordion>
+              {/* Render Settings */}
+              <div className="px-6 pb-5 pt-5 border-t border-gray-200 bg-linear-to-br from-gray-50 to-white">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-linear-to-br from-indigo-400 to-purple-500 blur-md opacity-40 rounded-xl"></div>
+                    <div className="relative p-2.5 bg-linear-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg">
+                      <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                       </svg>
-                      <p className="text-xs text-blue-800 leading-relaxed">
-                        <span className="font-semibold">Tip:</span> Enable performance options for faster previews, disable them for final high-quality exports.
-                      </p>
                     </div>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold bg-linear-to-r from-gray-900 via-indigo-900 to-purple-900 bg-clip-text text-transparent">Render Configuration</h3>
+                    <p className="text-sm text-gray-600">Fine-tune quality and performance</p>
                   </div>
                 </div>
 
-                {/* Generate Button */}
-                <GenerateVideoButton
-                  isGenerating={isGenerating}
-                  videoJobStatus={videoJobStatus}
-                  script={script}
-                  voiceOver={voiceOver}
-                  onGenerate={handleGenerate}
-                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Lower FPS Option */}
+                  <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerFps
+                      ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                      : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                    }`}>
+                    <div className="relative mt-0.5">
+                      <input
+                        type="checkbox"
+                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
+                        checked={useLowerFps}
+                        onChange={(e) => setUseLowerFps(e.target.checked)}
+                      />
+                      <div className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${useLowerFps ? 'animate-ping' : ''
+                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">Lower FPS</span>
+                        <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Faster</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">24 fps instead of 30 fps (~20% faster)</p>
+                    </div>
+                  </label>
+
+                  {/* Lower Resolution Option */}
+                  <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerResolution
+                      ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                      : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                    }`}>
+                    <div className="relative mt-0.5">
+                      <input
+                        type="checkbox"
+                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
+                        checked={useLowerResolution}
+                        onChange={(e) =>
+                          setUseLowerResolution(e.target.checked)
+                        }
+                      />
+                      <div className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${useLowerResolution ? 'animate-ping' : ''
+                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">720p Resolution</span>
+                        <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Faster</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Use 720p instead of 1080p (~50% faster)</p>
+                    </div>
+                  </label>
+
+                  {/* Glitch Transitions Option */}
+                  <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${enableGlitchTransitions
+                      ? 'border-purple-400 shadow-lg shadow-purple-100'
+                      : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
+                    }`}>
+                    <div className="relative mt-0.5">
+                      <input
+                        type="checkbox"
+                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-purple-600 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-purple-500"
+                        checked={enableGlitchTransitions}
+                        onChange={(e) =>
+                          setEnableGlitchTransitions(e.target.checked)
+                        }
+                      />
+                      <div className={`absolute inset-0 rounded bg-purple-500 opacity-0 transition-opacity duration-300 pointer-events-none ${enableGlitchTransitions ? 'animate-ping' : ''
+                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">Glitch Effect</span>
+                        <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">1x per video</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">RGB channel split effect on middle scene</p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <svg className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-xs text-blue-800 leading-relaxed">
+                      <span className="font-semibold">Tip:</span> Enable performance options for faster previews, disable them for final high-quality exports.
+                    </p>
+                  </div>
+                </div>
               </div>
+
+              {/* Generate Button */}
+              <GenerateVideoButton
+                isGenerating={isGenerating}
+                videoJobStatus={videoJobStatus}
+                script={script}
+                voiceOver={voiceOver}
+                onGenerate={handleGenerate}
+              />
+            </div>
 
             {/* Video job status & preview */}
             <div ref={videoSectionRef}>
