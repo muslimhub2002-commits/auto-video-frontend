@@ -1683,6 +1683,7 @@ export function GeneratePageInner() {
                 videoJobStatus={videoJobStatus}
                 videoJobError={videoJobError}
                 videoUrl={videoUrl}
+                script={script}
                 onSaveGeneration={handleSaveGeneration}
                 isSavingGeneration={isSavingGeneration}
                 canSaveGeneration={!!videoUrl && !!script.trim() && !!voiceOver && sentences.length > 0}
