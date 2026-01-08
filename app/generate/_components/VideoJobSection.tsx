@@ -8,7 +8,7 @@ interface VideoJobSectionProps {
   videoJobError: string | null;
   videoUrl: string | null;
   script: string;
-  onSaveGeneration: () => void;
+  onSaveGeneration: () => Promise<void>;
   isSavingGeneration: boolean;
   canSaveGeneration: boolean;
   onRetry?: () => void;

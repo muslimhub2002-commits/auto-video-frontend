@@ -35,7 +35,7 @@ import { api } from '@/lib/api';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+  'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
   'Please Subscribe & Help us reach out to more people';

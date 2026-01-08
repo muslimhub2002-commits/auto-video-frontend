@@ -1,10 +1,11 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { Plus, MessageSquare } from 'lucide-react';
+import { MoreVertical, Plus, Trash2, MessageSquare, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import type { User } from '@/lib/auth';
+import { useToast } from '@/components/ui/toast';
 
 interface SidebarProps {
   user: User | null;
@@ -34,6 +35,9 @@ export function Sidebar({ user, isOpen, onLogout, onNewGeneration, onSelectChat,
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [openMenuChatId, setOpenMenuChatId] = useState<string | null>(null);
+  const [isDeletingChatId, setIsDeletingChatId] = useState<string | null>(null);
+  const { showToast, ToastContainer } = useToast();
 
   const fetchChats = async (pageToLoad = 1) => {
     setIsLoading(true);
@@ -83,13 +87,48 @@ export function Sidebar({ user, isOpen, onLogout, onNewGeneration, onSelectChat,
     fetchChats(1);
   }, [user]);
 
+  useEffect(() => {
+    if (!openMenuChatId) return;
+
+    const onDocumentClick = () => setOpenMenuChatId(null);
+    document.addEventListener('click', onDocumentClick);
+    return () => document.removeEventListener('click', onDocumentClick);
+  }, [openMenuChatId]);
+
   const handleSelectChat = (chatId: string) => {
     onSelectChat(chatId);
+  };
+
+  const handleDeleteChat = async (chatId: string) => {
+    setIsDeletingChatId(chatId);
+    try {
+      await api.delete(`/chats/${chatId}`);
+
+      setChats((prev) => {
+        const next = prev.filter((c) => c.id !== chatId);
+        cachedChats = next;
+        return next;
+      });
+
+      if (activeChatId === chatId) {
+        onSelectChat(null);
+      }
+
+      showToast('Chat deleted successfully', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to delete chat', error);
+      showToast('Failed to delete chat', 'error');
+    } finally {
+      setOpenMenuChatId(null);
+      setIsDeletingChatId(null);
+    }
   };
   return (
     <div
       className={`${isOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden`}
     >
+      <ToastContainer />
       <div className="p-4 space-y-2">
         <Button
           variant="ghost"
@@ -105,19 +144,62 @@ export function Sidebar({ user, isOpen, onLogout, onNewGeneration, onSelectChat,
         <div className="text-xs text-gray-500 px-3 py-2">Chats</div>
         <div className="space-y-1">
           {chats.map((chat) => (
-            <button
+            <div
               key={chat.id}
-              type="button"
-              onClick={() => handleSelectChat(chat.id)}
-              className={`w-full text-left px-3 py-2 text-sm rounded-md flex items-center gap-2 truncate ${
+              className={`w-full px-2 py-1 text-sm rounded-md flex items-center gap-2 ${
                 activeChatId === chat.id
                   ? 'bg-linear-to-r from-indigo-500 to-purple-600 text-white shadow-sm'
                   : 'bg-transparent hover:bg-gray-200 text-gray-700'
               }`}
             >
-              <MessageSquare className="h-3 w-3 shrink-0" />
-              <span className="truncate">{chat.title || 'Untitled Chat'}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => handleSelectChat(chat.id)}
+                className="flex flex-1 min-w-0 items-center gap-2 text-left px-1 py-1"
+              >
+                <MessageSquare className="h-3 w-3 shrink-0" />
+                <span className="truncate">{chat.title || 'Untitled Chat'}</span>
+              </button>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Chat options"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenMenuChatId((prev) => (prev === chat.id ? null : chat.id));
+                  }}
+                  className={`p-1 rounded-md ${
+                    activeChatId === chat.id
+                      ? 'hover:bg-white/15'
+                      : 'hover:bg-gray-300'
+                  }`}
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+
+                {openMenuChatId === chat.id && (
+                  <div
+                    className="absolute right-0 mt-2 w-40 rounded-md border border-gray-200 bg-white shadow-md z-20 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteChat(chat.id)}
+                      disabled={isDeletingChatId === chat.id}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 flex items-center gap-2 disabled:opacity-50 rounded-md transition-colors"
+                    >
+                      {isDeletingChatId === chat.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                      {isDeletingChatId === chat.id ? 'Deleting...' : 'Delete chat'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           ))}
           {isLoading && (
             <div className="px-3 py-2 text-xs text-gray-400">Loading...</div>
