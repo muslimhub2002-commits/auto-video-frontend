@@ -20,9 +20,6 @@ import {
   ArrowDown,
 } from 'lucide-react';
 
-const SUBSCRIBE_SENTENCE =
-  'Please Subscribe & Help us reach out to more people';
-
 export type SentenceItem = {
   id: string;
   text: string;
@@ -45,10 +42,10 @@ interface SentencesImagesSectionProps {
   onGenerateAllImages?: () => void;
   isGeneratingAllImages?: boolean;
   onSentenceTextChange: (index: number, text: string) => void;
+  onMergeSentenceIntoPrevious: (index: number) => void;
+  onMergeSentenceIntoNext: (index: number) => void;
   onSaveSentenceImage: (index: number) => void;
   onSelectFromLibrary: (index: number) => void;
-  onMergeSentenceToPrevious: (index: number) => void;
-  onMergeSentenceToNext: (index: number) => void;
 }
 
 export function SentencesImagesSection({
@@ -59,10 +56,10 @@ export function SentencesImagesSection({
   onGenerateAllImages,
   isGeneratingAllImages,
   onSentenceTextChange,
+  onMergeSentenceIntoPrevious,
+  onMergeSentenceIntoNext,
   onSelectFromLibrary,
   onSaveSentenceImage,
-  onMergeSentenceToPrevious,
-  onMergeSentenceToNext,
 }: SentencesImagesSectionProps) {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isPreviewClosing, setIsPreviewClosing] = useState(false);
@@ -139,49 +136,7 @@ export function SentencesImagesSection({
                   >
                     <div className="flex flex-col lg:flex-row gap-4">
                       {/* Text Content */}
-                      <div className="flex-1 pt-2 space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs font-semibold text-gray-500">
-                            Sentence {index + 1}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onMergeSentenceToPrevious(index)}
-                              disabled={
-                                index === 0 ||
-                                item.text.trim() === SUBSCRIBE_SENTENCE ||
-                                sentences[index - 1]?.text.trim() ===
-                                  SUBSCRIBE_SENTENCE
-                              }
-                              className="h-7 px-2 gap-1 text-[10px] border-gray-200 text-gray-700 hover:bg-gray-50"
-                              title="Add this sentence into the previous one (keeps previous media)"
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                              Prev
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onMergeSentenceToNext(index)}
-                              disabled={
-                                index === sentences.length - 1 ||
-                                item.text.trim() === SUBSCRIBE_SENTENCE ||
-                                sentences[index + 1]?.text.trim() ===
-                                  SUBSCRIBE_SENTENCE
-                              }
-                              className="h-7 px-2 gap-1 text-[10px] border-gray-200 text-gray-700 hover:bg-gray-50"
-                              title="Add this sentence into the next one (keeps next media)"
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                              Next
-                            </Button>
-                          </div>
-                        </div>
-
+                      <div className="flex-1 pt-2">
                         <div className="flex items-start gap-2">
                           <FileText className="h-4 w-4 text-primary mt-2.5 shrink-0" />
                           <textarea
@@ -191,6 +146,34 @@ export function SentencesImagesSection({
                             rows={4}
                             placeholder="Enter sentence text..."
                           />
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2 pl-6">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={index === 0}
+                            onClick={() => onMergeSentenceIntoPrevious(index)}
+                            className="gap-1.5 text-xs"
+                            title="Merge this sentence into the previous one"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                            Add to Previous
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={index === sentences.length - 1}
+                            onClick={() => onMergeSentenceIntoNext(index)}
+                            className="gap-1.5 text-xs"
+                            title="Merge this sentence into the next one"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                            Add to Next
+                          </Button>
                         </div>
                       </div>
 

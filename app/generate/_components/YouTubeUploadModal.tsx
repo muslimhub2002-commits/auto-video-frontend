@@ -6,6 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { api } from '@/lib/api';
 
 interface YouTubeUploadModalProps {
@@ -29,6 +36,9 @@ export function YouTubeUploadModal({
   const [youtubeTitle, setYoutubeTitle] = useState('');
   const [youtubeDescription, setYoutubeDescription] = useState('');
   const [youtubeTags, setYoutubeTags] = useState('');
+  const [privacyStatus, setPrivacyStatus] = useState<'public' | 'unlisted' | 'private'>('public');
+  const [categoryId, setCategoryId] = useState<string>('24');
+  const [selfDeclaredMadeForKids, setSelfDeclaredMadeForKids] = useState<boolean>(false);
   const [isUploadingToYouTube, setIsUploadingToYouTube] = useState(false);
   const [isGeneratingSeo, setIsGeneratingSeo] = useState(false);
   const [seoError, setSeoError] = useState<string | null>(null);
@@ -153,7 +163,9 @@ export function YouTubeUploadModal({
           title: youtubeTitle,
           description: youtubeDescription,
           tags,
-          privacyStatus: 'public',
+            privacyStatus,
+            categoryId,
+            selfDeclaredMadeForKids,
         }),
       });
 
@@ -401,6 +413,56 @@ export function YouTubeUploadModal({
               </svg>
               Separate multiple tags with commas
             </p>
+          </div>
+
+          {/* Upload Settings */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <Label className="text-base font-semibold text-gray-900 flex items-center gap-2">Privacy</Label>
+              <Select value={privacyStatus} onValueChange={(v) => setPrivacyStatus(v as typeof privacyStatus)}>
+                <SelectTrigger className="w-full h-12 px-4 text-base border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all duration-200">
+                  <SelectValue placeholder="Select privacy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="public">Public</SelectItem>
+                  <SelectItem value="unlisted">Unlisted</SelectItem>
+                  <SelectItem value="private">Private</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold text-gray-900 flex items-center gap-2">Category</Label>
+              <Select value={categoryId} onValueChange={setCategoryId}>
+                <SelectTrigger className="w-full h-12 px-4 text-base border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all duration-200">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="24">Entertainment</SelectItem>
+                  <SelectItem value="22">People & Blogs</SelectItem>
+                  <SelectItem value="27">Education</SelectItem>
+                  <SelectItem value="28">Science & Technology</SelectItem>
+                  <SelectItem value="26">Howto & Style</SelectItem>
+                  <SelectItem value="10">Music</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-red-600"
+                  checked={selfDeclaredMadeForKids}
+                  onChange={(e) => setSelfDeclaredMadeForKids(e.target.checked)}
+                  disabled={isUploadingToYouTube}
+                />
+                Self-declare as made for kids
+              </label>
+              <p className="mt-2 text-sm text-gray-500">
+                Only enable this if your content is made specifically for children.
+              </p>
+            </div>
           </div>
 
           {/* Preview Card */}

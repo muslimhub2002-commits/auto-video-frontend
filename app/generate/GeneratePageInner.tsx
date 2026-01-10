@@ -40,10 +40,6 @@ const API_URL =
 const SUBSCRIBE_SENTENCE =
   'Please Subscribe & Help us reach out to more people';
 
-function mergeText(a: string, b: string) {
-  return `${a ?? ''} ${b ?? ''}`.replace(/\s+/g, ' ').trim();
-}
-
 // Convert a data URL (e.g. AI-generated base64 image) into a File for upload
 function dataUrlToFile(dataUrl: string, filename: string): File {
   const [meta, base64] = dataUrl.split(',');
@@ -158,8 +154,8 @@ export function GeneratePageInner() {
   >(null);
   const [isScriptLibraryOpen, setIsScriptLibraryOpen] = useState(false);
   // Render performance and transition options
-  const [useLowerFps, setUseLowerFps] = useState(true);
-  const [useLowerResolution, setUseLowerResolution] = useState(true);
+  const [useLowerFps, setUseLowerFps] = useState(false);
+  const [useLowerResolution, setUseLowerResolution] = useState(false);
   const [enableGlitchTransitions, setEnableGlitchTransitions] = useState(true);
   const [enableZoomRotateTransitions, setEnableZoomRotateTransitions] = useState(true);
   const {
@@ -879,64 +875,53 @@ export function GeneratePageInner() {
     );
   };
 
-  const handleMergeSentenceToPrevious = (index: number) => {
-    setSentences((prev) => {
-      if (index <= 0) return prev;
-
-      const current = prev[index];
-      const previous = prev[index - 1];
-      if (!current || !previous) return prev;
-
-      // Keep the previous sentence's media; move the text into it.
-      // Prevent breaking the special subscribe sentence.
-      if (
-        current.text.trim() === SUBSCRIBE_SENTENCE ||
-        previous.text.trim() === SUBSCRIBE_SENTENCE
-      ) {
-        return prev;
-      }
-
-      const next = [...prev];
-      next[index - 1] = {
-        ...previous,
-        text: mergeText(previous.text, current.text),
-      };
-      next.splice(index, 1);
-      return next;
-    });
-  };
-
-  const handleMergeSentenceToNext = (index: number) => {
-    setSentences((prev) => {
-      if (index >= prev.length - 1) return prev;
-
-      const current = prev[index];
-      const nextSentence = prev[index + 1];
-      if (!current || !nextSentence) return prev;
-
-      // Keep the next sentence's media; move the text into it.
-      // Prevent breaking the special subscribe sentence.
-      if (
-        current.text.trim() === SUBSCRIBE_SENTENCE ||
-        nextSentence.text.trim() === SUBSCRIBE_SENTENCE
-      ) {
-        return prev;
-      }
-
-      const next = [...prev];
-      next[index + 1] = {
-        ...nextSentence,
-        text: mergeText(current.text, nextSentence.text),
-      };
-      next.splice(index, 1);
-      return next;
-    });
-  };
-
   const handleSentenceTextChange = (index: number, text: string) => {
     setSentences((prev) =>
       prev.map((item, i) => (i === index ? { ...item, text } : item)),
     );
+  };
+
+  const mergeSentenceText = (targetText: string, sourceText: string) => {
+    const parts = [targetText, sourceText]
+      .map((t) => (t ?? '').trim())
+      .filter(Boolean);
+    return parts.join(' ');
+  };
+
+  const handleMergeSentenceIntoPrevious = (index: number) => {
+    setSentences((prev) => {
+      if (index <= 0 || index >= prev.length) return prev;
+      const targetIndex = index - 1;
+      const target = prev[targetIndex];
+      const source = prev[index];
+      if (!target || !source) return prev;
+
+      const next = prev.map((item, i) =>
+        i === targetIndex
+          ? { ...item, text: mergeSentenceText(item.text, source.text) }
+          : item,
+      );
+      next.splice(index, 1);
+      return next;
+    });
+  };
+
+  const handleMergeSentenceIntoNext = (index: number) => {
+    setSentences((prev) => {
+      if (index < 0 || index >= prev.length - 1) return prev;
+      const targetIndex = index + 1;
+      const target = prev[targetIndex];
+      const source = prev[index];
+      if (!target || !source) return prev;
+
+      const next = prev.map((item, i) =>
+        i === targetIndex
+          ? { ...item, text: mergeSentenceText(item.text, source.text) }
+          : item,
+      );
+      next.splice(index, 1);
+      return next;
+    });
   };
 
   const handleGenerateSentenceImage = async (index: number) => {
@@ -1590,10 +1575,10 @@ export function GeneratePageInner() {
                   onGenerateAllImages={handleGenerateAllSentenceImages}
                   isGeneratingAllImages={isGeneratingAllImages}
                   onSentenceTextChange={handleSentenceTextChange}
+                  onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
+                  onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
                   onSaveSentenceImage={handleSaveSentenceImage}
                   onSelectFromLibrary={handleSelectFromLibrary}
-                  onMergeSentenceToPrevious={handleMergeSentenceToPrevious}
-                  onMergeSentenceToNext={handleMergeSentenceToNext}
                 />
 
                 <VoiceOverSection
@@ -1686,7 +1671,7 @@ export function GeneratePageInner() {
                   </label>
 
                   {/* Glitch Transitions Option */}
-                  <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${enableGlitchTransitions
+                  {/* <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${enableGlitchTransitions
                       ? 'border-purple-400 shadow-lg shadow-purple-100'
                       : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
                     }`}>
@@ -1709,7 +1694,7 @@ export function GeneratePageInner() {
                       </div>
                       <p className="text-xs text-gray-500 mt-1">RGB channel split effect on middle scene</p>
                     </div>
-                  </label>
+                  </label> */}
                 </div>
 
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
