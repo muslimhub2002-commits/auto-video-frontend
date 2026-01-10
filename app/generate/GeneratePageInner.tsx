@@ -40,6 +40,10 @@ const API_URL =
 const SUBSCRIBE_SENTENCE =
   'Please Subscribe & Help us reach out to more people';
 
+function mergeText(a: string, b: string) {
+  return `${a ?? ''} ${b ?? ''}`.replace(/\s+/g, ' ').trim();
+}
+
 // Convert a data URL (e.g. AI-generated base64 image) into a File for upload
 function dataUrlToFile(dataUrl: string, filename: string): File {
   const [meta, base64] = dataUrl.split(',');
@@ -875,6 +879,60 @@ export function GeneratePageInner() {
     );
   };
 
+  const handleMergeSentenceToPrevious = (index: number) => {
+    setSentences((prev) => {
+      if (index <= 0) return prev;
+
+      const current = prev[index];
+      const previous = prev[index - 1];
+      if (!current || !previous) return prev;
+
+      // Keep the previous sentence's media; move the text into it.
+      // Prevent breaking the special subscribe sentence.
+      if (
+        current.text.trim() === SUBSCRIBE_SENTENCE ||
+        previous.text.trim() === SUBSCRIBE_SENTENCE
+      ) {
+        return prev;
+      }
+
+      const next = [...prev];
+      next[index - 1] = {
+        ...previous,
+        text: mergeText(previous.text, current.text),
+      };
+      next.splice(index, 1);
+      return next;
+    });
+  };
+
+  const handleMergeSentenceToNext = (index: number) => {
+    setSentences((prev) => {
+      if (index >= prev.length - 1) return prev;
+
+      const current = prev[index];
+      const nextSentence = prev[index + 1];
+      if (!current || !nextSentence) return prev;
+
+      // Keep the next sentence's media; move the text into it.
+      // Prevent breaking the special subscribe sentence.
+      if (
+        current.text.trim() === SUBSCRIBE_SENTENCE ||
+        nextSentence.text.trim() === SUBSCRIBE_SENTENCE
+      ) {
+        return prev;
+      }
+
+      const next = [...prev];
+      next[index + 1] = {
+        ...nextSentence,
+        text: mergeText(current.text, nextSentence.text),
+      };
+      next.splice(index, 1);
+      return next;
+    });
+  };
+
   const handleSentenceTextChange = (index: number, text: string) => {
     setSentences((prev) =>
       prev.map((item, i) => (i === index ? { ...item, text } : item)),
@@ -1534,6 +1592,8 @@ export function GeneratePageInner() {
                   onSentenceTextChange={handleSentenceTextChange}
                   onSaveSentenceImage={handleSaveSentenceImage}
                   onSelectFromLibrary={handleSelectFromLibrary}
+                  onMergeSentenceToPrevious={handleMergeSentenceToPrevious}
+                  onMergeSentenceToNext={handleMergeSentenceToNext}
                 />
 
                 <VoiceOverSection
