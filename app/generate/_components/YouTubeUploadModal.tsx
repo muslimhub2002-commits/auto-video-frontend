@@ -39,17 +39,6 @@ export function YouTubeUploadModal({
   const [privacyStatus, setPrivacyStatus] = useState<'public' | 'unlisted' | 'private'>('public');
   const [categoryId, setCategoryId] = useState<string>('24');
   const [selfDeclaredMadeForKids, setSelfDeclaredMadeForKids] = useState<boolean>(false);
-
-  const [isScheduling, setIsScheduling] = useState<boolean>(false);
-  const [privacyBeforeScheduling, setPrivacyBeforeScheduling] = useState<
-    'public' | 'unlisted' | 'private'
-  >('public');
-  const [scheduleHourEgypt, setScheduleHourEgypt] = useState<number>(18);
-  const [scheduleDateEgypt, setScheduleDateEgypt] = useState<string>(() => {
-    // Egypt is fixed at UTC+3 for this app requirement.
-    const nowEgypt = new Date(Date.now() + 3 * 60 * 60 * 1000);
-    return nowEgypt.toISOString().slice(0, 10);
-  });
   const [isUploadingToYouTube, setIsUploadingToYouTube] = useState(false);
   const [isGeneratingSeo, setIsGeneratingSeo] = useState(false);
   const [seoError, setSeoError] = useState<string | null>(null);
@@ -78,23 +67,6 @@ export function YouTubeUploadModal({
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
-
-  // If scheduling is enabled, YouTube requires privacyStatus=private.
-  useEffect(() => {
-    if (isScheduling) {
-      if (privacyStatus !== 'private') {
-        setPrivacyBeforeScheduling(privacyStatus);
-      }
-      setPrivacyStatus('private');
-      return;
-    }
-
-    // Restore user preference (unless they already had private).
-    setPrivacyStatus((current) => {
-      if (current !== 'private') return current;
-      return privacyBeforeScheduling || 'public';
-    });
-  }, [isScheduling, privacyBeforeScheduling, privacyStatus]);
 
   const handleGenerateSeo = async () => {
     setSeoError(null);
@@ -125,8 +97,23 @@ export function YouTubeUploadModal({
     setUploadedYoutubeUrl(null);
     setIsConnectingYouTube(true);
     try {
-      const res = await api.get('/youtube/auth-url');
-      const url = (res.data as any)?.url as string | undefined;
+      const token = localStorage.getItem('token');
+      const response = await fetch('https://auto-video-backend.vercel.app/youtube/auth-url', {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.message || 'Failed to get YouTube auth url');
+      }
+
+      const data = await response.json();
+      const url = data?.url as string | undefined;
       if (!url) throw new Error('Missing YouTube auth url');
 
       window.open(url, '_blank', 'noopener,noreferrer');
@@ -159,41 +146,36 @@ export function YouTubeUploadModal({
         .map((tag) => tag.trim())
         .filter(Boolean);
 
+      const token = localStorage.getItem('token');
+
       // 1) Save generation to chats/messages BEFORE uploading to YouTube (use api baseURL)
       await onSaveGeneration();
 
-      const pad2 = (n: number) => String(n).padStart(2, '0');
-      let publishAt: string | undefined;
-      if (isScheduling) {
-        const hour = Math.min(23, Math.max(0, Number(scheduleHourEgypt)));
-        const date = (scheduleDateEgypt || '').trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-          throw new Error('Please pick a valid schedule date (Egypt time).');
-        }
-
-        // RFC3339 with explicit +03:00 offset.
-        publishAt = `${date}T${pad2(hour)}:00:00+03:00`;
-
-        // Client-side sanity: must be in the future.
-        const publishMs = new Date(publishAt).getTime();
-        if (!Number.isFinite(publishMs) || publishMs < Date.now() + 2 * 60 * 1000) {
-          throw new Error('Scheduled time must be in the future (Egypt time).');
-        }
-      }
-
       // 2) Proceed to YouTube upload
-      const res = await api.post('/youtube/upload', {
-        videoUrl,
-        title: youtubeTitle,
-        description: youtubeDescription,
-        tags,
-        privacyStatus,
-        categoryId,
-        selfDeclaredMadeForKids,
-        ...(publishAt ? { publishAt } : {}),
+      const response = await fetch('https://auto-video-backend.vercel.app/youtube/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({
+          videoUrl,
+          title: youtubeTitle,
+          description: youtubeDescription,
+          tags,
+            privacyStatus,
+            categoryId,
+            selfDeclaredMadeForKids,
+        }),
       });
 
-      const videoId = (res.data as any)?.videoId as string | undefined;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.message || 'Upload failed');
+      }
+
+      const data = await response.json();
+      const videoId = data?.videoId as string | undefined;
       if (!videoId) throw new Error('Upload succeeded but missing videoId');
 
       const url = `https://www.youtube.com/watch?v=${videoId}`;
@@ -437,11 +419,7 @@ export function YouTubeUploadModal({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-3">
               <Label className="text-base font-semibold text-gray-900 flex items-center gap-2">Privacy</Label>
-              <Select
-                value={privacyStatus}
-                onValueChange={(v) => setPrivacyStatus(v as typeof privacyStatus)}
-                disabled={isScheduling}
-              >
+              <Select value={privacyStatus} onValueChange={(v) => setPrivacyStatus(v as typeof privacyStatus)}>
                 <SelectTrigger className="w-full h-12 px-4 text-base border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all duration-200">
                   <SelectValue placeholder="Select privacy" />
                 </SelectTrigger>
@@ -451,11 +429,6 @@ export function YouTubeUploadModal({
                   <SelectItem value="private">Private</SelectItem>
                 </SelectContent>
               </Select>
-              {isScheduling && (
-                <p className="text-xs text-gray-500">
-                  Scheduling requires <span className="font-semibold">Private</span> until publish time.
-                </p>
-              )}
             </div>
 
             <div className="space-y-3">
@@ -489,53 +462,6 @@ export function YouTubeUploadModal({
               <p className="mt-2 text-sm text-gray-500">
                 Only enable this if your content is made specifically for children.
               </p>
-            </div>
-
-            <div className="md:col-span-2 border-t border-gray-200 pt-5">
-              <label className="flex items-center gap-3 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-red-600"
-                  checked={isScheduling}
-                  onChange={(e) => setIsScheduling(e.target.checked)}
-                  disabled={isUploadingToYouTube}
-                />
-                Schedule publish (Egypt time UTC+3)
-              </label>
-
-              {isScheduling && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold text-gray-900">Date (Egypt)</Label>
-                    <Input
-                      type="date"
-                      value={scheduleDateEgypt}
-                      onChange={(e) => setScheduleDateEgypt(e.target.value)}
-                      className="w-full h-11 px-4 text-base border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all duration-200"
-                      disabled={isUploadingToYouTube}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold text-gray-900">Hour (Egypt)</Label>
-                    <Select
-                      value={String(scheduleHourEgypt)}
-                      onValueChange={(v) => setScheduleHourEgypt(Number(v))}
-                      disabled={isUploadingToYouTube}
-                    >
-                      <SelectTrigger className="w-full h-11 px-4 text-base border-2 border-gray-200 rounded-xl focus:border-red-500 focus:ring-4 focus:ring-red-100 transition-all duration-200">
-                        <SelectValue placeholder="Select hour" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 24 }).map((_, h) => (
-                          <SelectItem key={h} value={String(h)}>
-                            {String(h).padStart(2, '0')}:00
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
