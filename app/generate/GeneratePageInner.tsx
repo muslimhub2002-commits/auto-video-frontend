@@ -935,32 +935,29 @@ export function GeneratePageInner() {
     );
 
     try {
-      const response = await fetch(
-        `${API_URL}/ai/generate-image-from-sentence`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sentence: target.text,
-            subject: scriptSubject,
-            style: scriptStyle,
-            scriptLength,
-          }),
-        },
-      );
+      const res = await api.post('/ai/generate-image-from-sentence', {
+        sentence: target.text,
+        subject: scriptSubject,
+        style: scriptStyle,
+        scriptLength,
+      });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate image');
-      }
-
-      const data = (await response.json()) as {
+      const data = res.data as {
         prompt: string;
-        imageBase64: string;
+        imageBase64?: string;
+        imageUrl?: string;
+        savedImageId?: string;
       };
 
-      const imageUrl = `data:image/png;base64,${data.imageBase64}`;
+      const imageUrl =
+        (data.imageUrl && String(data.imageUrl)) ||
+        (data.imageBase64
+          ? `data:image/png;base64,${data.imageBase64}`
+          : null);
+
+      if (!imageUrl) {
+        throw new Error('Image generation returned no imageUrl');
+      }
 
       setSentences((prev) =>
         prev.map((item, i) =>
@@ -971,6 +968,7 @@ export function GeneratePageInner() {
               imagePrompt: data.prompt,
               isGeneratingImage: false,
               isFromLibrary: false,
+              savedImageId: data.savedImageId ?? item.savedImageId ?? null,
             }
             : item,
         ),

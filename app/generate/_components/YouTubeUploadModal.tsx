@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
 
+const YOUTUBE_BACKEND_URL = 'https://auto-video-backend.vercel.app';
+
 interface YouTubeUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -45,6 +47,8 @@ export function YouTubeUploadModal({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadedYoutubeUrl, setUploadedYoutubeUrl] = useState<string | null>(null);
   const [isConnectingYouTube, setIsConnectingYouTube] = useState(false);
+  const [isYouTubeConnected, setIsYouTubeConnected] = useState(false);
+  const [isCheckingYouTubeStatus, setIsCheckingYouTubeStatus] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -67,6 +71,48 @@ export function YouTubeUploadModal({
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let cancelled = false;
+    const run = async () => {
+      // Fast-path: optimistic UX hint (doesn't guarantee token validity).
+      const hinted = localStorage.getItem('youtubeConnected') === 'true';
+      if (!cancelled) setIsYouTubeConnected(hinted);
+
+      setIsCheckingYouTubeStatus(true);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/status`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            Authorization: token ? `Bearer ${token}` : '',
+          },
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json().catch(() => null);
+          const connected = !!data?.connected;
+          if (!cancelled) {
+            setIsYouTubeConnected(connected);
+            localStorage.setItem('youtubeConnected', connected ? 'true' : 'false');
+          }
+        }
+      } catch {
+        // Ignore (endpoint may not exist on the deployed backend yet)
+      } finally {
+        if (!cancelled) setIsCheckingYouTubeStatus(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   const handleGenerateSeo = async () => {
     setSeoError(null);
@@ -98,7 +144,7 @@ export function YouTubeUploadModal({
     setIsConnectingYouTube(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('https://auto-video-backend.vercel.app/youtube/auth-url', {
+      const response = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/auth-url`, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -116,9 +162,71 @@ export function YouTubeUploadModal({
       const url = data?.url as string | undefined;
       if (!url) throw new Error('Missing YouTube auth url');
 
-      window.open(url, '_blank', 'noopener,noreferrer');
+      const popup = window.open(url, '_blank', 'noopener,noreferrer,width=520,height=720');
+
+      // Poll status so the user doesn't need to click Connect again.
+      const startedAt = Date.now();
+      const poll = async () => {
+        try {
+          const statusResponse = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/status`, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: token ? `Bearer ${token}` : '',
+            },
+            credentials: 'include',
+          });
+
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json().catch(() => null);
+            const connected = !!statusData?.connected;
+            if (connected) {
+              setIsYouTubeConnected(true);
+              localStorage.setItem('youtubeConnected', 'true');
+              setIsConnectingYouTube(false);
+              return true;
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return false;
+      };
+
+      // Poll for up to 60 seconds.
+      const interval = setInterval(async () => {
+        const done = await poll();
+        const timedOut = Date.now() - startedAt > 60_000;
+        const popupClosed = popup ? popup.closed : false;
+        if (done || timedOut || popupClosed) {
+          clearInterval(interval);
+        }
+      }, 1000);
     } catch (err: any) {
       const message = err?.response?.data?.message || err?.message || 'Failed to start YouTube connection.';
+      setUploadError(String(message));
+    } finally {
+      setIsConnectingYouTube(false);
+    }
+  };
+
+  const handleDisconnectYouTube = async () => {
+    setUploadError(null);
+    setIsConnectingYouTube(true);
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${YOUTUBE_BACKEND_URL}/youtube/disconnect`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        credentials: 'include',
+      }).catch(() => null);
+      setIsYouTubeConnected(false);
+      localStorage.setItem('youtubeConnected', 'false');
+    } catch (err: any) {
+      const message = err?.response?.data?.message || err?.message || 'Failed to disconnect YouTube.';
       setUploadError(String(message));
     } finally {
       setIsConnectingYouTube(false);
@@ -146,13 +254,13 @@ export function YouTubeUploadModal({
         .map((tag) => tag.trim())
         .filter(Boolean);
 
-      const token = localStorage.getItem('token');
-
       // 1) Save generation to chats/messages BEFORE uploading to YouTube (use api baseURL)
       await onSaveGeneration();
 
+      const token = localStorage.getItem('token');
+
       // 2) Proceed to YouTube upload
-      const response = await fetch('https://auto-video-backend.vercel.app/youtube/upload', {
+      const response = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/upload`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -163,9 +271,9 @@ export function YouTubeUploadModal({
           title: youtubeTitle,
           description: youtubeDescription,
           tags,
-            privacyStatus,
-            categoryId,
-            selfDeclaredMadeForKids,
+          privacyStatus,
+          categoryId,
+          selfDeclaredMadeForKids,
         }),
       });
 
@@ -258,12 +366,19 @@ export function YouTubeUploadModal({
                   <Button
                     type="button"
                     onClick={handleConnectYouTube}
-                    disabled={isConnectingYouTube || isUploadingToYouTube}
+                    disabled={isCheckingYouTubeStatus || isConnectingYouTube || isUploadingToYouTube}
                     variant="outline"
                     className="border-2 border-blue-200 hover:border-blue-300 hover:bg-white text-blue-900"
                     size="sm"
                   >
-                    {isConnectingYouTube ? (
+                    {isCheckingYouTubeStatus ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Checking...
+                      </>
+                    ) : isYouTubeConnected ? (
+                      <>YouTube Connected</>
+                    ) : isConnectingYouTube ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Connecting...
@@ -272,6 +387,19 @@ export function YouTubeUploadModal({
                       <>Connect YouTube</>
                     )}
                   </Button>
+
+                  {isYouTubeConnected && (
+                    <Button
+                      type="button"
+                      onClick={handleDisconnectYouTube}
+                      disabled={isConnectingYouTube || isUploadingToYouTube}
+                      variant="outline"
+                      className="border-2 border-red-200 hover:border-red-300 hover:bg-white text-red-800"
+                      size="sm"
+                    >
+                      Disconnect
+                    </Button>
+                  )}
 
                   <Button
                     type="button"

@@ -201,52 +201,52 @@ export function SentencesImagesSection({
                               </span>
                             </div>
 
-  <div className="relative pointer-events-none">
-    <div className="absolute inset-0 flex items-center">
-      <div className="w-full border-t border-gray-300"></div>
-    </div>
-    <div className="relative flex justify-center text-xs">
-      <span className="bg-gray-50 px-2 text-gray-500">or</span>
-    </div>
-  </div>
-  <div className="grid grid-cols-2 gap-2 pointer-events-auto">
-    <Button
-      type="button"
-      size="sm"
-      onClick={(e) => {
-        e.stopPropagation();
-        onGenerateSentenceImage(index);
-      }}
-      disabled={item.isGeneratingImage}
-      className="gap-1.5 bg-linear-to-r from-emerald-500 to-teal-600 text-white shadow-sm hover:shadow-md hover:opacity-90 transition-all duration-200"
-    >
-      {item.isGeneratingImage ? (
-        <>
-          <Loader2 className="h-3 w-3 animate-spin" />
-          <span className="text-[10px]">Generating...</span>
-        </>
-      ) : (
-        <>
-          <Sparkles className="h-3 w-3" />
-          <span className="text-[10px] font-medium">Generate AI</span>
-        </>
-      )}
-    </Button>
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelectFromLibrary(index);
-      }}
-      className="gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
-    >
-      <Library className="h-3 w-3" />
-      <span className="text-[10px] font-medium">From Library</span>
-    </Button>
-  </div>
-</div>
+                            <div className="relative pointer-events-none">
+                              <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-gray-300"></div>
+                              </div>
+                              <div className="relative flex justify-center text-xs">
+                                <span className="bg-gray-50 px-2 text-gray-500">or</span>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 pointer-events-auto">
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onGenerateSentenceImage(index);
+                                }}
+                                disabled={item.isGeneratingImage}
+                                className="gap-1.5 bg-linear-to-r from-emerald-500 to-teal-600 text-white shadow-sm hover:shadow-md hover:opacity-90 transition-all duration-200"
+                              >
+                                {item.isGeneratingImage ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span className="text-[10px]">Generating...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="h-3 w-3" />
+                                    <span className="text-[10px] font-medium">Generate AI</span>
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSelectFromLibrary(index);
+                                }}
+                                className="gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
+                              >
+                                <Library className="h-3 w-3" />
+                                <span className="text-[10px] font-medium">From Library</span>
+                              </Button>
+                            </div>
+                          </div>
                         )}
 
                         {/* Media Preview (image or video) */}
@@ -308,38 +308,17 @@ export function SentencesImagesSection({
                             )}
 
                             <div className="flex gap-2">
-                              {item.isFromLibrary || item.video || item.videoUrl ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => onSelectFromLibrary(index)}
-                                  className="flex-1 gap-1.5 text-xs border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
-                                >
-                                  <Library className="h-3 w-3" />
-                                  Change
-                                </Button>
-                              ) : (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => onSaveSentenceImage(index)}
-                                  disabled={item.isSavingImage || !!item.savedImageId}
-                                  className="flex-1 gap-1.5 text-xs border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
-                                >
-                                  {item.isSavingImage ? (
-                                    <>
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                      Saving
-                                    </>
-                                  ) : item.savedImageId ? (
-                                    'Saved'
-                                  ) : (
-                                    'Save'
-                                  )}
-                                </Button>
-                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onSelectFromLibrary(index)}
+                                disabled={item.isSavingImage || item.isGeneratingImage}
+                                className="flex-1 gap-1.5 text-xs border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
+                              >
+                                <Library className="h-3 w-3" />
+                                Change
+                              </Button>
                               <Button
                                 type="button"
                                 size="sm"
@@ -377,22 +356,20 @@ export function SentencesImagesSection({
           )}
           {previewImageUrl && (
             <div
-              className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 ${
-                isPreviewClosing
+              className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 ${isPreviewClosing
                   ? 'animate-out fade-out-0 duration-200'
                   : 'animate-in fade-in-0 duration-200'
-              }`}
+                }`}
               onClick={() => {
                 setIsPreviewClosing(true);
                 setTimeout(() => setPreviewImageUrl(null), 200);
               }}
             >
               <div
-                className={`relative max-w-4xl w-full max-h-[90vh] flex items-center justify-center ${
-                  isPreviewClosing
+                className={`relative max-w-4xl w-full max-h-[90vh] flex items-center justify-center ${isPreviewClosing
                     ? 'animate-out zoom-out-95 fade-out-0 duration-200'
                     : 'animate-in zoom-in-95 fade-in-0 duration-200'
-                }`}
+                  }`}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
