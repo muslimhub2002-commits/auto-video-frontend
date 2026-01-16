@@ -17,6 +17,7 @@ import {
   Mic,
   Sparkles,
   MessageSquare,
+  RotateCcw,
 } from 'lucide-react';
 import { Sidebar } from './_components/Sidebar';
 import { HeaderBar } from './_components/HeaderBar';
@@ -27,12 +28,17 @@ import { GenerateVideoButton } from './_components/GenerateVideoButton';
 import { VideoJobSection } from './_components/VideoJobSection';
 import { ImageLibraryModal } from './_components/ImageLibraryModal';
 import { ScriptLibraryModal } from './_components/ScriptLibraryModal';
+import {
+  ScriptReferencesModal,
+  type ScriptReferenceDto,
+} from './_components/ScriptReferencesModal';
 import { VoiceLibraryModal } from './_components/VoiceLibraryModal';
 import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
+import { useToast } from '@/components/ui/toast';
 
 const API_URL =
   'http://localhost:3000';
@@ -74,6 +80,13 @@ export type VoiceOverOption = {
   name: string;
   use_case?: string | null;
   preview_url?: string | null;
+  isFavorite?: boolean;
+};
+
+type ReferenceScriptPayload = {
+  id: string;
+  title: string | null;
+  script: string;
 };
 
 export function GeneratePageInner() {
@@ -84,9 +97,11 @@ export function GeneratePageInner() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const videoSectionRef = useRef<HTMLDivElement | null>(null);
   const { alertState, showAlert, closeAlert } = useAlertModal();
+  const { showToast, ToastContainer } = useToast();
 
   // Form state
   const [script, setScript] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
   const [scriptSubject, setScriptSubject] = useState('religious (Islam)');
   const [scriptSubjectContent, setScriptSubjectContent] = useState('');
   const [scriptLength, setScriptLength] = useState('30 seconds');
@@ -119,6 +134,7 @@ export function GeneratePageInner() {
   const [isLoadingVoices, setIsLoadingVoices] = useState(false);
   const [voicesError, setVoicesError] = useState<string | null>(null);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
+  const [isSettingFavoriteVoice, setIsSettingFavoriteVoice] = useState(false);
   const [isSyncingVoices, setIsSyncingVoices] = useState(false);
   const [syncVoicesResult, setSyncVoicesResult] = useState<string | null>(null);
   const [isGeneratingAllImages, setIsGeneratingAllImages] = useState(false);
@@ -153,6 +169,8 @@ export function GeneratePageInner() {
     | null
   >(null);
   const [isScriptLibraryOpen, setIsScriptLibraryOpen] = useState(false);
+  const [isScriptReferencesOpen, setIsScriptReferencesOpen] = useState(false);
+  const [referenceScripts, setReferenceScripts] = useState<ReferenceScriptPayload[]>([]);
   // Render performance and transition options
   const [useLowerFps, setUseLowerFps] = useState(false);
   const [useLowerResolution, setUseLowerResolution] = useState(false);
@@ -166,7 +184,142 @@ export function GeneratePageInner() {
     resetJob,
     setJobFromResponse,
     setVideoJobError,
+    setVideoUrl,
   } = useVideoJob(API_URL);
+
+  const handleReuseSavedGeneration = async (
+    msg: {
+      id: string;
+      video?: { video: string } | null;
+      voice?: { voice: string } | null;
+      scripts?: {
+        id: string;
+        title: string | null;
+        script: string;
+        sentences?: {
+          id: string;
+          text: string;
+          index: number;
+          image?: { id: string; image: string } | null;
+        }[];
+      }[];
+    },
+  ) => {
+    const primaryScript = msg.scripts?.[0];
+    if (!primaryScript?.script) {
+      showAlert('This saved generation is missing a script.', { type: 'warning' });
+      return;
+    }
+
+    setSplitError(null);
+    setRandomScriptError(null);
+    setVoiceError(null);
+
+    // Restore script + sentences/images
+    setScript(primaryScript.script);
+    setOriginalScriptSubject(scriptSubject);
+    setOriginalScriptSubjectContent(
+      scriptSubject === 'religious (Islam)' ? scriptSubjectContent : '',
+    );
+
+    const sortedSentences = (primaryScript.sentences ?? [])
+      .slice()
+      .sort((a, b) => a.index - b.index);
+
+    const now = Date.now();
+    const restored: SentenceItem[] = (sortedSentences.length ? sortedSentences : [{
+      id: `${now}-0`,
+      text: primaryScript.script,
+      index: 0,
+      image: null,
+    } as any])
+      .map((s, idx) => {
+        const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
+        return {
+          id: s.id || `${now}-${idx}`,
+          text: s.text,
+          image: null,
+          imageUrl: isSubscribe ? null : s.image?.image ?? null,
+          video: null,
+          videoUrl: isSubscribe ? '/subscribe.mp4' : null,
+          imagePrompt: null,
+          isGeneratingImage: false,
+          isSavingImage: false,
+          savedImageId: isSubscribe ? null : s.image?.id ?? null,
+          isFromLibrary: !!s.image,
+        };
+      });
+
+    // Ensure subscribe sentence exists at the end (same rule as splitting)
+    const hasSubscribe = restored.some(
+      (s) => (s.text || '').trim() === SUBSCRIBE_SENTENCE,
+    );
+    if (!hasSubscribe) {
+      restored.push({
+        id: `${now}-subscribe`,
+        text: SUBSCRIBE_SENTENCE,
+        image: null,
+        imageUrl: null,
+        video: null,
+        videoUrl: '/subscribe.mp4',
+        imagePrompt: null,
+        isGeneratingImage: false,
+        isSavingImage: false,
+        savedImageId: null,
+        isFromLibrary: false,
+      });
+    }
+    setSentences(restored);
+
+    // Restore voice-over (download into File so render upload works)
+    if (msg.voice?.voice) {
+      try {
+        const res = await fetch(msg.voice.voice);
+        if (!res.ok) throw new Error('Failed to download voice-over');
+        const blob = await res.blob();
+        const file = new File([blob], 'reused-voice-over.mp3', {
+          type: blob.type || 'audio/mpeg',
+        });
+        setVoiceOver(file);
+        setSavedVoiceId(null);
+        setVoiceLibraryUrl(msg.voice.voice);
+
+        const url = URL.createObjectURL(file);
+        const audio = new Audio(url);
+        audio.addEventListener('loadedmetadata', () => {
+          const dur = Number.isFinite(audio.duration) ? audio.duration : null;
+          setVoiceDuration(dur && dur > 0 ? dur : null);
+          URL.revokeObjectURL(url);
+        });
+      } catch {
+        setVoiceOver(null);
+        setVoiceDuration(null);
+        setSavedVoiceId(null);
+        setVoiceLibraryUrl(null);
+        showAlert('Failed to load the saved voice-over. You can re-upload/select a voice.', { type: 'warning' });
+      }
+    } else {
+      setVoiceOver(null);
+      setVoiceDuration(null);
+      setSavedVoiceId(null);
+      setVoiceLibraryUrl(null);
+    }
+
+    // Restore the generated video URL into the VideoStatusCard area
+    if (msg.video?.video) {
+      setVideoJobError(null);
+      setVideoUrl(msg.video.video);
+      setJobFromResponse(msg.id, 'completed');
+
+      // Smoothly scroll to the video section
+      if (videoSectionRef.current) {
+        videoSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    } else {
+      // Clear the preview if this saved item has no video
+      resetJob();
+    }
+  };
 
   const fetchElevenLabsVoices = async () => {
     setIsLoadingVoices(true);
@@ -180,8 +333,16 @@ export function GeneratePageInner() {
       const data = (await res.json()) as VoiceOverOption[];
       setVoices(data);
 
-      if (!selectedVoiceId && data.length > 0) {
-        setSelectedVoiceId(data[0].voice_id);
+      const favorite = data.find((v) => v.isFavorite);
+      const fallbackId = favorite?.voice_id ?? (data.length > 0 ? data[0].voice_id : null);
+
+      if (!selectedVoiceId && fallbackId) {
+        setSelectedVoiceId(fallbackId);
+      }
+
+      if (selectedVoiceId && fallbackId) {
+        const stillExists = data.some((v) => v.voice_id === selectedVoiceId);
+        if (!stillExists) setSelectedVoiceId(fallbackId);
       }
     } catch (error) {
       console.error('Failed to load ElevenLabs voices', error);
@@ -189,6 +350,57 @@ export function GeneratePageInner() {
     } finally {
       setIsLoadingVoices(false);
     }
+  };
+
+  const handleSetFavoriteVoice = async (voiceId: string) => {
+    if (!user) {
+      showAlert('You must be logged in to set a favorite voice.', { type: 'warning' });
+      return;
+    }
+
+    try {
+      setIsSettingFavoriteVoice(true);
+      await api.patch(`/voice-overs/favorite/${encodeURIComponent(voiceId)}`);
+      await fetchElevenLabsVoices();
+
+      showToast('Favorite voice updated', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to set favorite voice', error);
+      showToast('Failed to set favorite voice', 'error');
+    }
+    finally {
+      setIsSettingFavoriteVoice(false);
+    }
+  };
+
+  const handleOpenScriptReferences = () => {
+    setIsScriptReferencesOpen(true);
+  };
+
+  const handleApplyReferenceScripts = (scripts: ScriptReferenceDto[]) => {
+    const normalized: ReferenceScriptPayload[] = (scripts ?? [])
+      .filter((s) => Boolean(s?.id) && Boolean(s?.script?.trim()))
+      .map((s) => ({
+        id: s.id,
+        title: s.title ?? null,
+        script: s.script,
+      }));
+    setReferenceScripts(normalized);
+    showToast(
+      normalized.length > 0
+        ? `Selected ${normalized.length} reference script${normalized.length === 1 ? '' : 's'}`
+        : 'No reference scripts selected',
+      'success',
+    );
+  };
+
+  const handleRemoveReferenceScript = (id: string) => {
+    setReferenceScripts((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const handleClearReferenceScripts = () => {
+    setReferenceScripts([]);
   };
 
   const handleSelectChat = async (chatId: string | null) => {
@@ -574,6 +786,8 @@ export function GeneratePageInner() {
     setOriginalScriptSubjectContent(undefined);
 
     try {
+      const usingReferences = referenceScripts.length > 0;
+
       const response = await fetch(`${API_URL}/ai/generate-script`, {
         method: 'POST',
         headers: {
@@ -586,8 +800,19 @@ export function GeneratePageInner() {
               ? scriptSubjectContent || undefined
               : undefined,
           length: scriptLength,
-          style: scriptStyle,
           model: scriptModel,
+          ...(usingReferences
+            ? {
+              referenceScripts: referenceScripts.map((s) => ({
+                id: s.id,
+                title: s.title ?? undefined,
+                script: s.script,
+              })),
+            }
+            : {
+              style: scriptStyle,
+              systemPrompt: systemPrompt.trim() ? systemPrompt.trim() : undefined,
+            }),
         }),
       });
 
@@ -638,7 +863,11 @@ export function GeneratePageInner() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ script, model: scriptModel }),
+        body: JSON.stringify({
+          script,
+          model: scriptModel,
+          systemPrompt: systemPrompt.trim() ? systemPrompt.trim() : undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -805,6 +1034,7 @@ export function GeneratePageInner() {
           length: scriptLength,
           style: scriptStyle,
           model: scriptModel,
+          systemPrompt: systemPrompt.trim() ? systemPrompt.trim() : undefined,
         }),
       });
 
@@ -1340,6 +1570,7 @@ export function GeneratePageInner() {
 
   return (
     <div className="flex h-screen bg-white text-gray-900">
+      <ToastContainer />
       {/* Sidebar */}
       <Sidebar
         user={user}
@@ -1418,7 +1649,7 @@ export function GeneratePageInner() {
                         >
                           <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-50 rounded-xl">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full gap-2">
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-3 w-full">
                                 <div className="p-2 bg-linear-to-br from-purple-100 to-blue-100 rounded-lg">
                                   <FileText className="h-4 w-4 text-purple-600" />
                                 </div>
@@ -1429,6 +1660,29 @@ export function GeneratePageInner() {
                                     {primaryScript?.script && primaryScript.script.length > 80 ? '…' : ''}
                                   </p>
                                 </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 mx-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    void handleReuseSavedGeneration(msg);
+                                  }}
+                                  className="group/reuse relative inline-flex items-center gap-3 px-4 py-2.5 rounded-xl bg-linear-to-r from-purple-500 via-purple-600 to-blue-600 hover:from-purple-600 hover:via-purple-700 hover:to-blue-700 text-white font-semibold text-sm shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-300 overflow-hidden"
+                                  aria-label="Reuse this generation"
+                                  title="Load this configuration into the editor"
+                                >
+                                  {/* Shine effect on hover */}
+                                  <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover/reuse:translate-x-full transition-transform duration-700 skew-x-12"></div>
+                                  
+                                  {/* Icon with smooth rotation */}
+                                  <RotateCcw className="relative h-4 w-4 group-hover/reuse:rotate-360 transition-transform duration-500 ease-out" />
+                                  
+                                  {/* Text */}
+                                  <span className="relative drop-shadow-sm text-sm">Reuse</span>
+                                </button>
                               </div>
                             </div>
                           </AccordionTrigger>
@@ -1538,6 +1792,12 @@ export function GeneratePageInner() {
                 <ScriptSection
                   script={script}
                   onScriptChange={setScript}
+                  systemPrompt={systemPrompt}
+                  onSystemPromptChange={setSystemPrompt}
+                  referenceScripts={referenceScripts}
+                  onOpenReferenceLibrary={handleOpenScriptReferences}
+                  onRemoveReferenceScript={handleRemoveReferenceScript}
+                  onClearReferenceScripts={handleClearReferenceScripts}
                   hasSentences={sentences.length > 0}
                   scriptSubject={scriptSubject}
                   setScriptSubject={setScriptSubject}
@@ -1593,6 +1853,8 @@ export function GeneratePageInner() {
                   selectedVoiceId={selectedVoiceId}
                   onSelectVoice={setSelectedVoiceId}
                   onRefreshVoices={fetchElevenLabsVoices}
+                  onSetFavoriteVoice={handleSetFavoriteVoice}
+                  isSettingFavoriteVoice={isSettingFavoriteVoice}
                   onVoiceUpload={handleVoiceUpload}
                   onGenerateVoiceWithElevenLabs={handleGenerateVoiceWithElevenLabs}
                   onRemoveVoice={removeVoice}
@@ -1786,6 +2048,18 @@ export function GeneratePageInner() {
         isOpen={isScriptLibraryOpen}
         onClose={() => setIsScriptLibraryOpen(false)}
         onSelectScript={handleSelectScriptFromLibrary}
+      />
+
+      {/* Script References Modal */}
+      <ScriptReferencesModal
+        isOpen={isScriptReferencesOpen}
+        onClose={() => setIsScriptReferencesOpen(false)}
+        initialSelected={referenceScripts.map((s) => ({
+          id: s.id,
+          title: s.title,
+          script: s.script,
+        }))}
+        onApply={handleApplyReferenceScripts}
       />
 
       {/* Alert Modal */}

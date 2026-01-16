@@ -20,6 +20,12 @@ import { Loader2, Sparkles, FileText, X, Save } from 'lucide-react';
 interface ScriptSectionProps {
   script: string;
   onScriptChange: (value: string) => void;
+  systemPrompt: string;
+  onSystemPromptChange: (value: string) => void;
+  referenceScripts: { id: string; title: string | null; script: string }[];
+  onOpenReferenceLibrary: () => void;
+  onRemoveReferenceScript: (id: string) => void;
+  onClearReferenceScripts: () => void;
   hasSentences: boolean;
   scriptSubject: string;
   setScriptSubject: (value: string) => void;
@@ -51,6 +57,12 @@ export function ScriptSection(props: ScriptSectionProps) {
   const {
     script,
     onScriptChange,
+    systemPrompt,
+    onSystemPromptChange,
+    referenceScripts,
+    onOpenReferenceLibrary,
+    onRemoveReferenceScript,
+    onClearReferenceScripts,
     hasSentences,
     scriptSubject,
     setScriptSubject,
@@ -78,6 +90,8 @@ export function ScriptSection(props: ScriptSectionProps) {
     onEnhanceScript,
   } = props;
 
+  const isUsingReferences = (referenceScripts?.length ?? 0) > 0;
+
   // Check if script config has changed (excluding model, length, and style)
   const hasConfigChanged =
     originalScriptSubject !== undefined &&
@@ -102,6 +116,99 @@ export function ScriptSection(props: ScriptSectionProps) {
       </AccordionTrigger>
       <AccordionContent>
         <div className="space-y-6 pb-2">
+          {/* Reference Scripts */}
+          <div className="bg-linear-to-br from-white to-gray-50 rounded-lg p-5 border border-gray-200">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                  <div className="w-1 h-4 bg-primary rounded-full"></div>
+                  Reference Scripts (optional)
+                </h4>
+                <p className="text-xs text-gray-600">
+                  When you select reference scripts, the AI will analyze them and mimic their narrative style.
+                  Style/tone and the text prompt below will be disabled and ignored for generation.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {isUsingReferences ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={onClearReferenceScripts}
+                    className="gap-2"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onOpenReferenceLibrary}
+                  className="gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all hover:scale-105"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {isUsingReferences ? 'Edit' : 'Add'}
+                </Button>
+              </div>
+            </div>
+
+            {isUsingReferences ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {referenceScripts.map((ref) => (
+                  <div
+                    key={ref.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 shadow-sm"
+                  >
+                    <span className="max-w-[220px] truncate">
+                      {ref.title || 'Untitled Script'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveReferenceScript(ref.id)}
+                      className="rounded-full p-1 hover:bg-gray-100"
+                      aria-label="Remove reference"
+                    >
+                      <X className="h-3.5 w-3.5 text-gray-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-gray-500">
+                No reference scripts selected.
+              </p>
+            )}
+          </div>
+
+          {/* System Prompt Override */}
+          <div className="bg-linear-to-br from-white to-gray-50 rounded-lg p-5 border border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+              <div className="w-1 h-4 bg-primary rounded-full"></div>
+              System Prompt (optional)
+            </h4>
+            <p className="text-xs text-gray-600 mb-3">
+              Optional writing guidance. Disabled when using reference scripts.
+            </p>
+            <Textarea
+              id="systemPrompt"
+              placeholder="Paste/write your custom system prompt here..."
+              value={systemPrompt}
+              onChange={(e) => onSystemPromptChange(e.target.value)}
+              disabled={isUsingReferences}
+              rows={4}
+              className={`bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 resize-none rounded-lg shadow-sm ${
+                isUsingReferences ? 'opacity-60 cursor-not-allowed' : ''
+              }`}
+            />
+            {isUsingReferences ? (
+              <p className="text-xs text-amber-700 mt-2">
+                Reference scripts are selected, so this field is ignored for generation.
+              </p>
+            ) : null}
+          </div>
+
           {/* Script Configuration */}
           <div className="bg-linear-to-br from-gray-50 to-gray-100/50 rounded-lg p-5 border border-gray-200">
             <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -162,7 +269,7 @@ export function ScriptSection(props: ScriptSectionProps) {
 
               {/* Style */}
               <Select value={scriptStyle} onValueChange={setScriptStyle}>
-                <SelectTrigger label="Style">
+                <SelectTrigger label="Style" disabled={isUsingReferences}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

@@ -2,7 +2,6 @@
 
 import { useRef, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -15,7 +14,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion';
-import { Mic, Upload, X, Sparkles, Loader2, Play, Library } from 'lucide-react';
+import { Mic, Upload, X, Sparkles, Loader2, Play, Library, Star } from 'lucide-react';
 
 interface VoiceOverSectionProps {
   script: string;
@@ -31,12 +30,15 @@ interface VoiceOverSectionProps {
     name: string;
     use_case?: string | null;
     preview_url?: string | null;
+    isFavorite?: boolean;
   }[];
   isLoadingVoices: boolean;
   voicesError: string | null;
   selectedVoiceId: string | null;
   onSelectVoice: (voiceId: string) => void;
   onRefreshVoices: () => void;
+  onSetFavoriteVoice: (voiceId: string) => void;
+  isSettingFavoriteVoice: boolean;
   onVoiceUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onGenerateVoiceWithElevenLabs: (voiceId?: string | null) => void;
   onRemoveVoice: () => void;
@@ -58,6 +60,8 @@ export function VoiceOverSection({
   selectedVoiceId,
   onSelectVoice,
   onRefreshVoices,
+  onSetFavoriteVoice,
+  isSettingFavoriteVoice,
   onVoiceUpload,
   onGenerateVoiceWithElevenLabs,
   onRemoveVoice,
@@ -163,9 +167,8 @@ export function VoiceOverSection({
                           <SelectValue
                             placeholder={
                               selectedVoice
-                                ? `${selectedVoice.name} — ${
-                                    selectedVoice.use_case || 'General use'
-                                  }`
+                                ? `${selectedVoice.name} — ${selectedVoice.use_case || 'General use'
+                                }`
                                 : 'Choose a voice'
                             }
                           />
@@ -175,11 +178,15 @@ export function VoiceOverSection({
                             <SelectItem
                               key={voice.id}
                               value={voice.voice_id}
-                              className="flex flex-col items-start gap-0.5 py-3"
+                              className="py-3"
                             >
-                              <span className="text-sm font-semibold text-gray-900">
-                                {voice.name}
-                              </span>
+                              <div className="flex items-center justify-between gap-3 w-full">
+                                <div className="flex flex-col items-start gap-0.5 min-w-0">
+                                  <span className="text-sm font-semibold text-gray-900 truncate">
+                                    {voice.name}
+                                  </span>
+                                </div>
+                              </div>
                               {/* <span className="text-xs text-gray-600">
                                 {voice.use_case || 'General use'}
                               </span> */}
@@ -206,15 +213,40 @@ export function VoiceOverSection({
                                 </p>
                               </div>
                             </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={handlePlayPreview}
-                              className="gap-1.5 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm hover:shadow-md transition-all shrink-0"
-                            >
-                              <Play className="h-3.5 w-3.5 fill-white" />
-                              <span className="text-xs font-medium">Preview</span>
-                            </Button>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => onSetFavoriteVoice(selectedVoice.voice_id)}
+                                disabled={isSettingFavoriteVoice || selectedVoice.isFavorite}
+                                className="inline-flex items-center justify-center rounded-md border border-purple-200 bg-white p-2 text-purple-700 hover:bg-purple-50"
+                                title={
+                                  selectedVoice.isFavorite
+                                    ? 'Favorite voice'
+                                    : 'Set as favorite'
+                                }
+                              >
+                                {isSettingFavoriteVoice ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Star
+                                    className={
+                                      selectedVoice.isFavorite
+                                        ? 'h-4 w-4 fill-purple-600'
+                                        : 'h-4 w-4'
+                                    }
+                                  />
+                                )}
+                              </button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={handlePlayPreview}
+                                className="gap-1.5 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm hover:shadow-md transition-all"
+                              >
+                                <Play className="h-3.5 w-3.5 fill-white" />
+                                <span className="text-xs font-medium">Preview</span>
+                              </Button>
+                            </div>
                             <audio
                               ref={previewAudioRef}
                               src={selectedVoice.preview_url}

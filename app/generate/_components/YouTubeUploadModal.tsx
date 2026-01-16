@@ -15,8 +15,6 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
 
-const YOUTUBE_BACKEND_URL = 'https://auto-video-backend.vercel.app';
-
 interface YouTubeUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -47,12 +45,90 @@ export function YouTubeUploadModal({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadedYoutubeUrl, setUploadedYoutubeUrl] = useState<string | null>(null);
   const [isConnectingYouTube, setIsConnectingYouTube] = useState(false);
-  const [isYouTubeConnected, setIsYouTubeConnected] = useState(false);
-  const [isCheckingYouTubeStatus, setIsCheckingYouTubeStatus] = useState(false);
+  const [enableScheduling, setEnableScheduling] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduledHour, setScheduledHour] = useState('12');
+
+  const getCairoTodayISODate = () => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const d = parts.find((p) => p.type === 'day')?.value;
+    return `${y}-${m}-${d}`;
+  };
+
+  const getTimeZoneOffsetMinutes = (timeZone: string, date: Date) => {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+
+    const parts = dtf.formatToParts(date);
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value);
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value);
+    const second = Number(parts.find((p) => p.type === 'second')?.value);
+
+    // Interpret the formatted wall-clock time as if it were UTC, then compare.
+    const asUTC = Date.UTC(year, month - 1, day, hour, minute, second);
+    return (asUTC - date.getTime()) / 60000;
+  };
+
+  const toRFC3339InCairo = (dateISO: string, hour24: number) => {
+    const [yStr, mStr, dStr] = dateISO.split('-');
+    const y = Number(yStr);
+    const m = Number(mStr);
+    const d = Number(dStr);
+
+    // Start with a naive guess, then adjust using Cairo's offset (handles DST).
+    let utcGuess = new Date(Date.UTC(y, m - 1, d, hour24, 0, 0));
+    let offsetMin = getTimeZoneOffsetMinutes('Africa/Cairo', utcGuess);
+    let utcInstant = new Date(utcGuess.getTime() - offsetMin * 60_000);
+
+    // One more pass in case DST boundary changes the offset.
+    offsetMin = getTimeZoneOffsetMinutes('Africa/Cairo', utcInstant);
+    utcInstant = new Date(utcGuess.getTime() - offsetMin * 60_000);
+
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const abs = Math.abs(offsetMin);
+    const offH = String(Math.floor(abs / 60)).padStart(2, '0');
+    const offM = String(abs % 60).padStart(2, '0');
+
+    const hh = String(hour24).padStart(2, '0');
+    return {
+      publishAt: `${dateISO}T${hh}:00:00${sign}${offH}:${offM}`,
+      publishAtMs: utcInstant.getTime(),
+    };
+  };
+
+  const parseTagsPreserveOrder = (raw: string): string[] => {
+    return (raw || '')
+      // Support both comma-separated and newline-separated tags.
+      .split(/[\n,]+/g)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+  };
 
   useEffect(() => {
     if (isOpen) {
       setIsRendered(true);
+      // Default scheduling date to "today" in Egypt.
+      if (!scheduledDate) {
+        setScheduledDate(getCairoTodayISODate());
+      }
       // Allow the element to mount before transitioning in
       const raf = requestAnimationFrame(() => setIsVisible(true));
       return () => cancelAnimationFrame(raf);
@@ -71,48 +147,6 @@ export function YouTubeUploadModal({
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    let cancelled = false;
-    const run = async () => {
-      // Fast-path: optimistic UX hint (doesn't guarantee token validity).
-      const hinted = localStorage.getItem('youtubeConnected') === 'true';
-      if (!cancelled) setIsYouTubeConnected(hinted);
-
-      setIsCheckingYouTubeStatus(true);
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/status`, {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            Authorization: token ? `Bearer ${token}` : '',
-          },
-          credentials: 'include',
-        });
-
-        if (response.ok) {
-          const data = await response.json().catch(() => null);
-          const connected = !!data?.connected;
-          if (!cancelled) {
-            setIsYouTubeConnected(connected);
-            localStorage.setItem('youtubeConnected', connected ? 'true' : 'false');
-          }
-        }
-      } catch {
-        // Ignore (endpoint may not exist on the deployed backend yet)
-      } finally {
-        if (!cancelled) setIsCheckingYouTubeStatus(false);
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen]);
 
   const handleGenerateSeo = async () => {
     setSeoError(null);
@@ -144,7 +178,7 @@ export function YouTubeUploadModal({
     setIsConnectingYouTube(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/auth-url`, {
+      const response = await fetch('https://auto-video-backend.vercel.app/youtube/auth-url', {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -162,71 +196,9 @@ export function YouTubeUploadModal({
       const url = data?.url as string | undefined;
       if (!url) throw new Error('Missing YouTube auth url');
 
-      const popup = window.open(url, '_blank', 'noopener,noreferrer,width=520,height=720');
-
-      // Poll status so the user doesn't need to click Connect again.
-      const startedAt = Date.now();
-      const poll = async () => {
-        try {
-          const statusResponse = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/status`, {
-            method: 'GET',
-            headers: {
-              Accept: 'application/json',
-              Authorization: token ? `Bearer ${token}` : '',
-            },
-            credentials: 'include',
-          });
-
-          if (statusResponse.ok) {
-            const statusData = await statusResponse.json().catch(() => null);
-            const connected = !!statusData?.connected;
-            if (connected) {
-              setIsYouTubeConnected(true);
-              localStorage.setItem('youtubeConnected', 'true');
-              setIsConnectingYouTube(false);
-              return true;
-            }
-          }
-        } catch {
-          // ignore
-        }
-        return false;
-      };
-
-      // Poll for up to 60 seconds.
-      const interval = setInterval(async () => {
-        const done = await poll();
-        const timedOut = Date.now() - startedAt > 60_000;
-        const popupClosed = popup ? popup.closed : false;
-        if (done || timedOut || popupClosed) {
-          clearInterval(interval);
-        }
-      }, 1000);
+      window.open(url, '_blank', 'noopener,noreferrer');
     } catch (err: any) {
       const message = err?.response?.data?.message || err?.message || 'Failed to start YouTube connection.';
-      setUploadError(String(message));
-    } finally {
-      setIsConnectingYouTube(false);
-    }
-  };
-
-  const handleDisconnectYouTube = async () => {
-    setUploadError(null);
-    setIsConnectingYouTube(true);
-    try {
-      const token = localStorage.getItem('token');
-      await fetch(`${YOUTUBE_BACKEND_URL}/youtube/disconnect`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: token ? `Bearer ${token}` : '',
-        },
-        credentials: 'include',
-      }).catch(() => null);
-      setIsYouTubeConnected(false);
-      localStorage.setItem('youtubeConnected', 'false');
-    } catch (err: any) {
-      const message = err?.response?.data?.message || err?.message || 'Failed to disconnect YouTube.';
       setUploadError(String(message));
     } finally {
       setIsConnectingYouTube(false);
@@ -247,20 +219,49 @@ export function YouTubeUploadModal({
       return;
     }
 
+    let publishAt: string | undefined;
+    if (enableScheduling) {
+      const date = (scheduledDate || '').trim();
+      const hour = (scheduledHour || '').trim();
+
+      if (!date) {
+        setUploadError('Please select a scheduled date.');
+        return;
+      }
+
+      if (hour === '' || Number.isNaN(Number(hour))) {
+        setUploadError('Please select a scheduled hour.');
+        return;
+      }
+
+      const hourNum = Math.max(0, Math.min(23, Number(hour)));
+      const computed = toRFC3339InCairo(date, hourNum);
+      publishAt = computed.publishAt;
+
+      const publishAtMs = computed.publishAtMs;
+      if (!Number.isFinite(publishAtMs)) {
+        setUploadError('Invalid scheduled date/time.');
+        return;
+      }
+
+      const minMs = Date.now() + 2 * 60 * 1000;
+      if (publishAtMs < minMs) {
+        setUploadError('Schedule time must be at least 2 minutes in the future.');
+        return;
+      }
+    }
+
     setIsUploadingToYouTube(true);
     try {
-      const tags = youtubeTags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean);
+      const tags = parseTagsPreserveOrder(youtubeTags);
+
+      const token = localStorage.getItem('token');
 
       // 1) Save generation to chats/messages BEFORE uploading to YouTube (use api baseURL)
       await onSaveGeneration();
 
-      const token = localStorage.getItem('token');
-
       // 2) Proceed to YouTube upload
-      const response = await fetch(`${YOUTUBE_BACKEND_URL}/youtube/upload`, {
+      const response = await fetch('https://auto-video-backend.vercel.app/youtube/upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -271,9 +272,10 @@ export function YouTubeUploadModal({
           title: youtubeTitle,
           description: youtubeDescription,
           tags,
-          privacyStatus,
+          privacyStatus: enableScheduling ? 'private' : privacyStatus,
           categoryId,
           selfDeclaredMadeForKids,
+          ...(publishAt ? { publishAt } : {}),
         }),
       });
 
@@ -366,19 +368,12 @@ export function YouTubeUploadModal({
                   <Button
                     type="button"
                     onClick={handleConnectYouTube}
-                    disabled={isCheckingYouTubeStatus || isConnectingYouTube || isUploadingToYouTube}
+                    disabled={isConnectingYouTube || isUploadingToYouTube}
                     variant="outline"
                     className="border-2 border-blue-200 hover:border-blue-300 hover:bg-white text-blue-900"
                     size="sm"
                   >
-                    {isCheckingYouTubeStatus ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Checking...
-                      </>
-                    ) : isYouTubeConnected ? (
-                      <>YouTube Connected</>
-                    ) : isConnectingYouTube ? (
+                    {isConnectingYouTube ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Connecting...
@@ -387,19 +382,6 @@ export function YouTubeUploadModal({
                       <>Connect YouTube</>
                     )}
                   </Button>
-
-                  {isYouTubeConnected && (
-                    <Button
-                      type="button"
-                      onClick={handleDisconnectYouTube}
-                      disabled={isConnectingYouTube || isUploadingToYouTube}
-                      variant="outline"
-                      className="border-2 border-red-200 hover:border-red-300 hover:bg-white text-red-800"
-                      size="sm"
-                    >
-                      Disconnect
-                    </Button>
-                  )}
 
                   <Button
                     type="button"
@@ -593,6 +575,103 @@ export function YouTubeUploadModal({
             </div>
           </div>
 
+          {/* Schedule Publishing Section */}
+          <div className="bg-linear-to-br from-purple-50 to-pink-50 border-2 border-purple-200 rounded-2xl p-6 space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  id="enable-scheduling"
+                  className="peer h-5 w-5 rounded border-2 border-purple-300 text-purple-600 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-purple-500"
+                  checked={enableScheduling}
+                  onChange={(e) => setEnableScheduling(e.target.checked)}
+                  disabled={isUploadingToYouTube}
+                />
+                <div
+                  className={`absolute inset-0 rounded bg-purple-500 opacity-0 transition-opacity duration-300 pointer-events-none ${
+                    enableScheduling ? 'animate-ping' : ''
+                  }`}
+                  style={{ animationIterationCount: 1, animationDuration: '0.5s' }}
+                ></div>
+              </div>
+              <div className="flex-1">
+                <label htmlFor="enable-scheduling" className="text-base font-bold text-gray-900 cursor-pointer flex items-center gap-2">
+                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    />
+                  </svg>
+                  Schedule Publishing
+                  <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">Egypt Time (Africa/Cairo)</span>
+                </label>
+                <p className="text-sm text-gray-600 mt-1">
+                  Set a specific date and time for your video to go public automatically
+                </p>
+              </div>
+            </div>
+
+            {enableScheduling && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t-2 border-purple-200/50 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-date" className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Date
+                  </Label>
+                  <Input
+                    id="schedule-date"
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    min={getCairoTodayISODate()}
+                    className="w-full h-12 px-4 text-base border-2 border-purple-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 transition-all duration-200"
+                    disabled={isUploadingToYouTube}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-hour" className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Time
+                  </Label>
+                  <Select value={scheduledHour} onValueChange={setScheduledHour} disabled={isUploadingToYouTube}>
+                    <SelectTrigger className="w-full h-12 px-4 text-base border-2 border-purple-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 transition-all duration-200">
+                      <SelectValue placeholder="Select hour" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {Array.from({ length: 24 }, (_, i) => (
+                        <SelectItem key={i} value={String(i)}>
+                          {`${((i + 11) % 12) + 1}:00 ${i < 12 ? 'AM' : 'PM'}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="md:col-span-2 bg-purple-100 border border-purple-300 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <svg className="w-4 h-4 text-purple-700 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <p className="text-xs text-purple-900 leading-relaxed">
+                      <span className="font-semibold">Note:</span> Scheduled videos will be set to "Private" until the publish time. Make sure to schedule at least 2 minutes in the future.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Preview Card */}
           <div className="bg-linear-to-br from-gray-50 to-gray-100 border-2 border-gray-200 rounded-2xl p-6 space-y-4">
             <div className="flex items-center gap-2 mb-3">
@@ -627,17 +706,14 @@ export function YouTubeUploadModal({
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Tags</p>
                 <div className="flex flex-wrap gap-2">
                   {youtubeTags ? (
-                    youtubeTags.split(',').map(
-                      (tag, idx) =>
-                        tag.trim() && (
-                          <span
-                            key={idx}
-                            className="px-3 py-1 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg border border-gray-200"
-                          >
-                            #{tag.trim()}
-                          </span>
-                        ),
-                    )
+                    parseTagsPreserveOrder(youtubeTags).map((tag, idx) => (
+                      <span
+                        key={`${idx}-${tag}`}
+                        className="px-3 py-1 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg border border-gray-200"
+                      >
+                        #{tag}
+                      </span>
+                    ))
                   ) : (
                     <span className="text-gray-400 italic text-sm">No tags entered yet</span>
                   )}
