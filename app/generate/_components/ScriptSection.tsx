@@ -146,7 +146,7 @@ export function ScriptSection(props: ScriptSectionProps) {
                   type="button"
                   size="sm"
                   onClick={onOpenReferenceLibrary}
-                  className="gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all hover:scale-105"
+                  className="gap-2 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all hover:scale-105"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                   {isUsingReferences ? 'Edit' : 'Add'}
@@ -161,7 +161,7 @@ export function ScriptSection(props: ScriptSectionProps) {
                     key={ref.id}
                     className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 shadow-sm"
                   >
-                    <span className="max-w-[220px] truncate">
+                    <span className="max-w-55 truncate">
                       {ref.title || 'Untitled Script'}
                     </span>
                     <button
@@ -198,9 +198,8 @@ export function ScriptSection(props: ScriptSectionProps) {
               onChange={(e) => onSystemPromptChange(e.target.value)}
               disabled={isUsingReferences}
               rows={4}
-              className={`bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 resize-none rounded-lg shadow-sm ${
-                isUsingReferences ? 'opacity-60 cursor-not-allowed' : ''
-              }`}
+              className={`bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 resize-none rounded-lg shadow-sm ${isUsingReferences ? 'opacity-60 cursor-not-allowed' : ''
+                }`}
             />
             {isUsingReferences ? (
               <p className="text-xs text-amber-700 mt-2">
@@ -248,6 +247,7 @@ export function ScriptSection(props: ScriptSectionProps) {
                     <SelectItem value="Islamic Morals and Manners">Islamic Morals and Manners</SelectItem>
                     <SelectItem value="Seerah of the Prophet">Seerah of the Prophet</SelectItem>
                     <SelectItem value="Specific Prophet Story">Specific Prophet Story</SelectItem>
+                    <SelectItem value="Specific Enemy of Allah">Specific Enemy of Allah</SelectItem>
                   </SelectContent>
                 </Select>
               ) : null}
@@ -298,6 +298,7 @@ export function ScriptSection(props: ScriptSectionProps) {
                   <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                   <SelectItem value="gpt-5">GPT-5</SelectItem>
                   <SelectItem value="gpt-5.1">GPT-5.1</SelectItem>
+                  <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
                 </SelectContent>
               </Select>
             </div>

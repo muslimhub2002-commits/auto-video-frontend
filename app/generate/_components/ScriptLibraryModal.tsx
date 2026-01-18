@@ -3,8 +3,9 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { X, Loader2, FileText, Sparkles, Plus, Pencil, Trash2 } from 'lucide-react';
+import { X, Loader2, FileText, Sparkles, Plus, Pencil, Trash2, Copy } from 'lucide-react';
 import { Pagination } from './Pagination';
+import { useToast } from '@/components/ui/toast';
 
 interface ScriptSentenceDto {
   id: string;
@@ -39,6 +40,7 @@ export function ScriptLibraryModal({
   onClose,
   onSelectScript,
 }: ScriptLibraryModalProps) {
+  const { showToast, ToastContainer } = useToast();
   const [scripts, setScripts] = useState<ScriptDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +111,40 @@ export function ScriptLibraryModal({
     }, 250);
   };
 
+  const handleCopyScript = async (e: React.MouseEvent, script: ScriptDto) => {
+    e.stopPropagation();
+
+    const textToCopy = (script.script || '').trim();
+    if (!textToCopy) {
+      showToast('Nothing to copy', 'warning');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      showToast('Script copied to clipboard', 'success');
+      return;
+    } catch {
+      // Fallback for older browsers / blocked clipboard permissions
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showToast(ok ? 'Script copied to clipboard' : 'Failed to copy script', ok ? 'success' : 'error');
+      } catch {
+        showToast('Failed to copy script', 'error');
+      }
+    }
+  };
+
   if (!isOpen) return null;
 
   const totalPages = total > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
@@ -118,6 +154,7 @@ export function ScriptLibraryModal({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
       onClick={onClose}
     >
+      <ToastContainer />
       <div
         className="bg-linear-to-br from-white via-gray-50 to-blue-50/30 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden border border-gray-200/50 animate-in zoom-in-95 duration-300"
         onClick={(e) => e.stopPropagation()}
@@ -260,6 +297,15 @@ export function ScriptLibraryModal({
                           >
                             <Pencil className="h-3 w-3" />
                             <span className="text-[10px] font-medium">Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleCopyScript(e, script)}
+                            className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all duration-200 flex items-center gap-1.5"
+                            title="Copy script"
+                          >
+                            <Copy className="h-3 w-3" />
+                            <span className="text-[10px] font-medium">Copy</span>
                           </button>
                           <button
                             type="button"

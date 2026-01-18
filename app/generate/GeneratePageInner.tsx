@@ -172,6 +172,7 @@ export function GeneratePageInner() {
   const [isScriptReferencesOpen, setIsScriptReferencesOpen] = useState(false);
   const [referenceScripts, setReferenceScripts] = useState<ReferenceScriptPayload[]>([]);
   // Render performance and transition options
+  const [isShort, setIsShort] = useState(true);
   const [useLowerFps, setUseLowerFps] = useState(false);
   const [useLowerResolution, setUseLowerResolution] = useState(false);
   const [enableGlitchTransitions, setEnableGlitchTransitions] = useState(true);
@@ -495,6 +496,16 @@ export function GeneratePageInner() {
     setIsGeneratingVoice(true);
 
     try {
+      const mergeSentences = (items: string[]) => {
+        return items
+          .map((s) => (s ?? '').trim())
+          .filter(Boolean)
+          .map((s) => (/[.!?]$/u.test(s) ? s : `${s}.`))
+          .join(' ')
+          .replace(/\s{2,}/g, ' ')
+          .trim();
+      };
+
       // Ensure the ElevenLabs script includes the subscribe sentence
       // at the end, similar to how we handle it when splitting.
       const normalize = (value: string) => {
@@ -507,13 +518,28 @@ export function GeneratePageInner() {
       };
 
       const targetNorm = normalize(SUBSCRIBE_SENTENCE);
-      const scriptNorm = normalize(script);
+      const sentenceTexts = (sentences || []).map((s) => s.text).filter(Boolean);
+      const baseText = sentenceTexts.length > 0 ? mergeSentences(sentenceTexts) : script;
+      const scriptNorm = normalize(baseText);
 
-      let scriptForVoice = script;
+      let sentencesForVoice = sentenceTexts;
+
+      if (sentencesForVoice.length > 0) {
+        const mergedNorm = normalize(mergeSentences(sentencesForVoice));
+        if (!mergedNorm.includes(targetNorm)) {
+          sentencesForVoice = [...sentencesForVoice, SUBSCRIBE_SENTENCE];
+        }
+      }
+
+      let scriptForVoice = baseText;
       if (!scriptNorm.includes(targetNorm)) {
-        const base = script.trim();
+        const base = baseText.trim();
         const needsPunctuation = base && !/[.!?]$/u.test(base);
         scriptForVoice = `${base}${needsPunctuation ? '.' : ''} ${SUBSCRIBE_SENTENCE}`;
+      }
+
+      if (sentencesForVoice.length > 0) {
+        scriptForVoice = mergeSentences(sentencesForVoice);
       }
 
       const response = await fetch(`${API_URL}/ai/generate-voice`, {
@@ -523,6 +549,7 @@ export function GeneratePageInner() {
         },
         body: JSON.stringify({
           script: scriptForVoice,
+          sentences: sentencesForVoice.length > 0 ? sentencesForVoice : undefined,
           voiceId,
         }),
       });
@@ -683,6 +710,7 @@ export function GeneratePageInner() {
       }
 
       // Render configuration flags
+      form.append('isShort', isShort ? 'true' : 'false');
       form.append('useLowerFps', useLowerFps ? 'true' : 'false');
       form.append(
         'useLowerResolution',
@@ -1170,6 +1198,7 @@ export function GeneratePageInner() {
         subject: scriptSubject,
         style: scriptStyle,
         scriptLength,
+        isShort,
       });
 
       const data = res.data as {
@@ -1880,6 +1909,35 @@ export function GeneratePageInner() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Is Short Option */}
+                  <label
+                    className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${isShort
+                      ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                      : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                      }`}
+                  >
+                    <div className="relative mt-0.5">
+                      <input
+                        type="checkbox"
+                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
+                        checked={isShort}
+                        onChange={(e) => setIsShort(e.target.checked)}
+                      />
+                      <div
+                        className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${isShort ? 'animate-ping' : ''
+                          }`}
+                        style={{ animationIterationCount: 1, animationDuration: '0.5s' }}
+                      ></div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">Is Short</span>
+                        <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">Aspect ratio</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">On: 9:16 (Shorts). Off: 16:9 (Regular)</p>
+                    </div>
+                  </label>
+
                   {/* Lower FPS Option */}
                   <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerFps
                       ? 'border-indigo-400 shadow-lg shadow-indigo-100'
