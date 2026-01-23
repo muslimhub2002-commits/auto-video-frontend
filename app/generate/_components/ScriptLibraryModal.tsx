@@ -11,9 +11,11 @@ interface ScriptSentenceDto {
   id: string;
   text: string;
   index: number;
+  isSuspense?: boolean;
   image?: {
     id: string;
     image: string;
+    prompt?: string | null;
   } | null;
 }
 

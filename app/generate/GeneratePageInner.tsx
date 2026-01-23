@@ -72,6 +72,7 @@ export type SentenceItem = {
   isSavingImage?: boolean;
   savedImageId?: string | null;
   isFromLibrary?: boolean;
+  isSuspense?: boolean;
 };
 
 export type VoiceOverOption = {
@@ -104,7 +105,7 @@ export function GeneratePageInner() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [scriptSubject, setScriptSubject] = useState('religious (Islam)');
   const [scriptSubjectContent, setScriptSubjectContent] = useState('');
-  const [scriptLength, setScriptLength] = useState('30 seconds');
+  const [scriptLength, setScriptLength] = useState('1 minute');
   const [scriptStyle, setScriptStyle] = useState('Conversational');
   const [scriptModel, setScriptModel] = useState('gpt-4o-mini');
   const [images, setImages] = useState<File[]>([]);
@@ -248,6 +249,7 @@ export function GeneratePageInner() {
           isSavingImage: false,
           savedImageId: isSubscribe ? null : s.image?.id ?? null,
           isFromLibrary: !!s.image,
+          isSuspense: !isSubscribe && Boolean((s as any).isSuspense),
         };
       });
 
@@ -268,6 +270,7 @@ export function GeneratePageInner() {
         isSavingImage: false,
         savedImageId: null,
         isFromLibrary: false,
+        isSuspense: false,
       });
     }
     setSentences(restored);
@@ -702,6 +705,7 @@ export function GeneratePageInner() {
 
       const sentencePayload = sentences.map((s) => ({
         text: s.text,
+        isSuspense: Boolean(s.isSuspense),
       }));
       form.append('sentences', JSON.stringify(sentencePayload));
       form.append('scriptLength', scriptLength);
@@ -945,6 +949,7 @@ export function GeneratePageInner() {
         imageUrl: null,
         video: text === SUBSCRIBE_SENTENCE ? null : null,
         videoUrl: text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : null,
+        isSuspense: false,
       }));
 
       setSentences(items);
@@ -976,7 +981,8 @@ export function GeneratePageInner() {
       id: string;
       text: string;
       index: number;
-      image?: { id: string; image: string } | null;
+      image?: { id: string; image: string; prompt?: string | null } | null;
+      isSuspense?: boolean;
     }[];
   }) => {
     setScript(draft.script);
@@ -995,11 +1001,12 @@ export function GeneratePageInner() {
         imageUrl: s.image?.image ?? null,
         video: s.text === SUBSCRIBE_SENTENCE ? null : null,
         videoUrl: s.text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : null,
-        imagePrompt: null,
+        imagePrompt: s.image?.prompt ?? null,
         isGeneratingImage: false,
         isSavingImage: false,
         savedImageId: s.image?.id ?? null,
         isFromLibrary: !!s.image,
+        isSuspense: Boolean(s.isSuspense) && s.text !== SUBSCRIBE_SENTENCE,
       }));
       setSentences(mapped);
     } else {
@@ -1182,7 +1189,40 @@ export function GeneratePageInner() {
     });
   };
 
-  const handleGenerateSentenceImage = async (index: number) => {
+  const handleDeleteSentence = (index: number) => {
+    setSentences((prev) => {
+      if (index < 0 || index >= prev.length) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleAddSuspenseScene = (sourceIndex: number) => {
+    setSentences((prev) => {
+      const source = prev[sourceIndex];
+      if (!source) return prev;
+
+      const newId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `suspense-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      const copy: SentenceItem = {
+        ...source,
+        id: newId,
+        isSuspense: true,
+        isGeneratingImage: false,
+        isSavingImage: false,
+        // Keep the saved image reference so drafts can round-trip the suspense scene media.
+        savedImageId: source.savedImageId ?? null,
+      };
+
+      // Only one suspense scene should exist. Adding a new one replaces the previous.
+      const withoutExistingSuspense = prev.filter((s) => !s.isSuspense);
+      return [copy, ...withoutExistingSuspense];
+    });
+  };
+
+  const handleGenerateSentenceImage = async (index: number, promptOverride?: string) => {
     const target = sentences[index];
     if (!target) return;
 
@@ -1199,6 +1239,7 @@ export function GeneratePageInner() {
         style: scriptStyle,
         scriptLength,
         isShort,
+        prompt: promptOverride?.trim() ? promptOverride.trim() : undefined,
       });
 
       const data = res.data as {
@@ -1339,7 +1380,11 @@ export function GeneratePageInner() {
     setIsLibraryModalOpen(true);
   };
 
-  const handleLibraryImageSelect = (imageUrl: string, id: string) => {
+  const handleLibraryImageSelect = (
+    imageUrl: string,
+    id: string,
+    prompt?: string | null,
+  ) => {
     if (libraryTargetIndex === null) return;
 
     setSentences((prev) =>
@@ -1349,7 +1394,7 @@ export function GeneratePageInner() {
             ...item,
             imageUrl,
             image: null,
-            imagePrompt: null,
+            imagePrompt: prompt ?? null,
             isFromLibrary: true,
             savedImageId: id,
           }
@@ -1413,7 +1458,7 @@ export function GeneratePageInner() {
 
     try {
       // Ensure images are saved and collect image IDs per sentence
-      const sentencePayload: { text: string; image_id?: string }[] = [];
+      const sentencePayload: { text: string; image_id?: string; isSuspense?: boolean }[] = [];
 
       // eslint-disable-next-line no-restricted-syntax
       for (let index = 0; index < sentences.length; index += 1) {
@@ -1435,6 +1480,9 @@ export function GeneratePageInner() {
           if (fileToUpload) {
             const formData = new FormData();
             formData.append('image', fileToUpload);
+            if ((s.imagePrompt ?? '').trim()) {
+              formData.append('prompt', (s.imagePrompt ?? '').trim());
+            }
 
             const response = await api.post<{ id: string }>(
               '/images',
@@ -1453,6 +1501,7 @@ export function GeneratePageInner() {
         sentencePayload.push({
           text: s.text,
           image_id: imageId ?? undefined,
+          isSuspense: Boolean(s.isSuspense) && (s.text || '').trim() !== SUBSCRIBE_SENTENCE,
         });
       }
 
@@ -1504,7 +1553,7 @@ export function GeneratePageInner() {
     setIsSavingDraft(true);
 
     try {
-      const sentencePayload: { text: string; image_id?: string }[] = [];
+      const sentencePayload: { text: string; image_id?: string; isSuspense?: boolean }[] = [];
 
       // Ensure any uploaded or generated images are saved to the images table
       // so their IDs can be linked to sentences in the draft.
@@ -1524,11 +1573,24 @@ export function GeneratePageInner() {
               s.imageUrl,
               `sentence-${index + 1}.png`,
             );
+          } else if (s.imageUrl) {
+            // If we only have a remote URL, fetch it and upload so the draft can restore it.
+            const res = await fetch(s.imageUrl);
+            if (res.ok) {
+              const blob = await res.blob();
+              const ext = blob.type === 'image/jpeg' ? 'jpg' : 'png';
+              fileToUpload = new File([blob], `sentence-${index + 1}.${ext}`, {
+                type: blob.type || 'image/png',
+              });
+            }
           }
 
           if (fileToUpload) {
             const formData = new FormData();
             formData.append('image', fileToUpload);
+            if ((s.imagePrompt ?? '').trim()) {
+              formData.append('prompt', (s.imagePrompt ?? '').trim());
+            }
 
             const response = await api.post<{ id: string }>(
               '/images',
@@ -1547,6 +1609,7 @@ export function GeneratePageInner() {
         sentencePayload.push({
           text: s.text,
           image_id: imageId ?? undefined,
+          isSuspense: Boolean(s.isSuspense) && (s.text || '').trim() !== SUBSCRIBE_SENTENCE,
         });
       }
 
@@ -1574,7 +1637,7 @@ export function GeneratePageInner() {
       const payload: {
         script: string;
         voice_id?: string;
-        sentences?: { text: string; image_id?: string }[];
+        sentences?: { text: string; image_id?: string; isSuspense?: boolean }[];
       } = {
         script,
         voice_id: voiceId ?? undefined,
@@ -1858,6 +1921,7 @@ export function GeneratePageInner() {
                   sentences={sentences}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
+                  onDeleteSentence={handleDeleteSentence}
                   onGenerateSentenceImage={handleGenerateSentenceImage}
                   onGenerateAllImages={handleGenerateAllSentenceImages}
                   isGeneratingAllImages={isGeneratingAllImages}
@@ -1866,6 +1930,11 @@ export function GeneratePageInner() {
                   onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
                   onSaveSentenceImage={handleSaveSentenceImage}
                   onSelectFromLibrary={handleSelectFromLibrary}
+                  onAddSuspenseScene={handleAddSuspenseScene}
+                  scriptStyle={scriptStyle}
+                  scriptModel={scriptModel}
+                  systemPrompt={systemPrompt}
+                  apiUrl={API_URL}
                 />
 
                 <VoiceOverSection

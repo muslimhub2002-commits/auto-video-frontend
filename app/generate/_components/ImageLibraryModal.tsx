@@ -9,6 +9,7 @@ import { Pagination } from './Pagination';
 interface SavedImage {
   id: string;
   image: string;
+  prompt?: string | null;
   image_style?: string;
   created_at: string;
 }
@@ -16,7 +17,7 @@ interface SavedImage {
 interface ImageLibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectImage: (imageUrl: string, id: string) => void;
+  onSelectImage: (imageUrl: string, id: string, prompt?: string | null) => void;
   selectedImageUrl?: string | null;
 }
 
@@ -78,7 +79,7 @@ export function ImageLibraryModal({
   const handleSelectImage = (img: SavedImage) => {
     setSelectedId(img.id);
     setTimeout(() => {
-      onSelectImage(img.image, img.id);
+      onSelectImage(img.image, img.id, img.prompt ?? null);
       onClose();
     }, 300);
   };
@@ -132,7 +133,7 @@ export function ImageLibraryModal({
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="aspect-square rounded-xl bg-gradient-to-br from-gray-200 to-gray-300 animate-pulse" />
+                  <div key={i} className="aspect-square rounded-xl bg-linear-to-br from-gray-200 to-gray-300 animate-pulse" />
                 ))}
               </div>
             </div>
