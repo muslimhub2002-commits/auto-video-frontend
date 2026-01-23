@@ -41,7 +41,7 @@ import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 import { useToast } from '@/components/ui/toast';
 
 const API_URL =
-  'http://localhost:3000';
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
   'Please Subscribe & Help us reach out to more people';
@@ -1768,10 +1768,10 @@ export function GeneratePageInner() {
                                 >
                                   {/* Shine effect on hover */}
                                   <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover/reuse:translate-x-full transition-transform duration-700 skew-x-12"></div>
-                                  
+
                                   {/* Icon with smooth rotation */}
                                   <RotateCcw className="relative h-4 w-4 group-hover/reuse:rotate-360 transition-transform duration-500 ease-out" />
-                                  
+
                                   {/* Text */}
                                   <span className="relative drop-shadow-sm text-sm">Reuse</span>
                                 </button>
@@ -2009,8 +2009,8 @@ export function GeneratePageInner() {
 
                   {/* Lower FPS Option */}
                   <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerFps
-                      ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                      : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                    ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                    : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
                     }`}>
                     <div className="relative mt-0.5">
                       <input
@@ -2033,8 +2033,8 @@ export function GeneratePageInner() {
 
                   {/* Lower Resolution Option */}
                   <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerResolution
-                      ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                      : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                    ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                    : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
                     }`}>
                     <div className="relative mt-0.5">
                       <input
