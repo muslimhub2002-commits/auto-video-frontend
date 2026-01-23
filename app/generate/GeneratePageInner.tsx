@@ -37,6 +37,7 @@ import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
+import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 import { useToast } from '@/components/ui/toast';
 
@@ -58,6 +59,20 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
     bytes[i] = binary.charCodeAt(i);
   }
   return new File([bytes], filename, { type: mime });
+}
+
+async function sha256HexForFile(file: File): Promise<string | null> {
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) return null;
+    const bytes = await file.arrayBuffer();
+    const digest = await subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return null;
+  }
 }
 
 export type SentenceItem = {
@@ -600,6 +615,23 @@ export function GeneratePageInner() {
     setVoiceLibraryUrl(null);
   };
 
+  const persistVoiceToLibrary = async (file: File) => {
+    // Upload directly to Cloudinary from the client to avoid Vercel serverless limits.
+    const cloudinaryUrl = await uploadToCloudinaryUnsigned(file, {
+      resourceType: 'video',
+      folder: 'auto-video-generator/voices',
+    });
+
+    const hash = await sha256HexForFile(file);
+
+    const response = await api.post<{ id: string }>('/voices/url', {
+      voice: cloudinaryUrl,
+      hash: hash ?? undefined,
+    });
+
+    return { id: response.data.id, url: cloudinaryUrl };
+  };
+
   const handleSaveVoice = async () => {
     if (!voiceOver) {
       showAlert('No voice-over to save.', { type: 'warning' });
@@ -618,16 +650,7 @@ export function GeneratePageInner() {
     setIsSavingVoice(true);
 
     try {
-      const formData = new FormData();
-      formData.append('voice', voiceOver);
-
-      const response = await api.post<{ id: string }>('/voices', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const saved = response.data;
+      const saved = await persistVoiceToLibrary(voiceOver);
       setSavedVoiceId(saved.id);
       setVoiceLibraryUrl(null);
     } catch (error) {
@@ -1509,20 +1532,8 @@ export function GeneratePageInner() {
       let voiceId = savedVoiceId;
 
       if (!voiceId) {
-        const formData = new FormData();
-        formData.append('voice', voiceOver);
-
-        const response = await api.post<{ id: string }>(
-          '/voices',
-          formData,
-          {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-            },
-          },
-        );
-
-        voiceId = response.data.id;
+        const saved = await persistVoiceToLibrary(voiceOver);
+        voiceId = saved.id;
         setSavedVoiceId(voiceId);
       }
 
@@ -1617,20 +1628,8 @@ export function GeneratePageInner() {
       let voiceId = savedVoiceId;
 
       if (!voiceId && voiceOver) {
-        const formData = new FormData();
-        formData.append('voice', voiceOver);
-
-        const response = await api.post<{ id: string }>(
-          '/voices',
-          formData,
-          {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-            },
-          },
-        );
-
-        voiceId = response.data.id;
+        const saved = await persistVoiceToLibrary(voiceOver);
+        voiceId = saved.id;
         setSavedVoiceId(voiceId);
       }
 
