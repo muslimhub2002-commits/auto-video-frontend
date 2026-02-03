@@ -282,7 +282,7 @@ export function ScriptSection(props: ScriptSectionProps) {
                   <SelectItem value="Conversational">Conversational</SelectItem>
                   <SelectItem value="Humorous">Humorous</SelectItem>
                   <SelectItem value="Inspirational">Inspirational</SelectItem>
-                  <SelectItem value="Storytelling/Narrative">Storytelling/Narrative</SelectItem>
+                  <SelectItem value="Storytelling/Narrative">Storytelling / Narrative</SelectItem>
                   <SelectItem value="Persuasive">Persuasive</SelectItem>
                   <SelectItem value="Educational/Instructional">Educational / Instructional</SelectItem>
                   <SelectItem value="Fast Paced">Fast Paced</SelectItem>
@@ -313,6 +313,18 @@ export function ScriptSection(props: ScriptSectionProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="claude-sonnet-4-5">Claude Sonnet 4.5</SelectItem>
+                  <SelectItem value="claude-sonnet-4-0">Claude Sonnet 4.0</SelectItem>
+
+                  <SelectItem value="claude-opus-4-5">Claude Opus 4.5</SelectItem>
+                  <SelectItem value="claude-opus-4-0">Claude Opus 4.0</SelectItem>
+
+                  <SelectItem value="claude-haiku-4-5">Claude Haiku 4.5</SelectItem>
+
+                  <SelectItem value="claude-3-7-sonnet-latest">Claude 3.7 Sonnet</SelectItem>
+                  <SelectItem value="claude-3-opus-latest">Claude 3 Opus</SelectItem>
+                  <SelectItem value="claude-3-5-haiku-latest">Claude 3.5 Haiku</SelectItem>
+
                   <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>
                   <SelectItem value="gpt-4.1-mini">GPT-4.1 mini</SelectItem>
                   <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>

@@ -123,7 +123,8 @@ export function GeneratePageInner() {
   const [scriptLength, setScriptLength] = useState('1 minute');
   const [scriptStyle, setScriptStyle] = useState('Conversational');
   const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
-  const [scriptModel, setScriptModel] = useState('gpt-4o-mini');
+  // Default to Anthropic (Claude) as requested.
+  const [scriptModel, setScriptModel] = useState('claude-sonnet-4-5');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);

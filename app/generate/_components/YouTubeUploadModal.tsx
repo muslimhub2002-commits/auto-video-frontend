@@ -387,7 +387,7 @@ export function YouTubeUploadModal({
                     type="button"
                     onClick={handleGenerateSeo}
                     disabled={isGeneratingSeo || isUploadingToYouTube || !(script || '').trim()}
-                    className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white hover:text-white shadow-md hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white hover:text-white shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
                     size="sm"
                   >
                     {isGeneratingSeo ? (
