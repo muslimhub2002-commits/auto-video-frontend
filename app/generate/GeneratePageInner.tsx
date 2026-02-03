@@ -41,7 +41,7 @@ import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 import { useToast } from '@/components/ui/toast';
 
-const API_URL =
+const API_URL = process.env.NEXT_PUBLIC_API_URL ||
  'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
