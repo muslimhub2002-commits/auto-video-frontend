@@ -253,8 +253,8 @@ export function YouTubeUploadModal({
 
     setIsUploadingToYouTube(true);
     try {
-      const tags = parseTagsPreserveOrder(youtubeTags);
-
+      let tags = parseTagsPreserveOrder(youtubeTags);
+      tags.join(',');
       const token = localStorage.getItem('token');
 
       // 1) Save generation to chats/messages BEFORE uploading to YouTube (use api baseURL)

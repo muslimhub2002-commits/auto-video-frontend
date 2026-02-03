@@ -42,7 +42,7 @@ import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 import { useToast } from '@/components/ui/toast';
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+ 'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
   'Please Subscribe & Help us reach out to more people';
@@ -122,6 +122,7 @@ export function GeneratePageInner() {
   const [scriptSubjectContent, setScriptSubjectContent] = useState('');
   const [scriptLength, setScriptLength] = useState('1 minute');
   const [scriptStyle, setScriptStyle] = useState('Conversational');
+  const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
   const [scriptModel, setScriptModel] = useState('gpt-4o-mini');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
@@ -855,6 +856,7 @@ export function GeneratePageInner() {
               ? scriptSubjectContent || undefined
               : undefined,
           length: scriptLength,
+          technique: scriptTechnique,
           model: scriptModel,
           ...(usingReferences
             ? {
@@ -999,6 +1001,13 @@ export function GeneratePageInner() {
   const handleSelectScriptFromLibrary = (draft: {
     id: string;
     script: string;
+    video_url?: string | null;
+    subject?: string | null;
+    subject_content?: string | null;
+    length?: string | null;
+    style?: string | null;
+    technique?: string | null;
+    reference_scripts?: { id: string; title: string | null; script: string }[];
     voice?: { id: string; voice: string } | null;
     sentences?: {
       id: string;
@@ -1009,10 +1018,29 @@ export function GeneratePageInner() {
     }[];
   }) => {
     setScript(draft.script);
-    // Capture the current config as the "original" baseline for the loaded script
-    setOriginalScriptSubject(scriptSubject);
+
+    const loadedSubject = (draft.subject ?? '').trim() || 'religious (Islam)';
+    const loadedSubjectContent = (draft.subject_content ?? '').trim();
+    const loadedLength = (draft.length ?? '').trim() || '1 minute';
+    const loadedStyle = (draft.style ?? '').trim() || 'Conversational';
+    const loadedTechnique = (draft.technique ?? '').trim() || 'The Dance (Context, Conflict)';
+
+    setScriptSubject(loadedSubject);
+    setScriptSubjectContent(loadedSubject === 'religious (Islam)' ? loadedSubjectContent : '');
+    setScriptLength(loadedLength);
+    setScriptStyle(loadedStyle);
+    setScriptTechnique(loadedTechnique);
+
+    // Restore reference scripts (if any) so UI disables style/system prompt accordingly.
+    const loadedRefs = (draft.reference_scripts ?? [])
+      .filter((s) => Boolean(s?.id) && Boolean(s?.script?.trim()))
+      .map((s) => ({ id: s.id, title: s.title ?? null, script: s.script }));
+    setReferenceScripts(loadedRefs);
+
+    // Capture loaded config as the "original" baseline for the loaded script
+    setOriginalScriptSubject(loadedSubject);
     setOriginalScriptSubjectContent(
-      scriptSubject === 'religious (Islam)' ? scriptSubjectContent : ''
+      loadedSubject === 'religious (Islam)' ? loadedSubjectContent : ''
     );
 
     if (draft.sentences && draft.sentences.length > 0) {
@@ -1066,6 +1094,21 @@ export function GeneratePageInner() {
       })();
     }
 
+    // Restore the generated video (if the draft has one)
+    if (draft.video_url) {
+      setVideoJobError(null);
+      setVideoUrl(draft.video_url);
+      // We just need a stable key so VideoStatusCard renders;
+      // status is set to completed so we don't poll.
+      setJobFromResponse(draft.id, 'completed');
+
+      if (videoSectionRef.current) {
+        videoSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    } else {
+      resetJob();
+    }
+
     setSplitError(null);
   };
 
@@ -1091,6 +1134,7 @@ export function GeneratePageInner() {
           script,
           length: scriptLength,
           style: scriptStyle,
+          technique: scriptTechnique,
           model: scriptModel,
           systemPrompt: systemPrompt.trim() ? systemPrompt.trim() : undefined,
         }),
@@ -1258,6 +1302,7 @@ export function GeneratePageInner() {
     try {
       const res = await api.post('/ai/generate-image-from-sentence', {
         sentence: target.text,
+        script,
         subject: scriptSubject,
         style: scriptStyle,
         scriptLength,
@@ -1543,6 +1588,14 @@ export function GeneratePageInner() {
         voice_id: voiceId ?? undefined,
         sentences: sentencePayload.length > 0 ? sentencePayload : undefined,
         chat_id: selectedChatId ?? routeChatId ?? undefined,
+        subject: scriptSubject,
+        subject_content:
+          scriptSubject === 'religious (Islam)' ? (scriptSubjectContent || null) : null,
+        length: scriptLength,
+        style: referenceScripts.length > 0 ? null : scriptStyle,
+        technique: scriptTechnique,
+        reference_script_ids:
+          referenceScripts.length > 0 ? referenceScripts.map((s) => s.id) : undefined,
       });
 
       showAlert('Saved to your chats successfully.', { type: 'success' });
@@ -1636,11 +1689,27 @@ export function GeneratePageInner() {
       const payload: {
         script: string;
         voice_id?: string;
+        video_url?: string;
         sentences?: { text: string; image_id?: string; isSuspense?: boolean }[];
+        subject?: string;
+        subject_content?: string | null;
+        length?: string;
+        style?: string | null;
+        technique?: string | null;
+        reference_script_ids?: string[];
       } = {
         script,
         voice_id: voiceId ?? undefined,
+        video_url: videoUrl ?? undefined,
         sentences: sentencePayload.length > 0 ? sentencePayload : undefined,
+        subject: scriptSubject,
+        subject_content:
+          scriptSubject === 'religious (Islam)' ? (scriptSubjectContent || null) : null,
+        length: scriptLength,
+        style: referenceScripts.length > 0 ? null : scriptStyle,
+        technique: scriptTechnique,
+        reference_script_ids:
+          referenceScripts.length > 0 ? referenceScripts.map((s) => s.id) : undefined,
       };
 
       await api.post('/scripts', payload);
@@ -1898,6 +1967,8 @@ export function GeneratePageInner() {
                   setScriptLength={setScriptLength}
                   scriptStyle={scriptStyle}
                   setScriptStyle={setScriptStyle}
+                  scriptTechnique={scriptTechnique}
+                  setScriptTechnique={setScriptTechnique}
                   scriptModel={scriptModel}
                   setScriptModel={setScriptModel}
                   isRandomScriptLoading={isRandomScriptLoading}
@@ -1931,6 +2002,7 @@ export function GeneratePageInner() {
                   onSelectFromLibrary={handleSelectFromLibrary}
                   onAddSuspenseScene={handleAddSuspenseScene}
                   scriptStyle={scriptStyle}
+                  scriptTechnique={scriptTechnique}
                   scriptModel={scriptModel}
                   systemPrompt={systemPrompt}
                   apiUrl={API_URL}

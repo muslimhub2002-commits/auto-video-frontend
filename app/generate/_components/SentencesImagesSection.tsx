@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { useState, type ChangeEvent, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   AccordionItem,
@@ -56,6 +56,7 @@ interface SentencesImagesSectionProps {
 
   // Optional: keep sentence enhancement consistent with Script enhance settings.
   scriptStyle?: string;
+  scriptTechnique?: string;
   scriptModel?: string;
   systemPrompt?: string;
 
@@ -78,6 +79,7 @@ export function SentencesImagesSection({
   onSaveSentenceImage,
   onAddSuspenseScene,
   scriptStyle,
+  scriptTechnique,
   scriptModel,
   systemPrompt,
   apiUrl,
@@ -92,6 +94,7 @@ export function SentencesImagesSection({
 
   const [enhancingById, setEnhancingById] = useState<Record<string, boolean>>({});
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
+  const [enhanceMenuOpenById, setEnhanceMenuOpenById] = useState<Record<string, boolean>>({});
 
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [promptTargetIndex, setPromptTargetIndex] = useState<number | null>(null);
@@ -172,6 +175,7 @@ export function SentencesImagesSection({
       body: JSON.stringify({
         sentence: options.sentence,
         style: scriptStyle,
+        technique: scriptTechnique,
         model: scriptModel,
         systemPrompt: systemPrompt?.trim() ? systemPrompt.trim() : undefined,
         userPrompt: options.userPrompt?.trim() ? options.userPrompt.trim() : undefined,
@@ -203,6 +207,8 @@ export function SentencesImagesSection({
 
     setEnhanceError(null);
     setEnhancingById((prev) => ({ ...prev, [item.id]: true }));
+    // Close the enhance menu
+    setEnhanceMenuOpenById((prev) => ({ ...prev, [item.id]: false }));
 
     try {
       // Keep the existing sentence visible until we actually start receiving chunks.
@@ -240,6 +246,10 @@ export function SentencesImagesSection({
     setPromptEnhancedSentence(base);
     setUserPrompt('');
     setPromptModalOpen(true);
+    // Close the enhance menu
+    if (item?.id) {
+      setEnhanceMenuOpenById((prev) => ({ ...prev, [item.id]: false }));
+    }
   };
 
   const applyPromptEnhancement = async () => {
@@ -280,6 +290,20 @@ export function SentencesImagesSection({
     setPromptModalOpen(false);
     setPromptTargetIndex(null);
   };
+
+  // Close enhance menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      // Check if click is outside any enhance menu
+      if (!target.closest('[data-enhance-menu]') && !target.closest('[data-enhance-button]')) {
+        setEnhanceMenuOpenById({});
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <AccordionItem value="sentences" className="border-b border-gray-200 px-6">
@@ -394,7 +418,7 @@ export function SentencesImagesSection({
                             />
                           </div>
 
-                          <div className="mt-4 space-y-3 pl-6">
+                          <div className="mt-4 space-y-3 pl-6 flex gap-2">
                             <div className="flex flex-wrap gap-2">
                               <Button
                                 type="button"
@@ -419,7 +443,82 @@ export function SentencesImagesSection({
                                 <ArrowDown className="h-3.5 w-3.5" />
                                 Merge Down
                               </Button>
+                              <div className="relative flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="gap-2 text-xs font-semibold bg-linear-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 transition-all shadow-sm hover:shadow text-white"
+                                  title="Enhance this sentence"
+                                  onClick={() => {
+                                    setEnhanceMenuOpenById((prev) => ({
+                                      ...prev,
+                                      [item.id]: !prev[item.id],
+                                    }));
+                                  }}
+                                  disabled={isEnhancing || isApplyingPrompt}
+                                  data-enhance-button
+                                >
+                                  {isEnhancing ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      Enhancing...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Sparkles className="h-3.5 w-3.5" />
+                                      Enhance
+                                    </>
+                                  )}
+                                </Button>
 
+                                {/* Enhance Menu Dropdown */}
+                                {enhanceMenuOpenById[item.id] && !isEnhancing && !isApplyingPrompt ? (
+                                  <div
+                                    className="absolute left-0 top-full mt-1 z-20 w-56 rounded-xl border-2 border-gray-200 bg-white shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+                                    onClick={(e) => e.stopPropagation()}
+                                    data-enhance-menu
+                                  >
+                                    <div className="p-2 space-y-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEnhanceSentenceWithAi(index)}
+                                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-linear-to-r hover:from-amber-50 hover:to-orange-50 transition-all group text-left"
+                                      >
+                                        <div className="p-1.5 bg-linear-to-br from-amber-100 to-orange-100 rounded-lg group-hover:scale-110 transition-transform">
+                                          <Sparkles className="h-3.5 w-3.5 text-amber-600" />
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className="text-sm font-semibold text-gray-900 group-hover:text-amber-700 transition-colors">
+                                            Enhance with AI
+                                          </p>
+                                          <p className="text-[10px] text-gray-500 leading-tight">
+                                            Auto-improve using AI
+                                          </p>
+                                        </div>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openPromptEnhanceModal(index)}
+                                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-linear-to-r hover:from-blue-50 hover:to-indigo-50 transition-all group text-left"
+                                      >
+                                        <div className="p-1.5 bg-linear-to-br from-blue-100 to-indigo-100 rounded-lg group-hover:scale-110 transition-transform">
+                                          <svg className="h-3.5 w-3.5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                          </svg>
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
+                                            Enhance with your prompt
+                                          </p>
+                                          <p className="text-[10px] text-gray-500 leading-tight">
+                                            Use custom instructions
+                                          </p>
+                                        </div>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
                               <Button
                                 type="button"
                                 size="sm"
@@ -436,42 +535,7 @@ export function SentencesImagesSection({
                               </Button>
                             </div>
 
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="gap-2 text-xs font-semibold bg-linear-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 transition-all shadow-sm hover:shadow text-white"
-                                title="Enhance this sentence with AI"
-                                onClick={() => handleEnhanceSentenceWithAi(index)}
-                                disabled={isEnhancing || isApplyingPrompt}
-                              >
-                                {isEnhancing ? (
-                                  <>
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    Enhancing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Sparkles className="h-3.5 w-3.5" />
-                                    Enhance With AI
-                                  </>
-                                )}
-                              </Button>
 
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="gap-2 text-xs font-semibold bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white transition-all shadow-sm hover:shadow"
-                                title="Enhance this sentence with your custom prompt"
-                                onClick={() => openPromptEnhanceModal(index)}
-                                disabled={isEnhancing || isApplyingPrompt}
-                              >
-                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                Enhance With Your Prompt
-                              </Button>
-                            </div>
 
                             {enhanceError ? (
                               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
@@ -1091,7 +1155,7 @@ export function SentencesImagesSection({
                               Text Only
                             </span>
                           )}
-                          
+
                           {s.isSuspense ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-600 text-white border border-purple-700 text-[11px] font-bold">
                               <VideoIcon className="h-3 w-3" />

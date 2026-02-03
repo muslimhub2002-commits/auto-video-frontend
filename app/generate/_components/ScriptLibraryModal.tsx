@@ -24,6 +24,13 @@ interface ScriptDto {
   title: string | null;
   script: string;
   created_at: string;
+  video_url?: string | null;
+  subject?: string | null;
+  subject_content?: string | null;
+  length?: string | null;
+  style?: string | null;
+  technique?: string | null;
+  reference_scripts?: { id: string; title: string | null; script: string }[];
    voice?: {
      id: string;
      voice: string;

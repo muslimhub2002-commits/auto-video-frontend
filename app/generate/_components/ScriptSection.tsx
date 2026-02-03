@@ -35,6 +35,8 @@ interface ScriptSectionProps {
   setScriptLength: (value: string) => void;
   scriptStyle: string;
   setScriptStyle: (value: string) => void;
+  scriptTechnique: string;
+  setScriptTechnique: (value: string) => void;
   scriptModel: string;
   setScriptModel: (value: string) => void;
   isRandomScriptLoading: boolean;
@@ -72,6 +74,8 @@ export function ScriptSection(props: ScriptSectionProps) {
     setScriptLength,
     scriptStyle,
     setScriptStyle,
+    scriptTechnique,
+    setScriptTechnique,
     scriptModel,
     setScriptModel,
     isRandomScriptLoading,
@@ -214,7 +218,7 @@ export function ScriptSection(props: ScriptSectionProps) {
               <div className="w-1 h-4 bg-primary rounded-full"></div>
               Script Configuration
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {/* Subject */}
               <Select value={scriptSubject} onValueChange={setScriptSubject}>
                 <SelectTrigger label="Subject">
@@ -280,9 +284,26 @@ export function ScriptSection(props: ScriptSectionProps) {
                   <SelectItem value="Inspirational">Inspirational</SelectItem>
                   <SelectItem value="Storytelling/Narrative">Storytelling/Narrative</SelectItem>
                   <SelectItem value="Persuasive">Persuasive</SelectItem>
-                  <SelectItem value="Educational/Instructional">Educational/Instructional</SelectItem>
+                  <SelectItem value="Educational/Instructional">Educational / Instructional</SelectItem>
                   <SelectItem value="Fast Paced">Fast Paced</SelectItem>
                   <SelectItem value="Wisdom">Wisdom</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Technique */}
+              <Select value={scriptTechnique} onValueChange={setScriptTechnique}>
+                <SelectTrigger label="Technique">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="The Dance (Context, Conflict)">
+                    The Dance
+                  </SelectItem>
+                  <SelectItem value="Loss Aversion">Loss Aversion</SelectItem>
+                  <SelectItem value="The Rhythm">The Rhythm</SelectItem>
+                  <SelectItem value="Confrontation Technique">
+                    Confrontation Technique
+                  </SelectItem>
                 </SelectContent>
               </Select>
 
