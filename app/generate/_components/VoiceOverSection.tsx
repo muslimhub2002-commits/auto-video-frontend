@@ -2,6 +2,7 @@
 
 import { useRef, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -22,8 +23,13 @@ interface VoiceOverSectionProps {
   voiceDuration: number | null;
   voiceError: string | null;
   isGeneratingVoice: boolean;
+  isPreviewingVoice?: boolean;
   isSavingVoice: boolean;
   savedVoiceId: string | null;
+  voiceProvider: 'google' | 'elevenlabs';
+  onVoiceProviderChange: (provider: 'google' | 'elevenlabs') => void;
+  styleInstructions?: string;
+  onStyleInstructionsChange?: (value: string) => void;
   voices: {
     id: number;
     voice_id: string;
@@ -40,7 +46,8 @@ interface VoiceOverSectionProps {
   onSetFavoriteVoice: (voiceId: string) => void;
   isSettingFavoriteVoice: boolean;
   onVoiceUpload: (e: ChangeEvent<HTMLInputElement>) => void;
-  onGenerateVoiceWithElevenLabs: (voiceId?: string | null) => void;
+  onGenerateVoice: (voiceId?: string | null) => void;
+  onPreviewVoice?: (voiceId: string) => void;
   onRemoveVoice: () => void;
   onOpenLibrary: () => void;
   onSaveVoice: () => void;
@@ -52,8 +59,13 @@ export function VoiceOverSection({
   voiceDuration,
   voiceError,
   isGeneratingVoice,
+  isPreviewingVoice,
   isSavingVoice,
   savedVoiceId,
+  voiceProvider,
+  onVoiceProviderChange,
+  styleInstructions,
+  onStyleInstructionsChange,
   voices,
   isLoadingVoices,
   voicesError,
@@ -63,24 +75,51 @@ export function VoiceOverSection({
   onSetFavoriteVoice,
   isSettingFavoriteVoice,
   onVoiceUpload,
-  onGenerateVoiceWithElevenLabs,
+  onGenerateVoice,
+  onPreviewVoice,
   onRemoveVoice,
   onOpenLibrary,
   onSaveVoice,
 }: VoiceOverSectionProps) {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const selectedVoice = voices.find((v) => v.voice_id === selectedVoiceId) || null;
+  const providerLabel = voiceProvider === 'google' ? 'AI Studio' : 'ElevenLabs';
+  const haveStyleInstructions = Boolean(String(styleInstructions ?? '').trim());
 
   const handlePlayPreview = () => {
-    if (!selectedVoice?.preview_url || !previewAudioRef.current) return;
-    try {
-      previewAudioRef.current.currentTime = 0;
-      void previewAudioRef.current.play();
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to play voice preview', error);
+    if (!selectedVoice) return;
+
+    // For AI Studio: when style instructions are provided, generate a fresh preview
+    // so it reflects the requested style instead of playing the cached preview_url.
+    if (voiceProvider === 'google' && haveStyleInstructions && onPreviewVoice) {
+      onPreviewVoice(selectedVoice.voice_id);
+      return;
+    }
+
+    // ElevenLabs static preview (when provided)
+    if (selectedVoice.preview_url && previewAudioRef.current) {
+      try {
+        previewAudioRef.current.currentTime = 0;
+        void previewAudioRef.current.play();
+      } catch (error) {
+        console.error('Failed to play voice preview', error);
+      }
+      return;
+    }
+
+    // AI Studio (Gemini TTS) preview: generate a short clip via backend
+    if (onPreviewVoice) {
+      onPreviewVoice(selectedVoice.voice_id);
     }
   };
+
+  const canPreview = Boolean(selectedVoice?.preview_url || onPreviewVoice);
+  const isPreviewDisabled =
+    !selectedVoice ||
+    !canPreview ||
+    Boolean(isPreviewingVoice) ||
+    Boolean(isSettingFavoriteVoice);
+
   return (
     <AccordionItem value="voice" className="px-6">
       <AccordionTrigger className="hover:no-underline py-5">
@@ -107,13 +146,36 @@ export function VoiceOverSection({
 
             {!voiceOver ? (
               <div className="space-y-4">
+                {/* Provider toggle */}
+                <div className="bg-white rounded-xl border border-purple-200 p-6 space-y-4 shadow-sm hover:shadow-md transition-shadow duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1 h-5 bg-linear-to-b from-purple-500 to-indigo-500 rounded-full"></div>
+                      <p className="text-sm font-semibold text-gray-900">Voice Provider</p>
+                    </div>
+                  </div>
+
+                  <Select
+                    value={voiceProvider}
+                    onValueChange={(v) => onVoiceProviderChange(v as 'google' | 'elevenlabs')}
+                  >
+                    <SelectTrigger label="Provider">
+                      <SelectValue placeholder="Choose a provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="google">AI Studio</SelectItem>
+                      <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Voice selection from synced ElevenLabs voices (Select input) */}
                 <div className="bg-white rounded-xl border border-purple-200 p-6 space-y-4 shadow-sm hover:shadow-md transition-shadow duration-200">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-1 h-5 bg-linear-to-b from-purple-500 to-indigo-500 rounded-full"></div>
                       <p className="text-sm font-semibold text-gray-900">
-                        Select AI Voice
+                        Select {providerLabel} Voice
                       </p>
                     </div>
                     <Button
@@ -151,8 +213,7 @@ export function VoiceOverSection({
                   {!isLoadingVoices && !voicesError && !voices.length ? (
                     <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
                       <p className="text-xs text-gray-600 text-center">
-                        No voices found yet. Use the sync button below to
-                        import voices from ElevenLabs, then refresh.
+                        No voices found yet. Click Refresh to load voices.
                       </p>
                     </div>
                   ) : null}
@@ -195,8 +256,25 @@ export function VoiceOverSection({
                         </SelectContent>
                       </Select>
 
+                      {voiceProvider === 'google' && onStyleInstructionsChange ? (
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-gray-900">
+                            Style instructions (optional)
+                          </p>
+                          <Textarea
+                            value={styleInstructions ?? ''}
+                            onChange={(e) => onStyleInstructionsChange(e.target.value)}
+                            placeholder="E.g. Calm, warm, and confident. Slightly slower pace. Friendly tone."
+                            className="min-h-21"
+                          />
+                          <p className="text-[11px] text-gray-500">
+                            These instructions affect how AI Studio speaks the script.
+                          </p>
+                        </div>
+                      ) : null}
+
                       {/* Selected voice preview - Enhanced styling */}
-                      {selectedVoice && selectedVoice.preview_url && (
+                      {selectedVoice && canPreview && (
                         <div className="relative overflow-hidden rounded-lg bg-linear-to-br from-purple-50 via-purple-50/50 to-indigo-50/50 border border-purple-200/60 shadow-sm hover:shadow transition-all duration-200">
                           <div className="absolute inset-0 bg-linear-to-br from-purple-400/5 to-indigo-400/5"></div>
                           <div className="relative flex items-center justify-between gap-4 px-4 py-3">
@@ -241,17 +319,24 @@ export function VoiceOverSection({
                                 type="button"
                                 size="sm"
                                 onClick={handlePlayPreview}
+                                disabled={isPreviewDisabled}
                                 className="gap-1.5 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm hover:shadow-md transition-all"
                               >
-                                <Play className="h-3.5 w-3.5 fill-white" />
+                                {isPreviewingVoice ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Play className="h-3.5 w-3.5 fill-white" />
+                                )}
                                 <span className="text-xs font-medium">Preview</span>
                               </Button>
                             </div>
-                            <audio
-                              ref={previewAudioRef}
-                              src={selectedVoice.preview_url}
-                              className="hidden"
-                            />
+                            {selectedVoice.preview_url ? (
+                              <audio
+                                ref={previewAudioRef}
+                                src={selectedVoice.preview_url}
+                                className="hidden"
+                              />
+                            ) : null}
                           </div>
                         </div>
                       )}
@@ -313,7 +398,7 @@ export function VoiceOverSection({
                 <Button
                   type="button"
                   size="default"
-                  onClick={() => onGenerateVoiceWithElevenLabs(selectedVoiceId)}
+                  onClick={() => onGenerateVoice(selectedVoiceId)}
                   disabled={
                     isGeneratingVoice || !script.trim() || !selectedVoiceId
                   }
@@ -322,12 +407,12 @@ export function VoiceOverSection({
                   {isGeneratingVoice ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Generating voice with ElevenLabs...
+                      Generating voice with {providerLabel}...
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-4 w-4" />
-                      Generate with ElevenLabs
+                      Generate with {providerLabel}
                     </>
                   )}
                 </Button>
@@ -428,7 +513,7 @@ export function VoiceOverSection({
                     size="sm"
                     variant="outline"
                     onClick={() =>
-                      onGenerateVoiceWithElevenLabs(selectedVoiceId)
+                      onGenerateVoice(selectedVoiceId)
                     }
                     disabled={
                       isGeneratingVoice || !script.trim() || !selectedVoiceId

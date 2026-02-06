@@ -41,7 +41,7 @@ import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 import { useToast } from '@/components/ui/toast';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ||
+const API_URL = 
  'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
@@ -106,6 +106,8 @@ type ReferenceScriptPayload = {
 };
 
 export function GeneratePageInner() {
+  type VoiceProvider = 'google' | 'elevenlabs';
+
   const { user, isLoading, handleLogout } = useAuthGuard();
   const router = useRouter();
   const params = useParams<{ id?: string }>();
@@ -129,11 +131,18 @@ export function GeneratePageInner() {
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
+  const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isSavingVoice, setIsSavingVoice] = useState(false);
   const [savedVoiceId, setSavedVoiceId] = useState<string | null>(null);
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>('google');
+  const [aiStudioStyleInstructions, setAiStudioStyleInstructions] = useState('');
   const [isVoiceLibraryOpen, setIsVoiceLibraryOpen] = useState(false);
   const [voiceLibraryUrl, setVoiceLibraryUrl] = useState<string | null>(null);
+
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioUrlRef = useRef<string | null>(null);
+  const previewAbortRef = useRef<AbortController | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRandomScriptLoading, setIsRandomScriptLoading] = useState(false);
   const [randomScriptError, setRandomScriptError] = useState<string | null>(
@@ -148,10 +157,22 @@ export function GeneratePageInner() {
   const [splitError, setSplitError] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSavingGeneration, setIsSavingGeneration] = useState(false);
-  const [voices, setVoices] = useState<VoiceOverOption[]>([]);
-  const [isLoadingVoices, setIsLoadingVoices] = useState(false);
-  const [voicesError, setVoicesError] = useState<string | null>(null);
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
+  const [voicesByProvider, setVoicesByProvider] = useState<Record<VoiceProvider, VoiceOverOption[]>>({
+    google: [],
+    elevenlabs: [],
+  });
+  const [isLoadingVoicesByProvider, setIsLoadingVoicesByProvider] = useState<Record<VoiceProvider, boolean>>({
+    google: false,
+    elevenlabs: false,
+  });
+  const [voicesErrorByProvider, setVoicesErrorByProvider] = useState<Record<VoiceProvider, string | null>>({
+    google: null,
+    elevenlabs: null,
+  });
+  const [selectedVoiceIdByProvider, setSelectedVoiceIdByProvider] = useState<Record<VoiceProvider, string | null>>({
+    google: null,
+    elevenlabs: null,
+  });
   const [isSettingFavoriteVoice, setIsSettingFavoriteVoice] = useState(false);
   const [isSyncingVoices, setIsSyncingVoices] = useState(false);
   const [syncVoicesResult, setSyncVoicesResult] = useState<string | null>(null);
@@ -205,6 +226,15 @@ export function GeneratePageInner() {
     setVideoJobError,
     setVideoUrl,
   } = useVideoJob(API_URL);
+
+  const voices = voicesByProvider[voiceProvider];
+  const isLoadingVoices = isLoadingVoicesByProvider[voiceProvider];
+  const voicesError = voicesErrorByProvider[voiceProvider];
+  const selectedVoiceId = selectedVoiceIdByProvider[voiceProvider];
+
+  const handleSelectVoice = (voiceId: string) => {
+    setSelectedVoiceIdByProvider((prev) => ({ ...prev, [voiceProvider]: voiceId }));
+  };
 
   const handleReuseSavedGeneration = async (
     msg: {
@@ -342,36 +372,44 @@ export function GeneratePageInner() {
     }
   };
 
-  const fetchElevenLabsVoices = async () => {
-    setIsLoadingVoices(true);
-    setVoicesError(null);
+  const fetchProviderVoices = async (provider: VoiceProvider) => {
+    setIsLoadingVoicesByProvider((prev) => ({ ...prev, [provider]: true }));
+    setVoicesErrorByProvider((prev) => ({ ...prev, [provider]: null }));
     try {
-      const res = await fetch(`${API_URL}/voice-overs`);
+      const res = await fetch(
+        `${API_URL}/voice-overs?provider=${encodeURIComponent(provider)}`,
+      );
       if (!res.ok) {
         throw new Error('Failed to load voices');
       }
 
       const data = (await res.json()) as VoiceOverOption[];
-      setVoices(data);
+      setVoicesByProvider((prev) => ({ ...prev, [provider]: data }));
 
-      const favorite = data.find((v) => v.isFavorite);
-      const fallbackId = favorite?.voice_id ?? (data.length > 0 ? data[0].voice_id : null);
-
-      if (!selectedVoiceId && fallbackId) {
-        setSelectedVoiceId(fallbackId);
-      }
-
-      if (selectedVoiceId && fallbackId) {
-        const stillExists = data.some((v) => v.voice_id === selectedVoiceId);
-        if (!stillExists) setSelectedVoiceId(fallbackId);
-      }
+      setSelectedVoiceIdByProvider((prev) => {
+        const previousSelected = prev[provider];
+        const favorite = data.find((v) => v.isFavorite);
+        const fallbackId = favorite?.voice_id ?? (data.length > 0 ? data[0].voice_id : null);
+        if (!fallbackId) return { ...prev, [provider]: null };
+        if (!previousSelected) return { ...prev, [provider]: fallbackId };
+        const stillExists = data.some((v) => v.voice_id === previousSelected);
+        return {
+          ...prev,
+          [provider]: stillExists ? previousSelected : fallbackId,
+        };
+      });
     } catch (error) {
-      console.error('Failed to load ElevenLabs voices', error);
-      setVoicesError('Failed to load ElevenLabs voices.');
+      console.error('Failed to load voices', error);
+      setVoicesErrorByProvider((prev) => ({
+        ...prev,
+        [provider]: 'Failed to load voices.',
+      }));
     } finally {
-      setIsLoadingVoices(false);
+      setIsLoadingVoicesByProvider((prev) => ({ ...prev, [provider]: false }));
     }
   };
+
+  const fetchVoices = async () => fetchProviderVoices(voiceProvider);
 
   const handleSetFavoriteVoice = async (voiceId: string) => {
     if (!user) {
@@ -382,7 +420,7 @@ export function GeneratePageInner() {
     try {
       setIsSettingFavoriteVoice(true);
       await api.patch(`/voice-overs/favorite/${encodeURIComponent(voiceId)}`);
-      await fetchElevenLabsVoices();
+      await fetchProviderVoices(voiceProvider);
 
       showToast('Favorite voice updated', 'success');
     } catch (error) {
@@ -462,9 +500,176 @@ export function GeneratePageInner() {
   };
 
   useEffect(() => {
-    fetchElevenLabsVoices();
+    // Prefetch both providers so switching is instant.
+    void Promise.all([fetchProviderVoices('google'), fetchProviderVoices('elevenlabs')]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const stopVoicePreview = () => {
+    try {
+      previewAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    previewAbortRef.current = null;
+
+    try {
+      previewAudioRef.current?.pause();
+    } catch {
+      // ignore
+    }
+    previewAudioRef.current = null;
+
+    if (previewAudioUrlRef.current) {
+      try {
+        URL.revokeObjectURL(previewAudioUrlRef.current);
+      } catch {
+        // ignore
+      }
+    }
+    previewAudioUrlRef.current = null;
+  };
+
+  useEffect(() => {
+    // Switching providers should stop any currently playing preview.
+    stopVoicePreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceProvider]);
+
+  useEffect(() => {
+    return () => {
+      stopVoicePreview();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePreviewVoice = async (voiceId: string) => {
+    if (!voiceId) return;
+
+    // Stop any previous preview first.
+    stopVoicePreview();
+    setIsPreviewingVoice(true);
+
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+
+    try {
+      const style =
+        voiceProvider === 'google'
+          ? String(aiStudioStyleInstructions ?? '').trim()
+          : '';
+
+      // If the user provided style instructions, generate a fresh preview so the audio matches.
+      // Otherwise use the cached Cloudinary preview URL endpoint.
+      if (voiceProvider === 'google' && style) {
+        const previewText = 'Hello! This is a short preview of the selected voice.';
+
+        const response = await fetch(`${API_URL}/ai/generate-voice`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            script: previewText,
+            voiceId,
+            styleInstructions: style,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to generate preview');
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const contentType = response.headers.get('content-type');
+        const mimeType = contentType || 'audio/wav';
+
+        const blob = new Blob([arrayBuffer], { type: mimeType });
+        const objectUrl = URL.createObjectURL(blob);
+        previewAudioUrlRef.current = objectUrl;
+
+        const audio = new Audio(objectUrl);
+        previewAudioRef.current = audio;
+        audio.addEventListener(
+          'ended',
+          () => {
+            stopVoicePreview();
+          },
+          { once: true },
+        );
+        audio.addEventListener(
+          'error',
+          () => {
+            stopVoicePreview();
+          },
+          { once: true },
+        );
+
+        await audio.play();
+        return;
+      }
+
+      const response = await fetch(
+        `${API_URL}/voice-overs/preview/${encodeURIComponent(voiceId)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate preview');
+      }
+
+      const data = (await response.json()) as { preview_url?: string };
+      const url = String(data?.preview_url ?? '').trim();
+      if (!url) {
+        throw new Error('Missing preview_url from server');
+      }
+
+      // Cache the URL locally so next preview can play instantly.
+      setVoicesByProvider((prev) => {
+        const next = { ...prev } as typeof prev;
+        const list = next.google;
+        if (!Array.isArray(list) || list.length === 0) return prev;
+        next.google = list.map((v) =>
+          v.voice_id === voiceId ? { ...v, preview_url: url } : v,
+        );
+        return next;
+      });
+
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      audio.addEventListener(
+        'ended',
+        () => {
+          stopVoicePreview();
+        },
+        { once: true },
+      );
+      audio.addEventListener(
+        'error',
+        () => {
+          stopVoicePreview();
+        },
+        { once: true },
+      );
+
+      await audio.play();
+    } catch (error) {
+      if ((error as any)?.name !== 'AbortError') {
+        console.error('Voice preview failed', error);
+        showToast('Failed to preview voice. Please try again.', 'error');
+      }
+      stopVoicePreview();
+    } finally {
+      setIsPreviewingVoice(false);
+    }
+  };
 
   // When navigated to /generate/:id, auto-load that chat's messages
   useEffect(() => {
@@ -499,7 +704,7 @@ export function GeneratePageInner() {
     }
   };
 
-  const handleGenerateVoiceWithElevenLabs = async (
+  const handleGenerateVoice = async (
     voiceId?: string | null,
   ) => {
     if (!script.trim()) {
@@ -571,17 +776,23 @@ export function GeneratePageInner() {
           script: scriptForVoice,
           sentences: sentencesForVoice.length > 0 ? sentencesForVoice : undefined,
           voiceId,
+          styleInstructions:
+            voiceProvider === 'google'
+              ? String(aiStudioStyleInstructions ?? '').trim() || undefined
+              : undefined,
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate voice using ElevenLabs');
+        throw new Error('Failed to generate voice');
       }
 
       const blob = await response.blob();
-      const fileName = 'elevenlabs-voice-over.mp3';
+      const ext = voiceProvider === 'google' ? 'wav' : 'mp3';
+      const fileName = `${voiceProvider}-voice-over.${ext}`;
       const file = new File([blob], fileName, {
-        type: blob.type || 'audio/mpeg',
+        type:
+          blob.type || (voiceProvider === 'google' ? 'audio/wav' : 'audio/mpeg'),
       });
 
       setVoiceOver(file);
@@ -597,9 +808,9 @@ export function GeneratePageInner() {
         }
       });
     } catch (error) {
-      console.error('ElevenLabs voice generation failed', error);
+      console.error('Voice generation failed', error);
       setVoiceError(
-        'Failed to generate voice using ElevenLabs. Please try again in a moment.',
+        'Failed to generate voice. Please try again in a moment.',
       );
     } finally {
       setIsGeneratingVoice(false);
@@ -1498,7 +1709,7 @@ export function GeneratePageInner() {
       );
 
       // Refresh local cache of voices after a successful sync
-      fetchElevenLabsVoices();
+      fetchVoices();
     } catch (error) {
       console.error('Sync ElevenLabs voices failed', error);
       setSyncVoicesResult('Failed to sync ElevenLabs voices. Check backend logs.');
@@ -2015,18 +2226,32 @@ export function GeneratePageInner() {
                   voiceDuration={voiceDuration}
                   voiceError={voiceError}
                   isGeneratingVoice={isGeneratingVoice}
+                  isPreviewingVoice={isPreviewingVoice}
                   isSavingVoice={isSavingVoice}
                   savedVoiceId={savedVoiceId}
+                  voiceProvider={voiceProvider}
+                  onVoiceProviderChange={(p) => {
+                    setVoiceProvider(p);
+                  }}
+                  styleInstructions={
+                    voiceProvider === 'google' ? aiStudioStyleInstructions : ''
+                  }
+                  onStyleInstructionsChange={(value) => {
+                    setAiStudioStyleInstructions(value);
+                  }}
                   voices={voices}
                   isLoadingVoices={isLoadingVoices}
                   voicesError={voicesError}
                   selectedVoiceId={selectedVoiceId}
-                  onSelectVoice={setSelectedVoiceId}
-                  onRefreshVoices={fetchElevenLabsVoices}
+                  onSelectVoice={handleSelectVoice}
+                  onRefreshVoices={fetchVoices}
                   onSetFavoriteVoice={handleSetFavoriteVoice}
                   isSettingFavoriteVoice={isSettingFavoriteVoice}
                   onVoiceUpload={handleVoiceUpload}
-                  onGenerateVoiceWithElevenLabs={handleGenerateVoiceWithElevenLabs}
+                  onGenerateVoice={handleGenerateVoice}
+                  onPreviewVoice={
+                    voiceProvider === 'google' ? handlePreviewVoice : undefined
+                  }
                   onRemoveVoice={removeVoice}
                   onSaveVoice={handleSaveVoice}
                   onOpenLibrary={handleOpenVoiceLibrary}
