@@ -620,7 +620,7 @@ export function ScriptReferencesModal({
                   <div className="flex flex-col gap-2 text-xs text-gray-500">
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold">1</span>
-                      <span>Click "Add Template" to save your collection</span>
+                      <span>Click &quot;Add Template&quot; to save your collection</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold">2</span>

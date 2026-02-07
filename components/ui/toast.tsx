@@ -13,12 +13,9 @@ interface ToastProps {
 }
 
 export const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, onClose }) => {
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
-    // Trigger animation
-    setIsVisible(true);
-
     const timer = setTimeout(() => {
       setIsVisible(false);
       setTimeout(onClose, 300); // Wait for fade out animation

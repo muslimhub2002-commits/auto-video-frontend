@@ -94,7 +94,7 @@ export function YouTubeUploadModal({
     const d = Number(dStr);
 
     // Start with a naive guess, then adjust using Cairo's offset (handles DST).
-    let utcGuess = new Date(Date.UTC(y, m - 1, d, hour24, 0, 0));
+    const utcGuess = new Date(Date.UTC(y, m - 1, d, hour24, 0, 0));
     let offsetMin = getTimeZoneOffsetMinutes('Africa/Cairo', utcGuess);
     let utcInstant = new Date(utcGuess.getTime() - offsetMin * 60_000);
 
@@ -164,9 +164,17 @@ export function YouTubeUploadModal({
       if (data?.title) setYoutubeTitle(data.title);
       if (typeof data?.description === 'string') setYoutubeDescription(data.description);
       if (Array.isArray(data?.tags)) setYoutubeTags(data.tags.join(', '));
-    } catch (err: any) {
-      const message = err?.response?.data?.message || err?.message || 'Failed to generate SEO metadata.';
-      setSeoError(String(message));
+    } catch (err: unknown) {
+      const messageFromApi = (() => {
+        if (typeof err === 'object' && err !== null && 'response' in err) {
+          const response = (err as { response?: { data?: { message?: unknown } } }).response;
+          const message = response?.data?.message;
+          if (typeof message === 'string' && message.trim()) return message;
+        }
+        if (err instanceof Error && err.message.trim()) return err.message;
+        return null;
+      })();
+      setSeoError(messageFromApi ?? 'Failed to generate SEO metadata.');
     } finally {
       setIsGeneratingSeo(false);
     }
@@ -197,9 +205,17 @@ export function YouTubeUploadModal({
       if (!url) throw new Error('Missing YouTube auth url');
 
       window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (err: any) {
-      const message = err?.response?.data?.message || err?.message || 'Failed to start YouTube connection.';
-      setUploadError(String(message));
+    } catch (err: unknown) {
+      const messageFromApi = (() => {
+        if (typeof err === 'object' && err !== null && 'response' in err) {
+          const response = (err as { response?: { data?: { message?: unknown } } }).response;
+          const message = response?.data?.message;
+          if (typeof message === 'string' && message.trim()) return message;
+        }
+        if (err instanceof Error && err.message.trim()) return err.message;
+        return null;
+      })();
+      setUploadError(messageFromApi ?? 'Failed to start YouTube connection.');
     } finally {
       setIsConnectingYouTube(false);
     }
@@ -253,7 +269,7 @@ export function YouTubeUploadModal({
 
     setIsUploadingToYouTube(true);
     try {
-      let tags = parseTagsPreserveOrder(youtubeTags);
+      const tags = parseTagsPreserveOrder(youtubeTags);
       tags.join(',');
       const token = localStorage.getItem('token');
 
@@ -291,9 +307,17 @@ export function YouTubeUploadModal({
       const url = `https://www.youtube.com/watch?v=${videoId}`;
       setUploadedYoutubeUrl(url);
       window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (error: any) {
-      const message = error?.response?.data?.message || error?.message || 'Failed to upload to YouTube. Please try again.';
-      setUploadError(String(message));
+    } catch (error: unknown) {
+      const messageFromApi = (() => {
+        if (typeof error === 'object' && error !== null && 'response' in error) {
+          const response = (error as { response?: { data?: { message?: unknown } } }).response;
+          const message = response?.data?.message;
+          if (typeof message === 'string' && message.trim()) return message;
+        }
+        if (error instanceof Error && error.message.trim()) return error.message;
+        return null;
+      })();
+      setUploadError(messageFromApi ?? 'Failed to upload to YouTube. Please try again.');
     } finally {
       setIsUploadingToYouTube(false);
     }
@@ -664,7 +688,7 @@ export function YouTubeUploadModal({
                       />
                     </svg>
                     <p className="text-xs text-purple-900 leading-relaxed">
-                      <span className="font-semibold">Note:</span> Scheduled videos will be set to "Private" until the publish time. Make sure to schedule at least 2 minutes in the future.
+                      <span className="font-semibold">Note:</span> Scheduled videos will be set to &quot;Private&quot; until the publish time. Make sure to schedule at least 2 minutes in the future.
                     </p>
                   </div>
                 </div>

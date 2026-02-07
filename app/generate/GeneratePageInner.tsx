@@ -11,7 +11,6 @@ import {
 import {
   Video,
   Image as ImageIcon,
-  Loader2,
   FileText,
   Play,
   Mic,
@@ -78,12 +77,25 @@ async function sha256HexForFile(file: File): Promise<string | null> {
 export type SentenceItem = {
   id: string;
   text: string;
+  mediaMode?: 'single' | 'frames';
+  sceneTab?: 'image' | 'video';
   image?: File | null;
   imageUrl?: string | null;
   video?: File | null;
   videoUrl?: string | null;
+  savedVideoId?: string | null;
+  startImage?: File | null;
+  startImageUrl?: string | null;
+  startImagePrompt?: string | null;
+  startSavedImageId?: string | null;
+  endImage?: File | null;
+  endImageUrl?: string | null;
+  endImagePrompt?: string | null;
+  endSavedImageId?: string | null;
   imagePrompt?: string | null;
   isGeneratingImage?: boolean;
+  isGeneratingStartImage?: boolean;
+  isGeneratingEndImage?: boolean;
   isSavingImage?: boolean;
   savedImageId?: string | null;
   isFromLibrary?: boolean;
@@ -113,6 +125,11 @@ export function GeneratePageInner() {
   const params = useParams<{ id?: string }>();
   const routeChatId = typeof params?.id === 'string' ? params.id : null;
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // When a draft is saved/loaded, we keep its script id so we can attach
+  // sentence-level media (start/end frames, per-sentence video) without
+  // destructive script-wide updates.
+  const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
   const videoSectionRef = useRef<HTMLDivElement | null>(null);
   const { alertState, showAlert, closeAlert } = useAlertModal();
   const { showToast, ToastContainer } = useToast();
@@ -178,9 +195,13 @@ export function GeneratePageInner() {
   const [syncVoicesResult, setSyncVoicesResult] = useState<string | null>(null);
   const [isGeneratingAllImages, setIsGeneratingAllImages] = useState(false);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
-  const [libraryTargetIndex, setLibraryTargetIndex] = useState<number | null>(
-    null,
-  );
+  const [libraryTarget, setLibraryTarget] = useState<
+    | {
+      index: number;
+      which: 'single' | 'start' | 'end';
+    }
+    | null
+  >(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(
     routeChatId,
   );
@@ -271,32 +292,51 @@ export function GeneratePageInner() {
       scriptSubject === 'religious (Islam)' ? scriptSubjectContent : '',
     );
 
-    const sortedSentences = (primaryScript.sentences ?? [])
+    type RestorableSentence = {
+      id: string;
+      text: string;
+      index: number;
+      image?: { id: string; image: string } | null;
+      video?: { id: string; video: string } | null;
+      isSuspense?: boolean;
+    };
+
+    const sortedSentences: RestorableSentence[] = (primaryScript.sentences ?? [])
       .slice()
       .sort((a, b) => a.index - b.index);
 
     const now = Date.now();
-    const restored: SentenceItem[] = (sortedSentences.length ? sortedSentences : [{
-      id: `${now}-0`,
-      text: primaryScript.script,
-      index: 0,
-      image: null,
-    } as any])
+    const sentencesForRestore: RestorableSentence[] =
+      sortedSentences.length
+        ? sortedSentences
+        : [
+            {
+              id: `${now}-0`,
+              text: primaryScript.script,
+              index: 0,
+              image: null,
+            },
+          ];
+
+    const restored: SentenceItem[] = sentencesForRestore
       .map((s, idx) => {
         const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
+        const hasVideo = !isSubscribe && Boolean(s.video?.video);
         return {
           id: s.id || `${now}-${idx}`,
           text: s.text,
+          mediaMode: isSubscribe ? 'frames' : hasVideo ? 'frames' : 'single',
+          sceneTab: isSubscribe ? 'video' : hasVideo ? 'video' : 'image',
           image: null,
           imageUrl: isSubscribe ? null : s.image?.image ?? null,
           video: null,
-          videoUrl: isSubscribe ? '/subscribe.mp4' : null,
+          videoUrl: isSubscribe ? '/subscribe.mp4' : s.video?.video ?? null,
           imagePrompt: null,
           isGeneratingImage: false,
           isSavingImage: false,
           savedImageId: isSubscribe ? null : s.image?.id ?? null,
           isFromLibrary: !!s.image,
-          isSuspense: !isSubscribe && Boolean((s as any).isSuspense),
+          isSuspense: !isSubscribe && Boolean(s.isSuspense),
         };
       });
 
@@ -308,6 +348,8 @@ export function GeneratePageInner() {
       restored.push({
         id: `${now}-subscribe`,
         text: SUBSCRIBE_SENTENCE,
+        mediaMode: 'frames',
+        sceneTab: 'video',
         image: null,
         imageUrl: null,
         video: null,
@@ -661,7 +703,13 @@ export function GeneratePageInner() {
 
       await audio.play();
     } catch (error) {
-      if ((error as any)?.name !== 'AbortError') {
+      const isAbortError =
+        typeof error === 'object' &&
+        error !== null &&
+        'name' in error &&
+        (error as { name?: unknown }).name === 'AbortError';
+
+      if (!isAbortError) {
         console.error('Voice preview failed', error);
         showToast('Failed to preview voice. Please try again.', 'error');
       }
@@ -921,12 +969,40 @@ export function GeneratePageInner() {
       showAlert('Please split the script into sentences first', { type: 'warning' });
       return;
     }
-    const missingMedia = sentences.some(
-      (s) => !s.image && !s.imageUrl && !s.video && !s.videoUrl,
-    );
-    if (missingMedia) {
+
+    const subscribeSentence = 'Please Subscribe & Help us reach out to more people';
+
+    const missingMediaForImageTab = sentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (text === subscribeSentence) return false;
+      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      if (tab !== 'image') return false;
+      return !s.image && !s.imageUrl;
+    });
+
+    if (missingMediaForImageTab) {
+      showAlert('Please provide an image for each sentence on the Image tab.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    const missingVideoTab = sentences
+      .map((s, index) => {
+        const text = String(s.text ?? '').trim();
+        if (text === subscribeSentence) return null;
+        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+        if (tab !== 'video') return null;
+
+        const url = String(s.videoUrl ?? '').trim();
+        const hasHttpUrl = url.startsWith('http://') || url.startsWith('https://');
+        return hasHttpUrl ? null : index;
+      })
+      .filter((v): v is number => v !== null);
+
+    if (missingVideoTab.length > 0) {
       showAlert(
-        'Please provide an image or a video for each sentence (upload or AI-generated)',
+        `You are on the Video tab for ${missingVideoTab.length} sentence(s), but no video is generated yet. Generate the sentence video or switch back to the Image tab.`,
         { type: 'warning' },
       );
       return;
@@ -939,10 +1015,34 @@ export function GeneratePageInner() {
       const form = new FormData();
       form.append('voiceOver', voiceOver);
 
-      const sentencePayload = sentences.map((s) => ({
-        text: s.text,
-        isSuspense: Boolean(s.isSuspense),
-      }));
+      const sentencePayload = sentences.map((s) => {
+        const text = String(s.text ?? '');
+        const trimmed = text.trim();
+        if (trimmed === subscribeSentence) {
+          return {
+            text,
+            isSuspense: Boolean(s.isSuspense),
+            mediaType: 'video' as const,
+            videoUrl: '/subscribe.mp4',
+          };
+        }
+
+        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+        if (tab === 'video') {
+          return {
+            text,
+            isSuspense: Boolean(s.isSuspense),
+            mediaType: 'video' as const,
+            videoUrl: String(s.videoUrl ?? '').trim(),
+          };
+        }
+
+        return {
+          text,
+          isSuspense: Boolean(s.isSuspense),
+          mediaType: 'image' as const,
+        };
+      });
       form.append('sentences', JSON.stringify(sentencePayload));
       form.append('scriptLength', scriptLength);
       if (voiceDuration && voiceDuration > 0) {
@@ -965,47 +1065,54 @@ export function GeneratePageInner() {
         enableZoomRotateTransitions ? 'true' : 'false',
       );
 
-      // Prepare image files for each sentence, including library images with URLs
-      const imageFiles = await Promise.all(
-        sentences.map(async (s, index) => {
-          if (s.image) {
-            return s.image;
-          }
+      // Prepare image files only for sentences on the Image tab (excluding the subscribe sentence).
+      // The backend will align these uploads to image-tab sentences in sentence order.
+      const imageUploads: File[] = [];
 
-          if (s.imageUrl?.startsWith('data:')) {
-            // AI-generated base64 image
-            return dataUrlToFile(
-              s.imageUrl,
-              `sentence-${index + 1}.png`,
-            );
-          }
+      // eslint-disable-next-line no-restricted-syntax
+      for (let index = 0; index < sentences.length; index += 1) {
+        const s = sentences[index];
+        const text = String(s?.text ?? '').trim();
+        if (text === subscribeSentence) continue;
 
-          if (s.imageUrl) {
-            // Image selected from library (Cloudinary or remote URL) – download to a File
-            try {
-              const res = await fetch(s.imageUrl);
-              if (!res.ok) return null;
-              const blob = await res.blob();
-              return new File(
-                [blob],
-                `sentence-${index + 1}.png`,
-                { type: blob.type || 'image/png' },
-              );
-            } catch {
-              return null;
-            }
-          }
+        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+        if (tab !== 'image') continue;
 
-          return null;
-        }),
-      );
-
-      // Append images in the same order as sentences
-      imageFiles.forEach((file) => {
-        if (file) {
-          form.append('images', file);
+        if (s.image) {
+          imageUploads.push(s.image);
+          continue;
         }
-      });
+
+        if (s.imageUrl?.startsWith('data:')) {
+          imageUploads.push(dataUrlToFile(s.imageUrl, `sentence-${index + 1}.png`));
+          continue;
+        }
+
+        if (s.imageUrl) {
+          try {
+            const res = await fetch(s.imageUrl);
+            if (!res.ok) {
+              throw new Error('Failed to fetch image URL');
+            }
+            const blob = await res.blob();
+            imageUploads.push(
+              new File([blob], `sentence-${index + 1}.png`, {
+                type: blob.type || 'image/png',
+              }),
+            );
+            continue;
+          } catch (error) {
+            console.error('Failed to prepare image upload', error);
+            showAlert(
+              `Failed to prepare image for sentence ${index + 1}. Please try re-selecting the image.`,
+              { type: 'error' },
+            );
+            return;
+          }
+        }
+      }
+
+      imageUploads.forEach((file) => form.append('images', file));
 
       const res = await fetch(`${API_URL}/videos`, {
         method: 'POST',
@@ -1182,13 +1289,24 @@ export function GeneratePageInner() {
       const items: SentenceItem[] = processedSentences.map((text, idx) => ({
         id: `${now}-${idx}`,
         text,
+        mediaMode: 'single',
+        sceneTab: text === SUBSCRIBE_SENTENCE ? 'video' : 'image',
         image: null,
         imageUrl: null,
         video: text === SUBSCRIBE_SENTENCE ? null : null,
         videoUrl: text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : null,
+        startImage: null,
+        startImageUrl: null,
+        startImagePrompt: null,
+        startSavedImageId: null,
+        endImage: null,
+        endImageUrl: null,
+        endImagePrompt: null,
+        endSavedImageId: null,
         isSuspense: false,
       }));
 
+      setActiveScriptId(null);
       setSentences(items);
     } catch (error) {
       console.error('Split script failed', error);
@@ -1199,6 +1317,7 @@ export function GeneratePageInner() {
   };
 
   const handleResetScriptAndSentences = () => {
+    setActiveScriptId(null);
     setScript('');
     setSentences([]);
     setSplitError(null);
@@ -1226,9 +1345,13 @@ export function GeneratePageInner() {
       text: string;
       index: number;
       image?: { id: string; image: string; prompt?: string | null } | null;
+      startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+      endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+      video?: { id: string; video: string } | null;
       isSuspense?: boolean;
     }[];
   }) => {
+    setActiveScriptId(draft.id);
     setScript(draft.script);
 
     const loadedSubject = (draft.subject ?? '').trim() || 'religious (Islam)';
@@ -1260,12 +1383,30 @@ export function GeneratePageInner() {
       const mapped: SentenceItem[] = sorted.map((s) => ({
         id: s.id,
         text: s.text,
+        mediaMode: s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
+        sceneTab:
+          (s.text || '').trim() === SUBSCRIBE_SENTENCE
+            ? 'video'
+            : s.video
+              ? 'video'
+              : 'image',
         image: null,
         imageUrl: s.image?.image ?? null,
+        startImage: null,
+        startImageUrl: s.startFrameImage?.image ?? null,
+        startImagePrompt: s.startFrameImage?.prompt ?? null,
+        startSavedImageId: s.startFrameImage?.id ?? null,
+        endImage: null,
+        endImageUrl: s.endFrameImage?.image ?? null,
+        endImagePrompt: s.endFrameImage?.prompt ?? null,
+        endSavedImageId: s.endFrameImage?.id ?? null,
         video: s.text === SUBSCRIBE_SENTENCE ? null : null,
-        videoUrl: s.text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : null,
+        videoUrl: s.text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : s.video?.video ?? null,
+        savedVideoId: s.video?.id ?? null,
         imagePrompt: s.image?.prompt ?? null,
         isGeneratingImage: false,
+        isGeneratingStartImage: false,
+        isGeneratingEndImage: false,
         isSavingImage: false,
         savedImageId: s.image?.id ?? null,
         isFromLibrary: !!s.image,
@@ -1391,13 +1532,99 @@ export function GeneratePageInner() {
         i === index
           ? {
             ...item,
+            mediaMode: 'single',
+            sceneTab: 'image',
             image: isVideo ? null : file,
-            imageUrl: isVideo ? item.imageUrl : item.imageUrl,
+            imageUrl: isVideo ? null : null,
             video: isVideo ? file : null,
-            videoUrl: isVideo ? null : item.videoUrl,
+            videoUrl: isVideo ? null : null,
+            savedVideoId: null,
+            imagePrompt: isVideo ? null : item.imagePrompt,
+            savedImageId: null,
+            isFromLibrary: false,
           }
           : item,
       ),
+    );
+  };
+
+  const handleSentenceMediaModeChange = (
+    index: number,
+    mode: 'single' | 'frames',
+  ) => {
+    setSentences((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+
+        // Important: do not clear previously generated/uploaded media when toggling.
+        // Users may want to switch modes temporarily and come back without losing frames.
+        return {
+          ...item,
+          mediaMode: mode,
+          sceneTab: mode === 'frames' ? 'video' : 'image',
+        };
+      }),
+    );
+  };
+
+  const handleSentenceFrameImageUpload = (
+    index: number,
+    which: 'start' | 'end',
+    e: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const target = sentences[index];
+
+    // Uploaded start/end frames are not persisted unless the draft exists.
+    // Require a saved/loaded draft so the user doesn't lose frame images on refresh.
+    // if (!activeScriptId || !target || !isUuid(target.id)) {
+    //   showAlert('Save/load this script draft first to persist frame images.', {
+    //     type: 'warning',
+    //   });
+    //   // Reset input so selecting the same file again still triggers onChange.
+    //   // eslint-disable-next-line no-param-reassign
+    //   e.target.value = '';
+    //   return;
+    // }
+
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    if (!file.type?.startsWith('image/')) return;
+
+    setSentences((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        return {
+          ...item,
+          mediaMode: 'frames',
+          startImage: which === 'start' ? file : item.startImage ?? null,
+          startImageUrl: which === 'start' ? null : item.startImageUrl ?? null,
+          startImagePrompt: which === 'start' ? null : item.startImagePrompt ?? null,
+          startSavedImageId: which === 'start' ? null : item.startSavedImageId ?? null,
+          endImage: which === 'end' ? file : item.endImage ?? null,
+          endImageUrl: which === 'end' ? null : item.endImageUrl ?? null,
+          endImagePrompt: which === 'end' ? null : item.endImagePrompt ?? null,
+          endSavedImageId: which === 'end' ? null : item.endSavedImageId ?? null,
+        };
+      }),
+    );
+  };
+
+  const removeSentenceFrameImage = (index: number, which: 'start' | 'end') => {
+    setSentences((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        return {
+          ...item,
+          startImage: which === 'start' ? null : item.startImage ?? null,
+          startImageUrl: which === 'start' ? null : item.startImageUrl ?? null,
+          startImagePrompt: which === 'start' ? null : item.startImagePrompt ?? null,
+          startSavedImageId: which === 'start' ? null : item.startSavedImageId ?? null,
+          endImage: which === 'end' ? null : item.endImage ?? null,
+          endImageUrl: which === 'end' ? null : item.endImageUrl ?? null,
+          endImagePrompt: which === 'end' ? null : item.endImagePrompt ?? null,
+          endSavedImageId: which === 'end' ? null : item.endSavedImageId ?? null,
+        };
+      }),
     );
   };
 
@@ -1411,8 +1638,20 @@ export function GeneratePageInner() {
             imageUrl: null,
             video: null,
             videoUrl: null,
+            savedVideoId: null,
+            startImage: null,
+            startImageUrl: null,
+            startImagePrompt: null,
+            startSavedImageId: null,
+            endImage: null,
+            endImageUrl: null,
+            endImagePrompt: null,
+            endSavedImageId: null,
             imagePrompt: null,
+            savedImageId: null,
             isFromLibrary: false,
+            sceneTab: 'image',
+            mediaMode: 'single',
           }
           : item,
       ),
@@ -1564,6 +1803,253 @@ export function GeneratePageInner() {
     }
   };
 
+  const isUuid = (value: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    );
+
+  const handleGenerateSentenceFrameImage = async (
+    index: number,
+    which: 'start' | 'end',
+  ) => {
+    const target = sentences[index];
+    if (!target) return;
+
+    // if (!activeScriptId || !isUuid(target.id)) {
+    //   showAlert('Save/load this script draft first to persist frame images.', {
+    //     type: 'warning',
+    //   });
+    //   return;
+    // }
+
+    setSentences((prev) =>
+      prev.map((item, i) =>
+        i === index
+          ? {
+              ...item,
+              isGeneratingStartImage:
+                which === 'start' ? true : item.isGeneratingStartImage,
+              isGeneratingEndImage:
+                which === 'end' ? true : item.isGeneratingEndImage,
+            }
+          : item,
+      ),
+    );
+
+    try {
+      const continuityPrompt =
+        which === 'end'
+          ? (target.startImagePrompt ?? target.imagePrompt ?? undefined)
+          : undefined;
+
+      const res = await api.post('/ai/generate-image-from-sentence', {
+        sentence: target.text,
+        script,
+        subject: scriptSubject,
+        style: scriptStyle,
+        scriptLength,
+        isShort,
+        frameType: which,
+        continuityPrompt,
+      });
+
+      const data = res.data as {
+        prompt: string;
+        imageBase64?: string;
+        imageUrl?: string;
+        savedImageId?: string;
+      };
+
+      const imageUrl =
+        (data.imageUrl && String(data.imageUrl)) ||
+        (data.imageBase64
+          ? `data:image/png;base64,${data.imageBase64}`
+          : null);
+
+      if (!imageUrl) {
+        throw new Error('Image generation returned no imageUrl');
+      }
+
+      const savedId = data.savedImageId ?? null;
+
+      setSentences((prev) =>
+        prev.map((item, i) => {
+          if (i !== index) return item;
+          if (which === 'start') {
+            return {
+              ...item,
+              startImageUrl: imageUrl,
+              startImagePrompt: data.prompt,
+              startSavedImageId: savedId,
+              isGeneratingStartImage: false,
+            };
+          }
+          return {
+            ...item,
+            endImageUrl: imageUrl,
+            endImagePrompt: data.prompt,
+            endSavedImageId: savedId,
+            isGeneratingEndImage: false,
+          };
+        }),
+      );
+
+      if (!savedId) {
+        showAlert('Frame image generated but not saved. Please try again.', {
+          type: 'warning',
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Generate frame image failed', error);
+      setSentences((prev) =>
+        prev.map((item, i) =>
+          i === index
+            ? {
+                ...item,
+                isGeneratingStartImage:
+                  which === 'start' ? false : item.isGeneratingStartImage,
+                isGeneratingEndImage:
+                  which === 'end' ? false : item.isGeneratingEndImage,
+              }
+            : item,
+        ),
+      );
+      setSplitError('Failed to generate frame image for this sentence.');
+    }
+  };
+
+  const handleGenerateSentenceVideo = async (index: number) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+
+    const scriptId = String(activeScriptId ?? '').trim();
+    const canUsePersistedEndpoint = Boolean(scriptId) && isUuid(sentence.id);
+
+    try {
+      showToast('Generating video for this sentence…', 'info');
+
+      const prompt = String(sentence.text ?? '').trim();
+      if (!prompt) {
+        showToast('Sentence text is required to generate a video.', 'error');
+        return;
+      }
+
+      const isLooping = !sentence.endImage && !sentence.endImageUrl;
+
+      const resolveFrameFile = async (
+        which: 'start' | 'end',
+      ): Promise<File | null> => {
+        if (which === 'start') {
+          if (sentence.startImage) return sentence.startImage;
+          if (sentence.startImageUrl?.startsWith('data:')) {
+            return dataUrlToFile(sentence.startImageUrl, `sentence-${index + 1}-start.png`);
+          }
+          if (sentence.startImageUrl) {
+            const r = await fetch(sentence.startImageUrl);
+            if (!r.ok) return null;
+            const blob = await r.blob();
+            return new File([blob], `sentence-${index + 1}-start.png`, {
+              type: blob.type || 'image/png',
+            });
+          }
+          return null;
+        }
+
+        // end frame
+        if (sentence.endImage) return sentence.endImage;
+        if (sentence.endImageUrl?.startsWith('data:')) {
+          return dataUrlToFile(sentence.endImageUrl, `sentence-${index + 1}-end.png`);
+        }
+        if (sentence.endImageUrl) {
+          const r = await fetch(sentence.endImageUrl);
+          if (!r.ok) return null;
+          const blob = await r.blob();
+          return new File([blob], `sentence-${index + 1}-end.png`, {
+            type: blob.type || 'image/png',
+          });
+        }
+        return null;
+      };
+
+      const startFrame = await resolveFrameFile('start');
+      if (!startFrame) {
+        showToast('Start frame image is required.', 'error');
+        return;
+      }
+
+      const endFrame = isLooping ? null : await resolveFrameFile('end');
+      if (!isLooping && !endFrame) {
+        showToast('End frame image is required (or enable looping).', 'error');
+        return;
+      }
+
+      const form = new FormData();
+      form.append('startFrame', startFrame);
+      if (endFrame) {
+        form.append('endFrame', endFrame);
+      }
+      form.append('isLooping', isLooping ? 'true' : 'false');
+      form.append('prompt', prompt);
+
+      let url: string | null = null;
+      let savedVideoId: string | null = null;
+
+      if (canUsePersistedEndpoint) {
+        const res = await api.post(
+          `/scripts/${encodeURIComponent(scriptId)}/sentences/${encodeURIComponent(
+            sentence.id,
+          )}/generate-video`,
+          form,
+          {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          },
+        );
+
+        const updatedScript = res.data as {
+          sentences?: Array<{
+            id: string;
+            video?: { id: string; video: string } | null;
+          }>;
+        };
+
+        const updated = (updatedScript.sentences ?? []).find(
+          (s) => s.id === sentence.id,
+        );
+
+        url = updated?.video?.video ?? null;
+        savedVideoId = updated?.video?.id ?? null;
+      } else {
+        const res = await api.post('/ai/generate-video-from-frames', form, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
+
+        url = (res.data as { videoUrl?: string })?.videoUrl ?? null;
+        savedVideoId = null;
+      }
+
+      if (!url) {
+        showToast('Video generated but no URL was returned.', 'warning');
+        return;
+      }
+
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index ? { ...s, videoUrl: url, savedVideoId } : s,
+        ),
+      );
+
+      showToast('Sentence video generated.', 'success');
+    } catch (error) {
+      console.error('Generate sentence video failed', error);
+      showToast('Failed to generate sentence video. Please try again.', 'error');
+    }
+  };
+
   const handleGenerateAllSentenceImages = async () => {
     if (!sentences.length || isGeneratingAllImages) return;
 
@@ -1655,8 +2141,11 @@ export function GeneratePageInner() {
     }
   };
 
-  const handleSelectFromLibrary = (index: number) => {
-    setLibraryTargetIndex(index);
+  const handleSelectFromLibrary = (
+    index: number,
+    which: 'single' | 'start' | 'end' = 'single',
+  ) => {
+    setLibraryTarget({ index, which });
     setIsLibraryModalOpen(true);
   };
 
@@ -1665,24 +2154,44 @@ export function GeneratePageInner() {
     id: string,
     prompt?: string | null,
   ) => {
-    if (libraryTargetIndex === null) return;
+    if (!libraryTarget) return;
+
+    const { index, which } = libraryTarget;
 
     setSentences((prev) =>
       prev.map((item, i) =>
-        i === libraryTargetIndex
-          ? {
-            ...item,
-            imageUrl,
-            image: null,
-            imagePrompt: prompt ?? null,
-            isFromLibrary: true,
-            savedImageId: id,
-          }
+        i === index
+          ? which === 'single'
+            ? {
+              ...item,
+              imageUrl,
+              image: null,
+              imagePrompt: prompt ?? null,
+              isFromLibrary: true,
+              savedImageId: id,
+            }
+            : which === 'start'
+              ? {
+                ...item,
+                startImageUrl: imageUrl,
+                startImage: null,
+                startImagePrompt: prompt ?? null,
+                isFromLibrary: true,
+                startSavedImageId: id,
+              }
+              : {
+                ...item,
+                endImageUrl: imageUrl,
+                endImage: null,
+                endImagePrompt: prompt ?? null,
+                isFromLibrary: true,
+                endSavedImageId: id,
+              }
           : item,
       ),
     );
 
-    setLibraryTargetIndex(null);
+    setLibraryTarget(null);
   };
 
   const handleSyncElevenLabsVoices = async () => {
@@ -1829,7 +2338,70 @@ export function GeneratePageInner() {
     setIsSavingDraft(true);
 
     try {
-      const sentencePayload: { text: string; image_id?: string; isSuspense?: boolean }[] = [];
+      const coerceImageFile = async (params: {
+        file?: File | null;
+        url?: string | null;
+        filename: string;
+      }): Promise<File | null> => {
+        if (params.file) return params.file;
+        const url = String(params.url ?? '').trim();
+        if (!url) return null;
+
+        if (url.startsWith('data:')) {
+          return dataUrlToFile(url, params.filename);
+        }
+
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return null;
+          const blob = await res.blob();
+          const mimeType = String(blob.type ?? '').trim();
+          if (!mimeType.startsWith('image/')) return null;
+          const ext = mimeType === 'image/jpeg' ? 'jpg' : 'png';
+          const base = params.filename.replace(/\.[a-z0-9]+$/i, '');
+          return new File([blob], `${base}.${ext}`, { type: mimeType || 'image/png' });
+        } catch {
+          return null;
+        }
+      };
+
+      const uploadImageIfNeeded = async (params: {
+        existingId?: string | null;
+        file?: File | null;
+        url?: string | null;
+        filename: string;
+        prompt?: string | null;
+      }): Promise<string | null> => {
+        if (params.existingId) return params.existingId;
+        if (!params.file && !params.url) return null;
+
+        const fileToUpload = await coerceImageFile({
+          file: params.file,
+          url: params.url,
+          filename: params.filename,
+        });
+        if (!fileToUpload) return null;
+
+        const formData = new FormData();
+        formData.append('image', fileToUpload);
+        if ((params.prompt ?? '').trim()) {
+          formData.append('prompt', (params.prompt ?? '').trim());
+        }
+
+        const response = await api.post<{ id: string }>('/images', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data.id;
+      };
+
+      const sentencePayload: {
+        text: string;
+        image_id?: string;
+        start_frame_image_id?: string;
+        end_frame_image_id?: string;
+        video_id?: string;
+        isSuspense?: boolean;
+      }[] = [];
 
       // Ensure any uploaded or generated images are saved to the images table
       // so their IDs can be linked to sentences in the draft.
@@ -1837,54 +2409,36 @@ export function GeneratePageInner() {
       // eslint-disable-next-line no-restricted-syntax
       for (let index = 0; index < sentences.length; index += 1) {
         const s = sentences[index];
-        let imageId = s.savedImageId ?? null;
+        const imageId = await uploadImageIfNeeded({
+          existingId: s.savedImageId ?? null,
+          file: s.image,
+          url: s.imageUrl,
+          filename: `sentence-${index + 1}.png`,
+          prompt: s.imagePrompt ?? null,
+        });
 
-        if (!imageId && (s.image || s.imageUrl)) {
-          let fileToUpload: File | null = null;
+        const startFrameImageId = await uploadImageIfNeeded({
+          existingId: s.startSavedImageId ?? null,
+          file: s.startImage,
+          url: s.startImageUrl,
+          filename: `sentence-${index + 1}-start.png`,
+          prompt: s.startImagePrompt ?? null,
+        });
 
-          if (s.image) {
-            fileToUpload = s.image;
-          } else if (s.imageUrl?.startsWith('data:')) {
-            fileToUpload = dataUrlToFile(
-              s.imageUrl,
-              `sentence-${index + 1}.png`,
-            );
-          } else if (s.imageUrl) {
-            // If we only have a remote URL, fetch it and upload so the draft can restore it.
-            const res = await fetch(s.imageUrl);
-            if (res.ok) {
-              const blob = await res.blob();
-              const ext = blob.type === 'image/jpeg' ? 'jpg' : 'png';
-              fileToUpload = new File([blob], `sentence-${index + 1}.${ext}`, {
-                type: blob.type || 'image/png',
-              });
-            }
-          }
-
-          if (fileToUpload) {
-            const formData = new FormData();
-            formData.append('image', fileToUpload);
-            if ((s.imagePrompt ?? '').trim()) {
-              formData.append('prompt', (s.imagePrompt ?? '').trim());
-            }
-
-            const response = await api.post<{ id: string }>(
-              '/images',
-              formData,
-              {
-                headers: {
-                  'Content-Type': 'multipart/form-data',
-                },
-              },
-            );
-
-            imageId = response.data.id;
-          }
-        }
+        const endFrameImageId = await uploadImageIfNeeded({
+          existingId: s.endSavedImageId ?? null,
+          file: s.endImage,
+          url: s.endImageUrl,
+          filename: `sentence-${index + 1}-end.png`,
+          prompt: s.endImagePrompt ?? null,
+        });
 
         sentencePayload.push({
           text: s.text,
           image_id: imageId ?? undefined,
+          start_frame_image_id: startFrameImageId ?? undefined,
+          end_frame_image_id: endFrameImageId ?? undefined,
+          video_id: s.savedVideoId ?? undefined,
           isSuspense: Boolean(s.isSuspense) && (s.text || '').trim() !== SUBSCRIBE_SENTENCE,
         });
       }
@@ -1902,7 +2456,14 @@ export function GeneratePageInner() {
         script: string;
         voice_id?: string;
         video_url?: string;
-        sentences?: { text: string; image_id?: string; isSuspense?: boolean }[];
+        sentences?: {
+          text: string;
+          image_id?: string;
+          start_frame_image_id?: string;
+          end_frame_image_id?: string;
+          video_id?: string;
+          isSuspense?: boolean;
+        }[];
         subject?: string;
         subject_content?: string | null;
         length?: string;
@@ -1912,7 +2473,7 @@ export function GeneratePageInner() {
       } = {
         script,
         voice_id: voiceId ?? undefined,
-        video_url: videoUrl ?? undefined,
+        video_url: activeScriptId ? undefined : videoUrl ?? undefined,
         sentences: sentencePayload.length > 0 ? sentencePayload : undefined,
         subject: scriptSubject,
         subject_content:
@@ -1924,9 +2485,108 @@ export function GeneratePageInner() {
           referenceScripts.length > 0 ? referenceScripts.map((s) => s.id) : undefined,
       };
 
-      await api.post('/scripts', payload);
+      const upserted = activeScriptId
+        ? await api.patch(`/scripts/${encodeURIComponent(activeScriptId)}`, payload)
+        : await api.post('/scripts', payload);
 
-      showAlert('Draft saved successfully.', { type: 'success' });
+      const upsertedScript = upserted.data as {
+        id: string;
+        sentences?: {
+          id: string;
+          text: string;
+          index: number;
+          image?: { id: string; image: string; prompt?: string | null } | null;
+          startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+          endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+          video?: { id: string; video: string } | null;
+          isSuspense?: boolean;
+        }[];
+      };
+
+      if (upsertedScript?.id) {
+        setActiveScriptId(upsertedScript.id);
+      }
+
+      if (upsertedScript?.sentences && upsertedScript.sentences.length > 0) {
+        const sorted = [...upsertedScript.sentences].sort((a, b) => a.index - b.index);
+        const mapped: SentenceItem[] = sorted.map((s) => ({
+          id: s.id,
+          text: s.text,
+          mediaMode: s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
+          sceneTab:
+            (s.text || '').trim() === SUBSCRIBE_SENTENCE
+              ? 'video'
+              : s.video
+                ? 'video'
+                : 'image',
+          image: null,
+          imageUrl: s.image?.image ?? null,
+          startImage: null,
+          startImageUrl: s.startFrameImage?.image ?? null,
+          startImagePrompt: s.startFrameImage?.prompt ?? null,
+          startSavedImageId: s.startFrameImage?.id ?? null,
+          endImage: null,
+          endImageUrl: s.endFrameImage?.image ?? null,
+          endImagePrompt: s.endFrameImage?.prompt ?? null,
+          endSavedImageId: s.endFrameImage?.id ?? null,
+          video: s.text === SUBSCRIBE_SENTENCE ? null : null,
+          videoUrl: s.text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : s.video?.video ?? null,
+          savedVideoId: s.video?.id ?? null,
+          imagePrompt: s.image?.prompt ?? null,
+          isGeneratingImage: false,
+          isGeneratingStartImage: false,
+          isGeneratingEndImage: false,
+          isSavingImage: false,
+          savedImageId: s.image?.id ?? null,
+          isFromLibrary: !!s.image,
+          isSuspense: Boolean(s.isSuspense) && s.text !== SUBSCRIBE_SENTENCE,
+        }));
+
+        setSentences(mapped);
+
+        // Persist any local sentence-level videos (generated via non-persistent endpoint or uploaded)
+        // once we have real sentence IDs.
+        for (let index = 0; index < mapped.length; index += 1) {
+          const local = sentences[index];
+          const persisted = mapped[index];
+          if (!local || !persisted) continue;
+          if ((persisted.text || '').trim() === SUBSCRIBE_SENTENCE) continue;
+          if (persisted.savedVideoId) continue;
+
+          const hasFile = Boolean(local.video);
+          const url = String(local.videoUrl ?? '').trim();
+          const hasHttpUrl = url.startsWith('http://') || url.startsWith('https://');
+
+          if (!hasFile && !hasHttpUrl) continue;
+
+          const formData = new FormData();
+          if (hasFile && local.video) {
+            formData.append('video', local.video);
+          } else {
+            formData.append('videoUrl', url);
+          }
+
+          const res = await api.post<{ id: string; video: string }>(
+            `/scripts/${encodeURIComponent(upsertedScript.id)}/sentences/${encodeURIComponent(
+              persisted.id,
+            )}/video`,
+            formData,
+            { headers: { 'Content-Type': 'multipart/form-data' } },
+          );
+
+          setSentences((prev) =>
+            prev.map((item) =>
+              item.id === persisted.id
+                ? { ...item, videoUrl: res.data.video, savedVideoId: res.data.id }
+                : item,
+            ),
+          );
+        }
+      }
+
+      showAlert(activeScriptId ? 'Draft updated successfully.' : 'Draft saved successfully.', {
+        type: 'success',
+      });
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Save script draft failed', error);
@@ -2203,6 +2863,11 @@ export function GeneratePageInner() {
                   sentences={sentences}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
+                  onSentenceFrameImageUpload={handleSentenceFrameImageUpload}
+                  onRemoveSentenceFrameImage={removeSentenceFrameImage}
+                  onSentenceMediaModeChange={handleSentenceMediaModeChange}
+                  onGenerateSentenceFrameImage={handleGenerateSentenceFrameImage}
+                  onGenerateSentenceVideo={handleGenerateSentenceVideo}
                   onDeleteSentence={handleDeleteSentence}
                   onGenerateSentenceImage={handleGenerateSentenceImage}
                   onGenerateAllImages={handleGenerateAllSentenceImages}
@@ -2446,13 +3111,17 @@ export function GeneratePageInner() {
       <ImageLibraryModal
         isOpen={isLibraryModalOpen}
         selectedImageUrl={
-          libraryTargetIndex !== null
-            ? sentences[libraryTargetIndex]?.imageUrl ?? null
+          libraryTarget
+            ? libraryTarget.which === 'single'
+              ? sentences[libraryTarget.index]?.imageUrl ?? null
+              : libraryTarget.which === 'start'
+                ? sentences[libraryTarget.index]?.startImageUrl ?? null
+                : sentences[libraryTarget.index]?.endImageUrl ?? null
             : null
         }
         onClose={() => {
           setIsLibraryModalOpen(false);
-          setLibraryTargetIndex(null);
+          setLibraryTarget(null);
         }}
         onSelectImage={handleLibraryImageSelect}
       />

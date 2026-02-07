@@ -42,10 +42,18 @@ export default function LoginPage() {
       authService.setToken(response.access_token);
       authService.setUser(response.user);
       router.push('/generate');
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message || 'Invalid email or password'
-      );
+    } catch (err: unknown) {
+      const messageFromApi = (() => {
+        if (typeof err === 'object' && err !== null && 'response' in err) {
+          const response = (err as { response?: { data?: { message?: unknown } } }).response;
+          const message = response?.data?.message;
+          if (typeof message === 'string' && message.trim()) return message;
+        }
+        if (err instanceof Error && err.message.trim()) return err.message;
+        return null;
+      })();
+
+      setError(messageFromApi ?? 'Invalid email or password');
     } finally {
       setIsLoading(false);
     }

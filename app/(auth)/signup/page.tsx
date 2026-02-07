@@ -43,10 +43,18 @@ export default function SignupPage() {
       authService.setToken(response.access_token);
       authService.setUser(response.user);
       router.push('/generate');
-    } catch (err: any) {
-      setError(
-        err.response?.data?.message || 'Failed to create account'
-      );
+    } catch (err: unknown) {
+      const messageFromApi = (() => {
+        if (typeof err === 'object' && err !== null && 'response' in err) {
+          const response = (err as { response?: { data?: { message?: unknown } } }).response;
+          const message = response?.data?.message;
+          if (typeof message === 'string' && message.trim()) return message;
+        }
+        if (err instanceof Error && err.message.trim()) return err.message;
+        return null;
+      })();
+
+      setError(messageFromApi ?? 'Failed to create account');
     } finally {
       setIsLoading(false);
     }
