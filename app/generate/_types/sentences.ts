@@ -1,0 +1,27 @@
+export type SentenceItem = {
+  id: string;
+  text: string;
+  mediaMode?: 'single' | 'frames';
+  sceneTab?: 'image' | 'video';
+  image?: File | null;
+  imageUrl?: string | null;
+  video?: File | null;
+  videoUrl?: string | null;
+  savedVideoId?: string | null;
+  startImage?: File | null;
+  startImageUrl?: string | null;
+  startImagePrompt?: string | null;
+  startSavedImageId?: string | null;
+  endImage?: File | null;
+  endImageUrl?: string | null;
+  endImagePrompt?: string | null;
+  endSavedImageId?: string | null;
+  imagePrompt?: string | null;
+  isGeneratingImage?: boolean;
+  isGeneratingStartImage?: boolean;
+  isGeneratingEndImage?: boolean;
+  isSavingImage?: boolean;
+  savedImageId?: string | null;
+  isFromLibrary?: boolean;
+  isSuspense?: boolean;
+};

@@ -39,8 +39,9 @@ import { api } from '@/lib/api';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
 import { useToast } from '@/components/ui/toast';
+import type { SentenceItem } from './_types/sentences';
 
-const API_URL = 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ||
  'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
@@ -74,33 +75,7 @@ async function sha256HexForFile(file: File): Promise<string | null> {
   }
 }
 
-export type SentenceItem = {
-  id: string;
-  text: string;
-  mediaMode?: 'single' | 'frames';
-  sceneTab?: 'image' | 'video';
-  image?: File | null;
-  imageUrl?: string | null;
-  video?: File | null;
-  videoUrl?: string | null;
-  savedVideoId?: string | null;
-  startImage?: File | null;
-  startImageUrl?: string | null;
-  startImagePrompt?: string | null;
-  startSavedImageId?: string | null;
-  endImage?: File | null;
-  endImageUrl?: string | null;
-  endImagePrompt?: string | null;
-  endSavedImageId?: string | null;
-  imagePrompt?: string | null;
-  isGeneratingImage?: boolean;
-  isGeneratingStartImage?: boolean;
-  isGeneratingEndImage?: boolean;
-  isSavingImage?: boolean;
-  savedImageId?: string | null;
-  isFromLibrary?: boolean;
-  isSuspense?: boolean;
-};
+// SentenceItem type is shared in ./_types/sentences
 
 export type VoiceOverOption = {
   id: number;

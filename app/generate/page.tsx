@@ -1,8 +1,6 @@
-"use client";
-
-import { GeneratePageInner } from "./GeneratePageInner";
+import GeneratePageClient from './GeneratePageClient';
 
 export default function GeneratePage() {
-  return <GeneratePageInner />;
+  return <GeneratePageClient />;
 }
 
