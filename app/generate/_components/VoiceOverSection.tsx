@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { API_URL } from '@/lib/api';
 import {
   Select,
   SelectContent,
@@ -82,9 +83,69 @@ export function VoiceOverSection({
   onSaveVoice,
 }: VoiceOverSectionProps) {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const styleAbortRef = useRef<AbortController | null>(null);
   const selectedVoice = voices.find((v) => v.voice_id === selectedVoiceId) || null;
   const providerLabel = voiceProvider === 'google' ? 'AI Studio' : 'ElevenLabs';
   const haveStyleInstructions = Boolean(String(styleInstructions ?? '').trim());
+  const [isGeneratingStyle, setIsGeneratingStyle] = useState(false);
+  const [styleGenError, setStyleGenError] = useState<string | null>(null);
+
+  const handleGenerateStyleWithAi = async () => {
+    if (!onStyleInstructionsChange) return;
+    if (!script.trim()) {
+      setStyleGenError('Add or generate a script first.');
+      return;
+    }
+
+    // Cancel any previous stream.
+    styleAbortRef.current?.abort();
+    const controller = new AbortController();
+    styleAbortRef.current = controller;
+
+    setStyleGenError(null);
+    setIsGeneratingStyle(true);
+    onStyleInstructionsChange('');
+
+    try {
+      const response = await fetch(`${API_URL}/ai/generate-voice-style`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          script,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Failed to start style generation');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = '';
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk) {
+          acc += chunk;
+          onStyleInstructionsChange(acc);
+        }
+      }
+    } catch (error) {
+      const aborted = (error as any)?.name === 'AbortError';
+      if (!aborted) {
+        console.error('Generate style instructions failed', error);
+        setStyleGenError('Failed to generate style. Please try again.');
+      }
+    } finally {
+      setIsGeneratingStyle(false);
+    }
+  };
 
   const handlePlayPreview = () => {
     if (!selectedVoice) return;
@@ -267,9 +328,34 @@ export function VoiceOverSection({
                             placeholder="E.g. Calm, warm, and confident. Slightly slower pace. Friendly tone."
                             className="min-h-21"
                           />
+                          <div className="flex items-center gap-2 pt-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={handleGenerateStyleWithAi}
+                              disabled={isGeneratingStyle || !script.trim()}
+                              className="h-8 px-3 text-[11px] border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
+                            >
+                              {isGeneratingStyle ? (
+                                <>
+                                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                  Generating...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                                  Generate with AI
+                                </>
+                              )}
+                            </Button>
+                          </div>
                           <p className="text-[11px] text-gray-500">
                             These instructions affect how AI Studio speaks the script.
                           </p>
+                          {styleGenError ? (
+                            <p className="text-[11px] text-red-600">{styleGenError}</p>
+                          ) : null}
                         </div>
                       ) : null}
 

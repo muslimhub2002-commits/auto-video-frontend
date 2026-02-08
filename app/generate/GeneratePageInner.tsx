@@ -45,7 +45,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ||
  'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
-  'Please Subscribe & Help us reach out to more people';
+  'Please Subscribe & Leave a comment to Help us reach out to more people';
 
 // Convert a data URL (e.g. AI-generated base64 image) into a File for upload
 function dataUrlToFile(dataUrl: string, filename: string): File {
@@ -945,7 +945,7 @@ export function GeneratePageInner() {
       return;
     }
 
-    const subscribeSentence = 'Please Subscribe & Help us reach out to more people';
+    const subscribeSentence = 'Please Subscribe & Leave a comment to Help us reach out to more people';
 
     const missingMediaForImageTab = sentences.some((s) => {
       const text = String(s.text ?? '').trim();
