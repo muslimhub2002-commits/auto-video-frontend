@@ -119,6 +119,10 @@ export function GeneratePageInner() {
   const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
   // Default to Anthropic (Claude) as requested.
   const [scriptModel, setScriptModel] = useState('claude-sonnet-4-5');
+
+  // Sentence image generation configuration
+  const [imagePromptModel, setImagePromptModel] = useState('claude-sonnet-4-5');
+  const [imageModel, setImageModel] = useState('leonardo');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);
@@ -1733,6 +1737,8 @@ export function GeneratePageInner() {
         style: scriptStyle,
         scriptLength,
         isShort,
+        promptModel: imagePromptModel,
+        imageModel,
         prompt: promptOverride?.trim() ? promptOverride.trim() : undefined,
       });
 
@@ -1824,6 +1830,8 @@ export function GeneratePageInner() {
         style: scriptStyle,
         scriptLength,
         isShort,
+        promptModel: imagePromptModel,
+        imageModel,
         frameType: which,
         continuityPrompt,
       });
@@ -2836,6 +2844,10 @@ export function GeneratePageInner() {
 
                 <SentencesImagesSection
                   sentences={sentences}
+                  imagePromptModel={imagePromptModel}
+                  onImagePromptModelChange={setImagePromptModel}
+                  imageModel={imageModel}
+                  onImageModelChange={setImageModel}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
                   onSentenceFrameImageUpload={handleSentenceFrameImageUpload}

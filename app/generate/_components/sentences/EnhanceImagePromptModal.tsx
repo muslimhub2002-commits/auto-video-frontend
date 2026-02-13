@@ -9,7 +9,7 @@ type EnhanceImagePromptModalProps = {
   enhanceImagePromptText: string;
   onEnhanceImagePromptTextChange: (next: string) => void;
   onCancel: () => void;
-  onDone: () => void;
+  onDone: () => void | Promise<void>;
 };
 
 export function EnhanceImagePromptModal({
@@ -21,6 +21,11 @@ export function EnhanceImagePromptModal({
   onDone,
 }: EnhanceImagePromptModalProps) {
   if (!isOpen) return null;
+
+  const handleDone = async () => {
+    onCancel(); // Close the modal immediately
+    await Promise.resolve(onDone());
+  };
 
   return (
     <div
@@ -74,7 +79,7 @@ export function EnhanceImagePromptModal({
             <Button
               type="button"
               size="sm"
-              onClick={onDone}
+              onClick={handleDone}
               disabled={!enhanceImagePromptText.trim()}
               className="gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white"
             >

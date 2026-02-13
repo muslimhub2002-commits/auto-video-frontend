@@ -328,7 +328,7 @@ export function VoiceOverSection({
                             placeholder="E.g. Calm, warm, and confident. Slightly slower pace. Friendly tone."
                             className="min-h-21"
                           />
-                          <div className="flex items-center gap-2 pt-1">
+                          <div className="flex justify-end gap-2 pt-1 mt-2">
                             <Button
                               type="button"
                               size="sm"

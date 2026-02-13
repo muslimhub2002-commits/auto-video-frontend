@@ -16,6 +16,7 @@ import {
   AccordionContent,
 } from '@/components/ui/accordion';
 import { Loader2, Sparkles, FileText, X, Save } from 'lucide-react';
+import { LlmModelSelect } from './LlmModelSelect';
 
 interface ScriptSectionProps {
   script: string;
@@ -308,30 +309,7 @@ export function ScriptSection(props: ScriptSectionProps) {
               </Select>
 
               {/* Model */}
-              <Select value={scriptModel} onValueChange={setScriptModel}>
-                <SelectTrigger label="Model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="claude-sonnet-4-5">Claude Sonnet 4.5</SelectItem>
-                  <SelectItem value="claude-sonnet-4-0">Claude Sonnet 4.0</SelectItem>
-
-                  <SelectItem value="claude-opus-4-5">Claude Opus 4.5</SelectItem>
-                  <SelectItem value="claude-opus-4-0">Claude Opus 4.0</SelectItem>
-
-                  <SelectItem value="claude-haiku-4-5">Claude Haiku 4.5</SelectItem>
-                  <SelectItem value="gemini-2.0-flash">Gemini 2.0 Flash</SelectItem>
-
-
-                  <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>
-                  <SelectItem value="gpt-4.1-mini">GPT-4.1 mini</SelectItem>
-                  <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                  <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                  <SelectItem value="gpt-5">GPT-5</SelectItem>
-                  <SelectItem value="gpt-5.1">GPT-5.1</SelectItem>
-                  <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
-                </SelectContent>
-              </Select>
+              <LlmModelSelect value={scriptModel} onValueChange={setScriptModel} label="Model" />
             </div>
           </div>
 

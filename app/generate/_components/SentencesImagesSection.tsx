@@ -10,10 +10,18 @@ import {
   Images,
 } from 'lucide-react';
 import { AlertDialog } from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 import type { SentenceItem } from '../_types/sentences';
 import { useSentenceEnhancement } from '../_hooks/useSentenceEnhancement';
 import { useEnhanceImagePrompt } from '../_hooks/useEnhanceImagePrompt';
+import { LlmModelSelect } from './LlmModelSelect';
 import { ImagePreviewOverlay } from './sentences/ImagePreviewOverlay';
 import { EnhanceWithPromptModal } from './sentences/EnhanceWithPromptModal';
 import { EnhanceImagePromptModal } from './sentences/EnhanceImagePromptModal';
@@ -25,6 +33,10 @@ type SentencesImagesSectionProps = {
   sentences: SentenceItem[];
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+  imagePromptModel: string;
+  onImagePromptModelChange: (value: string) => void;
+  imageModel: string;
+  onImageModelChange: (value: string) => void;
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
   onSentenceImageUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
@@ -58,6 +70,10 @@ export function SentencesImagesSection({
   sentences,
   isGeneratingAllImages,
   onGenerateAllImages,
+  imagePromptModel,
+  onImagePromptModelChange,
+  imageModel,
+  onImageModelChange,
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
@@ -144,6 +160,40 @@ export function SentencesImagesSection({
       </AccordionTrigger>
       <AccordionContent>
         <div className="space-y-8 pb-4">
+          <div className="bg-linear-to-br from-gray-50 to-gray-100/50 rounded-lg p-5 border border-gray-200">
+            <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <div className="w-1 h-4 bg-primary rounded-full"></div>
+              Sentence Configuration
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <LlmModelSelect
+                value={imagePromptModel}
+                onValueChange={onImagePromptModelChange}
+                label="Prompt Model"
+              />
+
+              <Select value={imageModel} onValueChange={onImageModelChange}>
+                <SelectTrigger label="Image Model">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="leonardo">Leonardo AI</SelectItem>
+                  <SelectItem value="gpt-image-1">OpenAI — gpt-image-1</SelectItem>
+                  <SelectItem value="gpt-image-1-mini">OpenAI — gpt-image-1-mini</SelectItem>
+                  <SelectItem value="gpt-image-1.5">OpenAI — gpt-image-1.5</SelectItem>
+                  <SelectItem value="modelslab:flux">
+                    Flux (ModelsLab)
+                  </SelectItem>
+                  <SelectItem value="modelslab:flux-2-pro">
+                    Flux 2 Pro (ModelsLab)
+                  </SelectItem>
+                  <SelectItem value="imagen-4">Imagen 4</SelectItem>
+                  <SelectItem value="imagen-4-ultra">Imagen 4 Ultra</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           {sentences.length > 0 ? (
             <SceneEditorSection
               sentences={sentences}
