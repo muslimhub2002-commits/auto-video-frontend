@@ -29,10 +29,23 @@ import { AddSuspenseSceneModal } from './sentences/AddSuspenseSceneModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
 import { SceneEditorSection } from './sentences/SceneEditorSection';
 
+type ScriptCharacter = {
+  key: string;
+  name: string;
+  description: string;
+  isSahaba: boolean;
+  isProphet: boolean;
+  isWoman: boolean;
+};
+
 type SentencesImagesSectionProps = {
   sentences: SentenceItem[];
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+
+  scriptCharacters: ScriptCharacter[];
+  onScriptCharactersChange: (next: ScriptCharacter[]) => void;
+  onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
   imagePromptModel: string;
   onImagePromptModelChange: (value: string) => void;
   imageModel: string;
@@ -73,6 +86,10 @@ export function SentencesImagesSection({
   sentences,
   isGeneratingAllImages,
   onGenerateAllImages,
+
+  scriptCharacters,
+  onScriptCharactersChange,
+  onSentenceForcedCharacterKeysChange,
   imagePromptModel,
   onImagePromptModelChange,
   imageModel,
@@ -227,6 +244,9 @@ export function SentencesImagesSection({
               sentences={sentences}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
+              scriptCharacters={scriptCharacters}
+              onScriptCharactersChange={onScriptCharactersChange}
+              onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
               onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
               onOpenAddSuspense={() => {
                 setSuspenseSelectedIndex(null);

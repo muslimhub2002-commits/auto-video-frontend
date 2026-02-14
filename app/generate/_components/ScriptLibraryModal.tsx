@@ -19,6 +19,15 @@ interface ScriptSentenceDto {
   } | null;
 }
 
+interface ScriptCharacterDto {
+  key: string;
+  name: string;
+  description: string;
+  isSahaba: boolean;
+  isProphet: boolean;
+  isWoman: boolean;
+}
+
 interface ScriptDto {
   id: string;
   title: string | null;
@@ -35,6 +44,7 @@ interface ScriptDto {
      id: string;
      voice: string;
    } | null;
+  characters?: ScriptCharacterDto[];
   sentences?: ScriptSentenceDto[];
 }
 

@@ -3,6 +3,11 @@ export type SentenceItem = {
   text: string;
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
+
+  // When set, image generation will reference ONLY these canonical character key(s)
+  // and will skip LLM-based character mapping.
+  forcedCharacterKeys?: string[] | null;
+
   image?: File | null;
   imageUrl?: string | null;
   video?: File | null;

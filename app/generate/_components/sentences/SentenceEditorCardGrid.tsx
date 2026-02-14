@@ -1,6 +1,6 @@
 'use client';
 
-import type { ChangeEvent } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Loader2,
@@ -13,15 +13,30 @@ import {
   ArrowUp,
   ArrowDown,
   Trash2,
+  Users,
 } from 'lucide-react';
 
+import { ForcedCharactersModal } from './ForcedCharactersModal';
+
 import type { SentenceItem } from '../../_types/sentences';
+
+type ScriptCharacter = {
+  key: string;
+  name: string;
+  description: string;
+  isSahaba: boolean;
+  isProphet: boolean;
+  isWoman: boolean;
+};
 
 type SentenceEditorCardProps = {
   item: SentenceItem;
   index: number;
   isFirst: boolean;
   isLast: boolean;
+
+  scriptCharacters: ScriptCharacter[];
+  onForcedCharacterKeysChange: (next: string[] | null) => void;
 
   enhanceError: string | null;
   isEnhancing: boolean;
@@ -63,6 +78,9 @@ export function SentenceEditorCard({
   isFirst,
   isLast,
 
+  scriptCharacters,
+  onForcedCharacterKeysChange,
+
   enhanceError,
   isEnhancing,
   isApplyingPrompt,
@@ -99,6 +117,13 @@ export function SentenceEditorCard({
   const hasAnyVideo = Boolean(item.video || item.videoUrl);
   const hasAnyImage = Boolean(item.image || item.imageUrl);
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
+
+  const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
+
+  const forcedCount = Array.isArray(item.forcedCharacterKeys)
+    ? item.forcedCharacterKeys.length
+    : 0;
+  const canPickForcedCharacters = Array.isArray(scriptCharacters) && scriptCharacters.length > 0;
 
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
   const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
@@ -208,6 +233,31 @@ export function SentenceEditorCard({
                   </Button>
                 </div>
 
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!canPickForcedCharacters}
+                  onClick={() => {
+                    setIsForcedCharactersOpen(true);
+                  }}
+                  className={
+                    forcedCount > 0
+                      ? 'gap-2 h-8 border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:border-indigo-400 transition-all'
+                      : 'gap-2 h-8 border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all'
+                  }
+                  title={
+                    canPickForcedCharacters
+                      ? 'Force character(s) for this sentence'
+                      : 'No characters available (add characters first)'
+                  }
+                >
+                  <Users className="h-4 w-4" />
+                  <span className="text-xs font-semibold">
+                    Characters{forcedCount > 0 ? ` (${forcedCount})` : ''}
+                  </span>
+                </Button>
+
                 {/* Enhance Button with Dropdown */}
                 <div className="relative">
                   <Button
@@ -296,6 +346,15 @@ export function SentenceEditorCard({
                   <span className="text-xs font-semibold">Delete</span>
                 </Button>
               </div>
+
+              <ForcedCharactersModal
+                isOpen={isForcedCharactersOpen}
+                characters={scriptCharacters}
+                selectedKeys={item.forcedCharacterKeys}
+                onClose={() => setIsForcedCharactersOpen(false)}
+                onClear={() => onForcedCharacterKeysChange(null)}
+                onSave={(next) => onForcedCharacterKeysChange(next)}
+              />
             </div>
 
             {/* Error Message */}
@@ -376,6 +435,7 @@ export function SentenceEditorCard({
                     <span className="text-sm">From Library</span>
                   </Button>
                 </div>
+
               </div>
             )}
 

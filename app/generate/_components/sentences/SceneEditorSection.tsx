@@ -2,15 +2,29 @@
 
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Loader2, Sparkles, Images, Video as VideoIcon, Plus } from 'lucide-react';
+import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
+import { CharactersModal } from './CharactersModal';
+
+type ScriptCharacter = {
+  key: string;
+  name: string;
+  description: string;
+  isSahaba: boolean;
+  isProphet: boolean;
+  isWoman: boolean;
+};
 
 type SceneEditorSectionProps = {
   sentences: SentenceItem[];
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+
+  scriptCharacters: ScriptCharacter[];
+  onScriptCharactersChange: (next: ScriptCharacter[]) => void;
+  onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
 
   onInsertEmptySentenceAfter: (index: number) => string;
 
@@ -61,6 +75,10 @@ export function SceneEditorSection({
   sentences,
   isGeneratingAllImages,
   onGenerateAllImages,
+
+  scriptCharacters,
+  onScriptCharactersChange,
+  onSentenceForcedCharacterKeysChange,
   onInsertEmptySentenceAfter,
   onOpenAddSuspense,
 
@@ -102,6 +120,8 @@ export function SceneEditorSection({
 }: SceneEditorSectionProps) {
   const [justInsertedId, setJustInsertedId] = useState<string | null>(null);
   const clearInsertedTimeoutRef = useRef<number | null>(null);
+
+  const [isCharactersModalOpen, setIsCharactersModalOpen] = useState(false);
 
   const completeCount = sentences.filter((s) =>
     Boolean(
@@ -145,6 +165,20 @@ export function SceneEditorSection({
               type="button"
               size="sm"
               variant="outline"
+              onClick={() => {
+                setIsCharactersModalOpen(true);
+              }}
+              className="gap-2 h-10 px-4 border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 shadow-sm hover:shadow transition-all"
+              title="View and edit all characters"
+            >
+              <Users className="h-4 w-4" />
+              <span className="text-sm font-semibold">Characters</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
               onClick={onOpenAddSuspense}
               disabled={sentences.length === 0}
               className="gap-2 h-10 px-4 border-purple-200 bg-white text-purple-700 hover:bg-purple-50 hover:border-purple-300 shadow-sm hover:shadow transition-all"
@@ -177,6 +211,13 @@ export function SceneEditorSection({
         </div>
       </div>
 
+      <CharactersModal
+        isOpen={isCharactersModalOpen}
+        characters={scriptCharacters}
+        onClose={() => setIsCharactersModalOpen(false)}
+        onSave={onScriptCharactersChange}
+      />
+
       {/* Sentences List */}
       <div className="space-y-4">
         {sentences.map((item, index) => {
@@ -200,6 +241,10 @@ export function SceneEditorSection({
                   index={index}
                   isFirst={index === 0}
                   isLast={index === sentences.length - 1}
+                  scriptCharacters={scriptCharacters}
+                  onForcedCharacterKeysChange={(next) =>
+                    onSentenceForcedCharacterKeysChange(index, next)
+                  }
                   enhanceError={enhanceError}
                   isEnhancing={isEnhancing}
                   isApplyingPrompt={isApplyingPrompt}

@@ -42,6 +42,27 @@ import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import type { SentenceItem } from './_types/sentences';
 
+type ScriptCharacter = {
+  key: string;
+  name: string;
+  description: string;
+  isSahaba: boolean;
+  isProphet: boolean;
+  isWoman: boolean;
+};
+
+type BackendSentenceDto = {
+  id: string;
+  text: string;
+  index: number;
+  image?: { id: string; image: string; prompt?: string | null } | null;
+  startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+  endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+  video?: { id: string; video: string } | null;
+  isSuspense?: boolean;
+  forced_character_keys?: string[] | null;
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
  'http://localhost:3000';
 
@@ -190,6 +211,9 @@ export function GeneratePageInner() {
   const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
   // Default to Anthropic (Claude) as requested.
   const [scriptModel, setScriptModel] = useState('claude-sonnet-4-5');
+
+  // Canonical characters extracted during split.
+  const [scriptCharacters, setScriptCharacters] = useState<ScriptCharacter[]>([]);
 
   // Sentence image generation configuration
   const [imagePromptModel, setImagePromptModel] = useState('claude-sonnet-4-5');
@@ -1222,6 +1246,7 @@ export function GeneratePageInner() {
     // Clear existing sentences and voice-over when generating a new script
     setSentences([]);
     setSplitError(null);
+    setScriptCharacters([]);
     setVoiceOver(null);
     setVoiceDuration(null);
     setSavedVoiceId(null);
@@ -1320,7 +1345,10 @@ export function GeneratePageInner() {
         throw new Error('Failed to split script');
       }
 
-      const data = (await response.json()) as { sentences: string[] };
+      const data = (await response.json()) as {
+        sentences: string[];
+        characters?: ScriptCharacter[];
+      };
 
       // Normalize and ensure the subscribe sentence appears only once at the end
       const normalize = (value: string) => {
@@ -1361,6 +1389,7 @@ export function GeneratePageInner() {
         text,
         mediaMode: 'single',
         sceneTab: text === SUBSCRIBE_SENTENCE ? 'video' : 'image',
+        forcedCharacterKeys: null,
         image: null,
         imageUrl: null,
         video: text === SUBSCRIBE_SENTENCE ? null : null,
@@ -1378,6 +1407,7 @@ export function GeneratePageInner() {
 
       setActiveScriptId(null);
       setSentences(items);
+      setScriptCharacters(Array.isArray(data.characters) ? data.characters : []);
     } catch (error) {
       console.error('Split script failed', error);
       setSplitError('Failed to split script. Please try again.');
@@ -1391,8 +1421,32 @@ export function GeneratePageInner() {
     setScript('');
     setSentences([]);
     setSplitError(null);
+    setScriptCharacters([]);
     setOriginalScriptSubject(undefined);
     setOriginalScriptSubjectContent(undefined);
+  };
+
+  const handleScriptCharactersChange = (next: ScriptCharacter[]) => {
+    setScriptCharacters(Array.isArray(next) ? next : []);
+  };
+
+  const handleSentenceForcedCharacterKeysChange = (
+    index: number,
+    next: string[] | null,
+  ) => {
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? {
+              ...s,
+              forcedCharacterKeys:
+                Array.isArray(next) && next.length
+                  ? Array.from(new Set(next.filter(Boolean)))
+                  : null,
+            }
+          : s,
+      ),
+    );
   };
 
   const handleOpenScriptLibrary = () => {
@@ -1410,16 +1464,8 @@ export function GeneratePageInner() {
     technique?: string | null;
     reference_scripts?: { id: string; title: string | null; script: string }[];
     voice?: { id: string; voice: string } | null;
-    sentences?: {
-      id: string;
-      text: string;
-      index: number;
-      image?: { id: string; image: string; prompt?: string | null } | null;
-      startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
-      endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
-      video?: { id: string; video: string } | null;
-      isSuspense?: boolean;
-    }[];
+    characters?: ScriptCharacter[];
+    sentences?: BackendSentenceDto[];
   }) => {
     setActiveScriptId(draft.id);
     setScript(draft.script);
@@ -1448,6 +1494,8 @@ export function GeneratePageInner() {
       loadedSubject === 'religious (Islam)' ? loadedSubjectContent : ''
     );
 
+    setScriptCharacters(Array.isArray(draft.characters) ? draft.characters : []);
+
     if (draft.sentences && draft.sentences.length > 0) {
       const sorted = [...draft.sentences].sort((a, b) => a.index - b.index);
       const mapped: SentenceItem[] = sorted.map((s) => ({
@@ -1460,6 +1508,9 @@ export function GeneratePageInner() {
             : s.video
               ? 'video'
               : 'image',
+        forcedCharacterKeys: Array.isArray(s.forced_character_keys)
+          ? s.forced_character_keys
+          : null,
         image: null,
         imageUrl: s.image?.image ?? null,
         startImage: null,
@@ -1798,6 +1849,7 @@ export function GeneratePageInner() {
         text: '',
         sceneTab: 'image',
         mediaMode: 'single',
+        forcedCharacterKeys: null,
         image: null,
         imageUrl: null,
         imagePrompt: null,
@@ -1877,6 +1929,11 @@ export function GeneratePageInner() {
         isShort,
         promptModel: imagePromptModel,
         imageModel,
+        characters: scriptCharacters.length ? scriptCharacters : undefined,
+        forcedCharacterKeys:
+          Array.isArray(target.forcedCharacterKeys) && target.forcedCharacterKeys.length
+            ? target.forcedCharacterKeys
+            : undefined,
         prompt: promptOverride?.trim() ? promptOverride.trim() : undefined,
       });
 
@@ -1972,6 +2029,11 @@ export function GeneratePageInner() {
         isShort,
         promptModel: imagePromptModel,
         imageModel,
+        characters: scriptCharacters.length ? scriptCharacters : undefined,
+        forcedCharacterKeys:
+          Array.isArray(target.forcedCharacterKeys) && target.forcedCharacterKeys.length
+            ? target.forcedCharacterKeys
+            : undefined,
         frameType: which,
         continuityPrompt,
       });
@@ -2554,6 +2616,7 @@ export function GeneratePageInner() {
         end_frame_image_id?: string;
         video_id?: string;
         isSuspense?: boolean;
+        forced_character_keys?: string[];
       }[] = [];
 
       // Ensure any uploaded or generated images are saved to the images table
@@ -2593,6 +2656,10 @@ export function GeneratePageInner() {
           end_frame_image_id: endFrameImageId ?? undefined,
           video_id: s.savedVideoId ?? undefined,
           isSuspense: Boolean(s.isSuspense) && (s.text || '').trim() !== SUBSCRIBE_SENTENCE,
+          forced_character_keys:
+            Array.isArray(s.forcedCharacterKeys) && s.forcedCharacterKeys.length
+              ? s.forcedCharacterKeys
+              : undefined,
         });
       }
 
@@ -2609,6 +2676,7 @@ export function GeneratePageInner() {
         script: string;
         voice_id?: string;
         video_url?: string;
+        characters?: ScriptCharacter[];
         sentences?: {
           text: string;
           image_id?: string;
@@ -2616,6 +2684,7 @@ export function GeneratePageInner() {
           end_frame_image_id?: string;
           video_id?: string;
           isSuspense?: boolean;
+          forced_character_keys?: string[];
         }[];
         subject?: string;
         subject_content?: string | null;
@@ -2627,6 +2696,7 @@ export function GeneratePageInner() {
         script,
         voice_id: voiceId ?? undefined,
         video_url: activeScriptId ? undefined : videoUrl ?? undefined,
+        characters: scriptCharacters.length ? scriptCharacters : undefined,
         sentences: sentencePayload.length > 0 ? sentencePayload : undefined,
         subject: scriptSubject,
         subject_content:
@@ -2644,20 +2714,16 @@ export function GeneratePageInner() {
 
       const upsertedScript = upserted.data as {
         id: string;
-        sentences?: {
-          id: string;
-          text: string;
-          index: number;
-          image?: { id: string; image: string; prompt?: string | null } | null;
-          startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
-          endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
-          video?: { id: string; video: string } | null;
-          isSuspense?: boolean;
-        }[];
+        characters?: ScriptCharacter[];
+        sentences?: BackendSentenceDto[];
       };
 
       if (upsertedScript?.id) {
         setActiveScriptId(upsertedScript.id);
+      }
+
+      if (Array.isArray(upsertedScript?.characters)) {
+        setScriptCharacters(upsertedScript.characters);
       }
 
       if (upsertedScript?.sentences && upsertedScript.sentences.length > 0) {
@@ -2672,6 +2738,9 @@ export function GeneratePageInner() {
               : s.video
                 ? 'video'
                 : 'image',
+          forcedCharacterKeys: Array.isArray(s.forced_character_keys)
+            ? s.forced_character_keys
+            : null,
           image: null,
           imageUrl: s.image?.image ?? null,
           startImage: null,
@@ -3020,6 +3089,9 @@ export function GeneratePageInner() {
                   onImageModelChange={setImageModel}
                   imageStyle={imageStyle}
                   onImageStyleChange={setImageStyle}
+                  scriptCharacters={scriptCharacters}
+                  onScriptCharactersChange={handleScriptCharactersChange}
+                  onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
