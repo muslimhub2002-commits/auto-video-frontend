@@ -1,7 +1,8 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Loader2, Sparkles, Images, Video as VideoIcon } from 'lucide-react';
+import { Loader2, Sparkles, Images, Video as VideoIcon, Plus } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
@@ -10,6 +11,8 @@ type SceneEditorSectionProps = {
   sentences: SentenceItem[];
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+
+  onInsertEmptySentenceAfter: (index: number) => string;
 
   onOpenAddSuspense: () => void;
 
@@ -58,6 +61,7 @@ export function SceneEditorSection({
   sentences,
   isGeneratingAllImages,
   onGenerateAllImages,
+  onInsertEmptySentenceAfter,
   onOpenAddSuspense,
 
   enhanceError,
@@ -96,6 +100,9 @@ export function SceneEditorSection({
 
   onPreviewImage,
 }: SceneEditorSectionProps) {
+  const [justInsertedId, setJustInsertedId] = useState<string | null>(null);
+  const clearInsertedTimeoutRef = useRef<number | null>(null);
+
   const completeCount = sentences.filter((s) =>
     Boolean(
       s.image ||
@@ -177,68 +184,115 @@ export function SceneEditorSection({
           const isApplyingImagePrompt = Boolean(applyingImagePromptById[item.id]);
           const imagePromptError = imagePromptErrorById[item.id];
 
+          const isJustInserted = justInsertedId === item.id;
+
           return (
-            <SentenceEditorCard
-              key={item.id}
-              item={item}
-              index={index}
-              isFirst={index === 0}
-              isLast={index === sentences.length - 1}
-              enhanceError={enhanceError}
-              isEnhancing={isEnhancing}
-              isApplyingPrompt={isApplyingPrompt}
-              isEnhanceMenuOpen={Boolean(enhanceMenuOpenById[item.id])}
-              onToggleEnhanceMenu={() => {
-                setEnhanceMenuOpenById((prev) => ({
-                  ...prev,
-                  [item.id]: !prev[item.id],
-                }));
-              }}
-              onAutoEnhance={() => onAutoEnhance(index)}
-              onCustomPrompt={() => onCustomPrompt(index)}
-              onMergeUp={() => onMergeSentenceIntoPrevious(index)}
-              onMergeDown={() => onMergeSentenceIntoNext(index)}
-              onRequestDelete={() => onRequestDelete(index)}
-              onSentenceTextChange={(next) => onSentenceTextChange(index, next)}
-              onSentenceMediaModeChange={(mode) => onSentenceMediaModeChange(index, mode)}
-              onSentenceImageUpload={(e) => onSentenceImageUpload(index, e)}
-              onSentenceFrameImageUpload={(which, e) => onSentenceFrameImageUpload(index, which, e)}
-              onGenerateSentenceImage={() => onGenerateSentenceImage(index)}
-              onGenerateSentenceFrameImage={
-                onGenerateSentenceFrameImage
-                  ? (which) => onGenerateSentenceFrameImage(index, which)
-                  : undefined
-              }
-              onSelectFromLibrary={(which) => onSelectFromLibrary(index, which)}
-              onRemoveSentenceImage={() => onRemoveSentenceImage(index)}
-              onRemoveSentenceFrameImage={(which) => onRemoveSentenceFrameImage(index, which)}
-              onOpenEnhanceImagePromptModal={() => onOpenEnhanceImagePromptModal(index)}
-              isApplyingImagePrompt={isApplyingImagePrompt}
-              imagePromptError={imagePromptError}
-              isGeneratingVideo={Boolean(isGeneratingVideoBySentenceId[item.id])}
-              onGenerateVideo={
-                onGenerateSentenceVideo
-                  ? async (canGenerateVideo) => {
-                      if (!canGenerateVideo || item.videoUrl === '/subscribe.mp4') return;
+            <div key={item.id}>
+              <div
+                className={
+                  isJustInserted
+                    ? 'animate-in fade-in slide-in-from-top-2 duration-500'
+                    : ''
+                }
+              >
+                <SentenceEditorCard
+                  item={item}
+                  index={index}
+                  isFirst={index === 0}
+                  isLast={index === sentences.length - 1}
+                  enhanceError={enhanceError}
+                  isEnhancing={isEnhancing}
+                  isApplyingPrompt={isApplyingPrompt}
+                  isEnhanceMenuOpen={Boolean(enhanceMenuOpenById[item.id])}
+                  onToggleEnhanceMenu={() => {
+                    setEnhanceMenuOpenById((prev) => ({
+                      ...prev,
+                      [item.id]: !prev[item.id],
+                    }));
+                  }}
+                  onAutoEnhance={() => onAutoEnhance(index)}
+                  onCustomPrompt={() => onCustomPrompt(index)}
+                  onMergeUp={() => onMergeSentenceIntoPrevious(index)}
+                  onMergeDown={() => onMergeSentenceIntoNext(index)}
+                  onRequestDelete={() => onRequestDelete(index)}
+                  onSentenceTextChange={(next) => onSentenceTextChange(index, next)}
+                  onSentenceMediaModeChange={(mode) => onSentenceMediaModeChange(index, mode)}
+                  onSentenceImageUpload={(e) => onSentenceImageUpload(index, e)}
+                  onSentenceFrameImageUpload={(which, e) =>
+                    onSentenceFrameImageUpload(index, which, e)
+                  }
+                  onGenerateSentenceImage={() => onGenerateSentenceImage(index)}
+                  onGenerateSentenceFrameImage={
+                    onGenerateSentenceFrameImage
+                      ? (which) => onGenerateSentenceFrameImage(index, which)
+                      : undefined
+                  }
+                  onSelectFromLibrary={(which) => onSelectFromLibrary(index, which)}
+                  onRemoveSentenceImage={() => onRemoveSentenceImage(index)}
+                  onRemoveSentenceFrameImage={(which) =>
+                    onRemoveSentenceFrameImage(index, which)
+                  }
+                  onOpenEnhanceImagePromptModal={() =>
+                    onOpenEnhanceImagePromptModal(index)
+                  }
+                  isApplyingImagePrompt={isApplyingImagePrompt}
+                  imagePromptError={imagePromptError}
+                  isGeneratingVideo={Boolean(isGeneratingVideoBySentenceId[item.id])}
+                  onGenerateVideo={
+                    onGenerateSentenceVideo
+                      ? async (canGenerateVideo) => {
+                          if (!canGenerateVideo || item.videoUrl === '/subscribe.mp4') return;
 
-                      setIsGeneratingVideoBySentenceId((prev) => ({
-                        ...prev,
-                        [item.id]: true,
-                      }));
+                          setIsGeneratingVideoBySentenceId((prev) => ({
+                            ...prev,
+                            [item.id]: true,
+                          }));
 
-                      try {
-                        await Promise.resolve(onGenerateSentenceVideo(index));
-                      } finally {
-                        setIsGeneratingVideoBySentenceId((prev) => ({
-                          ...prev,
-                          [item.id]: false,
-                        }));
-                      }
-                    }
-                  : undefined
-              }
-              onPreviewImage={onPreviewImage}
-            />
+                          try {
+                            await Promise.resolve(onGenerateSentenceVideo(index));
+                          } finally {
+                            setIsGeneratingVideoBySentenceId((prev) => ({
+                              ...prev,
+                              [item.id]: false,
+                            }));
+                          }
+                        }
+                      : undefined
+                  }
+                  onPreviewImage={onPreviewImage}
+                />
+              </div>
+
+              {index < sentences.length - 1 ? (
+                <div className="relative py-3">
+                  <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-200" />
+                  <div className="relative flex items-center justify-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const insertedId = onInsertEmptySentenceAfter(index);
+                        setJustInsertedId(insertedId);
+
+                        if (clearInsertedTimeoutRef.current) {
+                          window.clearTimeout(clearInsertedTimeoutRef.current);
+                        }
+                        clearInsertedTimeoutRef.current = window.setTimeout(() => {
+                          setJustInsertedId(null);
+                          clearInsertedTimeoutRef.current = null;
+                        }, 700);
+                      }}
+                      className="h-9 gap-2 bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 shadow-sm"
+                      title="Insert a new empty sentence here"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span className="text-xs font-semibold">Add sentence</span>
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </div>

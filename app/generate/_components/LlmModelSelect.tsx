@@ -36,6 +36,18 @@ export function LlmModelSelect({
         <SelectItem value="claude-opus-4-0">Claude Opus 4.0</SelectItem>
 
         <SelectItem value="claude-haiku-4-5">Claude Haiku 4.5</SelectItem>
+
+        <SelectItem value="grok-4">Grok 4</SelectItem>
+        <SelectItem value="grok-4-latest">Grok 4 (latest)</SelectItem>
+        <SelectItem value="grok-4-0709">Grok 4-0709</SelectItem>
+        <SelectItem value="grok-4-1-fast-reasoning">Grok 4.1 Fast (reasoning)</SelectItem>
+        <SelectItem value="grok-4-1-fast-non-reasoning">Grok 4.1 Fast (non-reasoning)</SelectItem>
+        <SelectItem value="grok-3">Grok 3</SelectItem>
+        <SelectItem value="grok-3-latest">Grok 3 (latest)</SelectItem>
+        <SelectItem value="grok-3-mini">Grok 3 mini</SelectItem>
+        <SelectItem value="grok-3-mini-latest">Grok 3 mini (latest)</SelectItem>
+        <SelectItem value="grok-code-fast-1">Grok Code Fast 1</SelectItem>
+
         <SelectItem value="gemini-2.0-flash">Gemini 2.0 Flash</SelectItem>
 
         <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>

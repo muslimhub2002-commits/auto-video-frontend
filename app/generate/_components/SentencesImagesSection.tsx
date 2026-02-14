@@ -37,6 +37,9 @@ type SentencesImagesSectionProps = {
   onImagePromptModelChange: (value: string) => void;
   imageModel: string;
   onImageModelChange: (value: string) => void;
+  imageStyle: string;
+  onImageStyleChange: (value: string) => void;
+  onInsertEmptySentenceAfter: (index: number) => string;
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
   onSentenceImageUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
@@ -74,6 +77,9 @@ export function SentencesImagesSection({
   onImagePromptModelChange,
   imageModel,
   onImageModelChange,
+  imageStyle,
+  onImageStyleChange,
+  onInsertEmptySentenceAfter,
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
@@ -141,6 +147,14 @@ export function SentencesImagesSection({
   const [isDeleteSentenceOpen, setIsDeleteSentenceOpen] = useState(false);
   const [deleteSentenceIndex, setDeleteSentenceIndex] = useState<number | null>(null);
 
+  const IMAGE_STYLE_OPTIONS: { value: string; label: string }[] = [
+    { value: 'anime', label: 'Anime' },
+    { value: 'realism', label: 'Realism' },
+    { value: 'cinematic', label: 'Cinematic' },
+    { value: '3d', label: '3D Render' },
+    { value: 'watercolor', label: 'Watercolor' },
+  ];
+
   return (
     <AccordionItem value="sentences" className="border-b border-gray-200 px-6">
       <AccordionTrigger className="hover:no-underline py-5">
@@ -165,12 +179,25 @@ export function SentencesImagesSection({
               <div className="w-1 h-4 bg-primary rounded-full"></div>
               Sentence Configuration
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <LlmModelSelect
                 value={imagePromptModel}
                 onValueChange={onImagePromptModelChange}
                 label="Prompt Model"
               />
+
+              <Select value={imageStyle} onValueChange={onImageStyleChange}>
+                <SelectTrigger label="Image Style">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {IMAGE_STYLE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
               <Select value={imageModel} onValueChange={onImageModelChange}>
                 <SelectTrigger label="Image Model">
@@ -178,6 +205,7 @@ export function SentencesImagesSection({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="leonardo">Leonardo AI</SelectItem>
+                  <SelectItem value="grok-imagine-image">Grok — grok-imagine-image</SelectItem>
                   <SelectItem value="gpt-image-1">OpenAI — gpt-image-1</SelectItem>
                   <SelectItem value="gpt-image-1-mini">OpenAI — gpt-image-1-mini</SelectItem>
                   <SelectItem value="gpt-image-1.5">OpenAI — gpt-image-1.5</SelectItem>
@@ -199,6 +227,7 @@ export function SentencesImagesSection({
               sentences={sentences}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
+              onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
               onOpenAddSuspense={() => {
                 setSuspenseSelectedIndex(null);
                 setSuspenseModalOpen(true);

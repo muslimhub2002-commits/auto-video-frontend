@@ -7,6 +7,7 @@ interface AlertDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  onCancel?: () => void;
   title: string;
   description: string;
   confirmText?: string;
@@ -19,6 +20,7 @@ export function AlertDialog({
   isOpen,
   onClose,
   onConfirm,
+  onCancel,
   title,
   description,
   confirmText = 'Confirm',
@@ -111,7 +113,7 @@ export function AlertDialog({
             type="button"
             variant="outline"
             size="sm"
-            onClick={onClose}
+            onClick={onCancel ?? onClose}
             disabled={isLoading}
             className="px-5"
           >

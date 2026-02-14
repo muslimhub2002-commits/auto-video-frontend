@@ -38,6 +38,7 @@ import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import type { SentenceItem } from './_types/sentences';
 
@@ -45,7 +46,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ||
  'http://localhost:3000';
 
 const SUBSCRIBE_SENTENCE =
-  'Please Subscribe & Leave a comment to Help us reach out to more people';
+  'Please Subscribe & Help us reach out to more people';
 
 // Convert a data URL (e.g. AI-generated base64 image) into a File for upload
 function dataUrlToFile(dataUrl: string, filename: string): File {
@@ -59,6 +60,48 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
     bytes[i] = binary.charCodeAt(i);
   }
   return new File([bytes], filename, { type: mime });
+}
+
+function filenameFromContentDisposition(headerValue: string | null): string | null {
+  const header = String(headerValue ?? '').trim();
+  if (!header) return null;
+
+  // RFC 5987: filename*=UTF-8''...
+  const starMatch = /filename\*=(?:UTF-8''|utf-8'')([^;]+)/u.exec(header);
+  if (starMatch?.[1]) {
+    const raw = starMatch[1].trim().replace(/^"|"$/g, '');
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  const match = /filename=([^;]+)/u.exec(header);
+  if (!match?.[1]) return null;
+  return match[1].trim().replace(/^"|"$/g, '');
+}
+
+function extensionFromAudioMimeType(mimeTypeRaw: string): string {
+  const mimeType = String(mimeTypeRaw ?? '').trim().toLowerCase().split(';')[0] ?? '';
+  switch (mimeType) {
+    case 'audio/mpeg':
+    case 'audio/mp3':
+      return 'mp3';
+    case 'audio/wav':
+    case 'audio/x-wav':
+      return 'wav';
+    case 'audio/ogg':
+      return 'ogg';
+    case 'audio/webm':
+      return 'webm';
+    case 'audio/flac':
+      return 'flac';
+    case 'audio/aac':
+      return 'aac';
+    default:
+      return '';
+  }
 }
 
 async function sha256HexForFile(file: File): Promise<string | null> {
@@ -95,6 +138,34 @@ type ReferenceScriptPayload = {
 export function GeneratePageInner() {
   type VoiceProvider = 'google' | 'elevenlabs';
 
+  const IMAGE_STYLE_PRESETS = [
+    {
+      key: 'anime',
+      label: 'Anime',
+      style: 'Anime style, detailed, vibrant, high quality',
+    },
+    {
+      key: 'realism',
+      label: 'Realism',
+      style: 'Photorealistic, ultra-detailed, natural lighting, high quality',
+    },
+    {
+      key: 'cinematic',
+      label: 'Cinematic',
+      style: 'Cinematic film still, dramatic lighting, shallow depth of field, ultra-detailed',
+    },
+    {
+      key: '3d',
+      label: '3D Render',
+      style: '3D render, high detail, global illumination, physically based rendering, high quality',
+    },
+    {
+      key: 'watercolor',
+      label: 'Watercolor',
+      style: 'Watercolor illustration, soft washes, textured paper, high quality',
+    },
+  ] as const;
+
   const { user, isLoading, handleLogout } = useAuthGuard();
   const router = useRouter();
   const params = useParams<{ id?: string }>();
@@ -123,6 +194,7 @@ export function GeneratePageInner() {
   // Sentence image generation configuration
   const [imagePromptModel, setImagePromptModel] = useState('claude-sonnet-4-5');
   const [imageModel, setImageModel] = useState('leonardo');
+  const [imageStyle, setImageStyle] = useState<string>('anime');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);
@@ -173,6 +245,16 @@ export function GeneratePageInner() {
   const [isSyncingVoices, setIsSyncingVoices] = useState(false);
   const [syncVoicesResult, setSyncVoicesResult] = useState<string | null>(null);
   const [isGeneratingAllImages, setIsGeneratingAllImages] = useState(false);
+  const [generateAllImagesConfirm, setGenerateAllImagesConfirm] = useState<
+    | null
+    | {
+      kind: 'some' | 'all';
+      eligibleIndices: number[];
+      missingIndices: number[];
+      existingCount: number;
+      missingCount: number;
+    }
+  >(null);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [libraryTarget, setLibraryTarget] = useState<
     | {
@@ -814,13 +896,22 @@ export function GeneratePageInner() {
         throw new Error('Failed to generate voice');
       }
 
-      const blob = await response.blob();
-      const ext = voiceProvider === 'google' ? 'wav' : 'mp3';
-      const fileName = `${voiceProvider}-voice-over.${ext}`;
-      const file = new File([blob], fileName, {
-        type:
-          blob.type || (voiceProvider === 'google' ? 'audio/wav' : 'audio/mpeg'),
-      });
+      const arrayBuffer = await response.arrayBuffer();
+      const contentType = response.headers.get('content-type');
+      const disposition = response.headers.get('content-disposition');
+
+      const fallbackMime = voiceProvider === 'google' ? 'audio/wav' : 'audio/mpeg';
+      const mimeType = String(contentType ?? '').trim() || fallbackMime;
+
+      const headerFilename = filenameFromContentDisposition(disposition);
+      const extFromMime = extensionFromAudioMimeType(mimeType);
+      const defaultExt = voiceProvider === 'google' ? 'wav' : 'mp3';
+      const fileName =
+        headerFilename ||
+        `${voiceProvider}-voice-over.${extFromMime || defaultExt}`;
+
+      const blob = new Blob([arrayBuffer], { type: mimeType });
+      const file = new File([blob], fileName, { type: mimeType });
 
       setVoiceOver(file);
       setVoiceDuration(null);
@@ -949,7 +1040,7 @@ export function GeneratePageInner() {
       return;
     }
 
-    const subscribeSentence = 'Please Subscribe & Leave a comment to Help us reach out to more people';
+    const subscribeSentence = 'Please Subscribe & Help us reach out to more people';
 
     const missingMediaForImageTab = sentences.some((s) => {
       const text = String(s.text ?? '').trim();
@@ -1693,6 +1784,51 @@ export function GeneratePageInner() {
     });
   };
 
+  const handleInsertEmptySentenceAfter = (index: number): string => {
+    const newId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `sentence-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    setSentences((prev) => {
+      if (index < 0 || index >= prev.length) return prev;
+
+      const empty: SentenceItem = {
+        id: newId,
+        text: '',
+        sceneTab: 'image',
+        mediaMode: 'single',
+        image: null,
+        imageUrl: null,
+        imagePrompt: null,
+        savedImageId: null,
+        startImage: null,
+        startImageUrl: null,
+        startImagePrompt: null,
+        startSavedImageId: null,
+        endImage: null,
+        endImageUrl: null,
+        endImagePrompt: null,
+        endSavedImageId: null,
+        video: null,
+        videoUrl: null,
+        savedVideoId: null,
+        isGeneratingImage: false,
+        isGeneratingStartImage: false,
+        isGeneratingEndImage: false,
+        isSavingImage: false,
+        isFromLibrary: false,
+        isSuspense: false,
+      };
+
+      const next = [...prev];
+      next.splice(index + 1, 0, empty);
+      return next;
+    });
+
+    return newId;
+  };
+
   const handleAddSuspenseScene = (sourceIndex: number) => {
     setSentences((prev) => {
       const source = prev[sourceIndex];
@@ -1723,6 +1859,8 @@ export function GeneratePageInner() {
     const target = sentences[index];
     if (!target) return;
 
+    const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
+
     setSentences((prev) =>
       prev.map((item, i) =>
         i === index ? { ...item, isGeneratingImage: true } : item,
@@ -1734,7 +1872,7 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
-        style: scriptStyle,
+        style,
         scriptLength,
         isShort,
         promptModel: imagePromptModel,
@@ -1796,6 +1934,8 @@ export function GeneratePageInner() {
     const target = sentences[index];
     if (!target) return;
 
+    const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
+
     // if (!activeScriptId || !isUuid(target.id)) {
     //   showAlert('Save/load this script draft first to persist frame images.', {
     //     type: 'warning',
@@ -1827,7 +1967,7 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
-        style: scriptStyle,
+        style,
         scriptLength,
         isShort,
         promptModel: imagePromptModel,
@@ -2036,31 +2176,61 @@ export function GeneratePageInner() {
   const handleGenerateAllSentenceImages = async () => {
     if (!sentences.length || isGeneratingAllImages) return;
 
-    const indicesToGenerate = sentences
-      .map((item, index) =>
-        // Skip if this is the subscribe sentence or it already has media
-        item.text === SUBSCRIBE_SENTENCE || item.image || item.imageUrl
-          ? null
-          : index,
-      )
+    const eligibleIndices = sentences
+      .map((item, index) => (item.text === SUBSCRIBE_SENTENCE ? null : index))
       .filter((index): index is number => index !== null);
 
-    if (!indicesToGenerate.length) {
-      // All sentences already have images
+    const missingIndices = eligibleIndices.filter((index) => {
+      const item = sentences[index];
+      return Boolean(item) && !item.image && !item.imageUrl;
+    });
+
+    const existingCount = eligibleIndices.length - missingIndices.length;
+
+    const runGenerateAll = async (indices: number[]) => {
+      if (!indices.length) return;
+
+      setIsGeneratingAllImages(true);
+      try {
+        // Generate images sequentially to avoid overwhelming the backend/API
+        // eslint-disable-next-line no-restricted-syntax
+        for (const index of indices) {
+          // eslint-disable-next-line no-await-in-loop
+          await handleGenerateSentenceImage(index);
+        }
+      } finally {
+        setIsGeneratingAllImages(false);
+      }
+    };
+
+    // All sentences already have images.
+    if (!missingIndices.length) {
+      showToast('All sentence images are already generated. Replace all images?', 'info');
+      setGenerateAllImagesConfirm({
+        kind: 'all',
+        eligibleIndices,
+        missingIndices: [],
+        existingCount: eligibleIndices.length,
+        missingCount: 0,
+      });
       return;
     }
 
-    setIsGeneratingAllImages(true);
-    try {
-      // Generate images sequentially to avoid overwhelming the backend/API
-      // eslint-disable-next-line no-restricted-syntax
-      for (const index of indicesToGenerate) {
-        // eslint-disable-next-line no-await-in-loop
-        await handleGenerateSentenceImage(index);
-      }
-    } finally {
-      setIsGeneratingAllImages(false);
+    // Some sentences already have images.
+    if (existingCount > 0) {
+      setGenerateAllImagesConfirm({
+        kind: 'some',
+        eligibleIndices,
+        missingIndices,
+        existingCount,
+        missingCount: missingIndices.length,
+      });
+      return;
     }
+
+    // None have images yet - generate all missing (which is all eligible).
+    await runGenerateAll(missingIndices);
+    return;
   };
 
   const handleSaveSentenceImage = async (index: number) => {
@@ -2848,6 +3018,9 @@ export function GeneratePageInner() {
                   onImagePromptModelChange={setImagePromptModel}
                   imageModel={imageModel}
                   onImageModelChange={setImageModel}
+                  imageStyle={imageStyle}
+                  onImageStyleChange={setImageStyle}
+                  onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
                   onSentenceFrameImageUpload={handleSentenceFrameImageUpload}
@@ -3140,6 +3313,73 @@ export function GeneratePageInner() {
           script: s.script,
         }))}
         onApply={handleApplyReferenceScripts}
+      />
+
+      {/* Generate All Images Confirmation */}
+      <AlertDialog
+        isOpen={Boolean(generateAllImagesConfirm)}
+        onClose={() => setGenerateAllImagesConfirm(null)}
+        onCancel={() => {
+          if (!generateAllImagesConfirm) return;
+
+          if (generateAllImagesConfirm.kind === 'some') {
+            const indices = generateAllImagesConfirm.missingIndices;
+            setGenerateAllImagesConfirm(null);
+            if (indices.length) {
+              void (async () => {
+                setIsGeneratingAllImages(true);
+                try {
+                  // eslint-disable-next-line no-restricted-syntax
+                  for (const index of indices) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await handleGenerateSentenceImage(index);
+                  }
+                } finally {
+                  setIsGeneratingAllImages(false);
+                }
+              })();
+            }
+            return;
+          }
+
+          setGenerateAllImagesConfirm(null);
+        }}
+        onConfirm={() => {
+          if (!generateAllImagesConfirm) return;
+          const indices = generateAllImagesConfirm.eligibleIndices;
+          setGenerateAllImagesConfirm(null);
+          if (indices.length) {
+            void (async () => {
+              setIsGeneratingAllImages(true);
+              try {
+                // eslint-disable-next-line no-restricted-syntax
+                for (const index of indices) {
+                  // eslint-disable-next-line no-await-in-loop
+                  await handleGenerateSentenceImage(index);
+                }
+              } finally {
+                setIsGeneratingAllImages(false);
+              }
+            })();
+          }
+        }}
+        title={
+          generateAllImagesConfirm?.kind === 'all'
+            ? 'Replace all sentence images?'
+            : 'Replace existing sentence images?'
+        }
+        description={
+          generateAllImagesConfirm?.kind === 'all'
+            ? 'All sentences already have images. This will regenerate and overwrite every sentence image (except the subscribe sentence).'
+            : `Some sentences already have images (${generateAllImagesConfirm?.existingCount ?? 0}). Do you want to replace them too, or only generate the missing ones (${generateAllImagesConfirm?.missingCount ?? 0})?`
+        }
+        confirmText={
+          generateAllImagesConfirm?.kind === 'all' ? 'Replace all' : 'Replace all images'
+        }
+        cancelText={
+          generateAllImagesConfirm?.kind === 'some' ? 'Generate missing only' : 'Cancel'
+        }
+        variant="warning"
       />
 
       {/* Alert Modal */}
