@@ -48,6 +48,7 @@ export function YouTubeUploadModal({
   const [enableScheduling, setEnableScheduling] = useState(false);
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledHour, setScheduledHour] = useState('12');
+  const [useWebSearchForSeo, setUseWebSearchForSeo] = useState(false);
 
   const getCairoTodayISODate = () => {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -158,7 +159,10 @@ export function YouTubeUploadModal({
 
     setIsGeneratingSeo(true);
     try {
-      const res = await api.post('/ai/youtube-seo', { script: trimmed });
+      const res = await api.post('/ai/youtube-seo', {
+        script: trimmed,
+        useWebSearch: useWebSearchForSeo,
+      });
       const data = res.data as { title?: string; description?: string; tags?: string[] };
 
       if (data?.title) setYoutubeTitle(data.title);
@@ -426,6 +430,17 @@ export function YouTubeUploadModal({
                       </>
                     )}
                   </Button>
+
+                  <label className="flex items-center gap-2 text-sm text-blue-900 bg-white/70 border border-blue-200 rounded-xl px-3 py-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-purple-600"
+                      checked={useWebSearchForSeo}
+                      onChange={(e) => setUseWebSearchForSeo(e.target.checked)}
+                      disabled={isGeneratingSeo || isUploadingToYouTube}
+                    />
+                    <span className="font-medium">Use web search (viral tags)</span>
+                  </label>
 
                   {seoError && (
                     <span className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">

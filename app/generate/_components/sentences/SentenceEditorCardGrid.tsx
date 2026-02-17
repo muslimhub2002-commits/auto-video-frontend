@@ -1,7 +1,14 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import { useState, type ChangeEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Loader2,
   Sparkles,
@@ -20,6 +27,54 @@ import { ForcedCharactersModal } from './ForcedCharactersModal';
 
 import type { SentenceItem } from '../../_types/sentences';
 
+type VisualEffectValue = SentenceItem['visualEffect'];
+
+function VisualEffectPreview({
+  effect,
+  children,
+}: {
+  effect: VisualEffectValue;
+  children: ReactNode;
+}) {
+  const normalized = effect ?? null;
+
+  const isColorGrading = normalized === 'colorGrading';
+  const isAnimatedLighting = normalized === 'animatedLighting';
+
+  const mediaFilter = isColorGrading
+    ? 'contrast(1.12) saturate(1.16) brightness(0.98)'
+    : undefined;
+
+  return (
+    <div className="relative">
+      <style>{`
+        @keyframes av-light-sweep {
+          0% { transform: translate(-10%, -6%) scale(1.05); }
+          50% { transform: translate(10%, 4%) scale(1.12); }
+          100% { transform: translate(-6%, 8%) scale(1.08); }
+        }
+      `}</style>
+
+      <div style={{ filter: mediaFilter }}>
+        {children}
+      </div>
+
+      {isAnimatedLighting ? (
+        <div
+          className="pointer-events-none absolute -inset-[20%]"
+          style={{
+            animation: 'av-light-sweep 5200ms ease-in-out infinite',
+            opacity: 0.34,
+            mixBlendMode: 'screen',
+            background:
+              'radial-gradient(circle at 40% 35%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)',
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 type ScriptCharacter = {
   key: string;
   name: string;
@@ -37,6 +92,14 @@ type SentenceEditorCardProps = {
 
   scriptCharacters: ScriptCharacter[];
   onForcedCharacterKeysChange: (next: string[] | null) => void;
+
+  onVisualEffectChange: (
+    value:
+      | 'none'
+      | 'colorGrading'
+      | 'animatedLighting'
+      | null,
+  ) => void;
 
   enhanceError: string | null;
   isEnhancing: boolean;
@@ -69,7 +132,7 @@ type SentenceEditorCardProps = {
   isGeneratingVideo: boolean;
   onGenerateVideo?: (canGenerateVideo: boolean) => void | Promise<void>;
 
-  onPreviewImage: (url: string) => void;
+  onPreviewImage: (url: string, effect: SentenceItem['visualEffect'] | null) => void;
 };
 
 export function SentenceEditorCard({
@@ -80,6 +143,8 @@ export function SentenceEditorCard({
 
   scriptCharacters,
   onForcedCharacterKeysChange,
+
+  onVisualEffectChange,
 
   enhanceError,
   isEnhancing,
@@ -125,6 +190,17 @@ export function SentenceEditorCard({
     : 0;
   const canPickForcedCharacters = Array.isArray(scriptCharacters) && scriptCharacters.length > 0;
 
+  const visualEffectValue = item.visualEffect ?? '__none__';
+
+  const visualEffectLabel =
+    visualEffectValue === '__none__'
+      ? 'None'
+      : visualEffectValue === 'colorGrading'
+        ? 'Color grading'
+        : visualEffectValue === 'animatedLighting'
+          ? 'Animated lighting'
+          : 'None';
+
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
   const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
   const hasStart = Boolean(startPreviewUrl);
@@ -137,7 +213,8 @@ export function SentenceEditorCard({
     >
       <div className="p-4">
         {/* Centered media mode tabs (applies to whole scene) */}
-        <div className="flex items-center justify-center pb-4">
+        <div className="flex items-center justify-between pb-4 gap-3">
+          <div className="w-12" />
           <div className="inline-flex items-center gap-1 p-1 bg-linear-to-br from-gray-50 to-gray-100 rounded-2xl shadow-sm border border-gray-200">
             <Button
               type="button"
@@ -167,6 +244,40 @@ export function SentenceEditorCard({
               <VideoIcon className="h-4 w-4 mr-2" />
               Video
             </Button>
+          </div>
+
+          <div className="shrink-0">
+            <Select
+              value={visualEffectValue}
+              onValueChange={(v) => {
+                if (v === '__none__') {
+                  onVisualEffectChange(null);
+                  return;
+                }
+                onVisualEffectChange(
+                  v as 'colorGrading' | 'animatedLighting',
+                );
+              }}
+            >
+              <SelectTrigger
+                className={
+                  visualEffectValue === '__none__'
+                    ? 'border-none focus-none h-9 w-48 bg-white border-gray-200 text-gray-600 shadow-sm [&>svg]:text-gray-600'
+                    : 'border-none focus-none h-9 w-48 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 outline-none font-semibold text-white border-transparent shadow-md [&>svg]:text-white'
+                }
+                title={`Visual effect: ${visualEffectLabel}`}
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  <SelectValue placeholder="Effect" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                <SelectItem value="colorGrading">Color grading</SelectItem>
+                <SelectItem value="animatedLighting">Animated lighting</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -453,12 +564,14 @@ export function SentenceEditorCard({
                         </div>
                         {startPreviewUrl ? (
                           <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                            <img
-                              src={startPreviewUrl}
-                              alt="Start frame"
-                              className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                              onClick={() => onPreviewImage(startPreviewUrl)}
-                            />
+                            <VisualEffectPreview effect={item.visualEffect}>
+                              <img
+                                src={startPreviewUrl}
+                                alt="Start frame"
+                                className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
+                                onClick={() => onPreviewImage(startPreviewUrl, item.visualEffect ?? null)}
+                              />
+                            </VisualEffectPreview>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -552,12 +665,14 @@ export function SentenceEditorCard({
                         </div>
                         {endPreviewUrl ? (
                           <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                            <img
-                              src={endPreviewUrl}
-                              alt="End frame"
-                              className="w-full h-58 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                              onClick={() => onPreviewImage(endPreviewUrl)}
-                            />
+                            <VisualEffectPreview effect={item.visualEffect}>
+                              <img
+                                src={endPreviewUrl}
+                                alt="End frame"
+                                className="w-full h-58 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
+                                onClick={() => onPreviewImage(endPreviewUrl, item.visualEffect ?? null)}
+                              />
+                            </VisualEffectPreview>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -668,11 +783,13 @@ export function SentenceEditorCard({
                 {item.video || item.videoUrl ? (
                   <div className="space-y-3">
                     <div className="relative w-full rounded-2xl overflow-hidden shadow-xl">
-                      <video
-                        src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
-                        controls
-                        className="block w-full aspect-9/16 object-cover h-96"
-                      />
+                      <VisualEffectPreview effect={item.visualEffect}>
+                        <video
+                          src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
+                          controls
+                          className="block w-full aspect-9/16 object-cover h-96"
+                        />
+                      </VisualEffectPreview>
                     </div>
 
                     <Button
@@ -725,18 +842,27 @@ export function SentenceEditorCard({
                 <div className="space-y-3">
                   <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 bg-gray-100 shadow-lg group/preview">
                     {item.image || item.imageUrl ? (
-                      <img
-                        src={item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string)}
-                        alt={`Scene ${index + 1}`}
-                        className="w-full h-58 object-cover transition-transform duration-200 group-hover/preview:scale-105 cursor-zoom-in"
-                        onClick={() => onPreviewImage(item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string))}
-                      />
+                      <VisualEffectPreview effect={item.visualEffect}>
+                        <img
+                          src={item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string)}
+                          alt={`Scene ${index + 1}`}
+                          className="w-full h-58 object-cover transition-transform duration-200 group-hover/preview:scale-105 cursor-zoom-in"
+                          onClick={() =>
+                            onPreviewImage(
+                              item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string),
+                              item.visualEffect ?? null,
+                            )
+                          }
+                        />
+                      </VisualEffectPreview>
                     ) : (
-                      <video
-                        src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
-                        controls
-                        className="block w-full max-w-65 mx-auto aspect-9/16 object-cover"
-                      />
+                      <VisualEffectPreview effect={item.visualEffect}>
+                        <video
+                          src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
+                          controls
+                          className="block w-full max-w-65 mx-auto aspect-9/16 object-cover"
+                        />
+                      </VisualEffectPreview>
                     )}
                     <button
                       type="button"
@@ -756,18 +882,18 @@ export function SentenceEditorCard({
                   </div>
                 </div>
                 {item.imagePrompt && (
-                    <div className="col-span-2 bg-gray-50 rounded-xl p-2 border border-gray-200">
-                      <div className="flex items-start gap-2">
-                        <div className="p-1 bg-indigo-100 rounded-lg shrink-0 mt-0.5">
-                          <Sparkles className="h-3 w-3 text-indigo-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-gray-700 mb-1">Prompt Used</p>
-                          <p className="text-xs text-gray-600 leading-relaxed line-clamp-1">{item.imagePrompt}</p>
-                        </div>
+                  <div className="col-span-2 bg-gray-50 rounded-xl p-2 border border-gray-200">
+                    <div className="flex items-start gap-2">
+                      <div className="p-1 bg-indigo-100 rounded-lg shrink-0 mt-0.5">
+                        <Sparkles className="h-3 w-3 text-indigo-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-700 mb-1">Prompt Used</p>
+                        <p className="text-xs text-gray-600 leading-relaxed line-clamp-1">{item.imagePrompt}</p>
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2">
                   <Button
@@ -776,9 +902,8 @@ export function SentenceEditorCard({
                     variant="outline"
                     onClick={() => onSelectFromLibrary('single')}
                     disabled={item.isSavingImage || item.isGeneratingImage || isApplyingImagePrompt}
-                    className={`h-9 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300 font-semibold ${
-                      hasAnyImage ? '' : 'col-span-2'
-                    }`}
+                    className={`h-9 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300 font-semibold ${hasAnyImage ? '' : 'col-span-2'
+                      }`}
                   >
                     <Library className="h-4 w-4" />
                     <span className="text-xs">Change</span>
@@ -817,7 +942,7 @@ export function SentenceEditorCard({
                       </Button>
                     </>
                   )}
-                  
+
                   {imagePromptError && (
                     <div className="col-span-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
                       <div className="p-1 bg-red-100 rounded-lg shrink-0">

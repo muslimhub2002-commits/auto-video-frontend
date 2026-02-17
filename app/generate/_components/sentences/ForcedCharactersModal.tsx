@@ -56,7 +56,7 @@ export function ForcedCharactersModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-8 py-6 border-b border-gray-100 bg-linear-to-br from-slate-50 to-white">
+        <div className="px-8 py-6 border-b border-gray-200/80 bg-linear-to-r from-indigo-50 via-purple-50 to-pink-50">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-linear-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-md shadow-blue-500/20">

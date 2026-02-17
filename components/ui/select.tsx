@@ -13,8 +13,9 @@ const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
     label?: string;
+    hideChevron?: boolean;
   }
->(({ className, children, label, ...props }, ref) => {
+>(({ className, children, label, hideChevron, ...props }, ref) => {
   const triggerId = React.useId();
   
   return (
@@ -42,9 +43,11 @@ const SelectTrigger = React.forwardRef<
         {...props}
       >
         {children}
-        <SelectPrimitive.Icon asChild>
-          <ChevronDown className="h-4 w-4 text-gray-500 transition-transform duration-200 data-[state=open]:rotate-180 data-[state=open]:text-primary" />
-        </SelectPrimitive.Icon>
+        {hideChevron ? null : (
+          <SelectPrimitive.Icon asChild>
+            <ChevronDown className="h-4 w-4 text-gray-500 transition-transform duration-200 data-[state=open]:rotate-180 data-[state=open]:text-primary" />
+          </SelectPrimitive.Icon>
+        )}
       </SelectPrimitive.Trigger>
     </div>
   );

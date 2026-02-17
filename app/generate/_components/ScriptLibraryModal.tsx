@@ -12,10 +12,34 @@ interface ScriptSentenceDto {
   text: string;
   index: number;
   isSuspense?: boolean;
+  forced_character_keys?: string[] | null;
+  transition_to_next?:
+    | 'none'
+    | 'glitch'
+    | 'whip'
+    | 'flash'
+    | 'fade'
+    | 'chromaLeak'
+    | null;
+  visual_effect?: 'colorGrading' | 'animatedLighting' | null;
   image?: {
     id: string;
     image: string;
     prompt?: string | null;
+  } | null;
+  startFrameImage?: {
+    id: string;
+    image: string;
+    prompt?: string | null;
+  } | null;
+  endFrameImage?: {
+    id: string;
+    image: string;
+    prompt?: string | null;
+  } | null;
+  video?: {
+    id: string;
+    video: string;
   } | null;
 }
 
@@ -28,7 +52,7 @@ interface ScriptCharacterDto {
   isWoman: boolean;
 }
 
-interface ScriptDto {
+export interface ScriptDto {
   id: string;
   title: string | null;
   script: string;

@@ -2,6 +2,13 @@
 
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
@@ -25,6 +32,27 @@ type SceneEditorSectionProps = {
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
+
+  onSentenceVisualEffectChange: (
+    index: number,
+    value:
+      | 'none'
+      | 'colorGrading'
+      | 'animatedLighting'
+      | null,
+  ) => void;
+
+  onTransitionToNextChange: (
+    index: number,
+    value:
+      | 'none'
+      | 'glitch'
+      | 'whip'
+      | 'flash'
+      | 'fade'
+      | 'chromaLeak'
+      | null,
+  ) => void;
 
   onInsertEmptySentenceAfter: (index: number) => string;
 
@@ -68,7 +96,7 @@ type SceneEditorSectionProps = {
   onRemoveSentenceImage: (index: number) => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
 
-  onPreviewImage: (url: string) => void;
+  onPreviewImage: (url: string, effect: SentenceItem['visualEffect'] | null) => void;
 };
 
 export function SceneEditorSection({
@@ -79,6 +107,8 @@ export function SceneEditorSection({
   scriptCharacters,
   onScriptCharactersChange,
   onSentenceForcedCharacterKeysChange,
+  onSentenceVisualEffectChange,
+  onTransitionToNextChange,
   onInsertEmptySentenceAfter,
   onOpenAddSuspense,
 
@@ -245,6 +275,10 @@ export function SceneEditorSection({
                   onForcedCharacterKeysChange={(next) =>
                     onSentenceForcedCharacterKeysChange(index, next)
                   }
+
+                  onVisualEffectChange={(value) =>
+                    onSentenceVisualEffectChange(index, value)
+                  }
                   enhanceError={enhanceError}
                   isEnhancing={isEnhancing}
                   isApplyingPrompt={isApplyingPrompt}
@@ -311,7 +345,64 @@ export function SceneEditorSection({
               {index < sentences.length - 1 ? (
                 <div className="relative py-3">
                   <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-200" />
-                  <div className="relative flex items-center justify-center">
+                  <div className="relative flex items-center justify-center gap-2">
+                    {(() => {
+                      const next = sentences[index + 1];
+                      const currentTab = item.sceneTab ?? (item.mediaMode === 'frames' ? 'video' : 'image');
+                      const nextTab = next?.sceneTab ?? (next?.mediaMode === 'frames' ? 'video' : 'image');
+                      const isImageToImage =
+                        currentTab === 'image' &&
+                        nextTab === 'image' &&
+                        !item.video &&
+                        !item.videoUrl &&
+                        !next?.video &&
+                        !next?.videoUrl;
+
+                      const value = item.transitionToNext ?? '__auto__';
+
+                      return (
+                        <Select
+                          value={value}
+                          onValueChange={(v) => {
+                            if (v === '__auto__') {
+                              onTransitionToNextChange(index, null);
+                              return;
+                            }
+                            onTransitionToNextChange(
+                              index,
+                              v as
+                                | 'none'
+                                | 'glitch'
+                                | 'whip'
+                                | 'flash'
+                                | 'fade'
+                                | 'chromaLeak',
+                            );
+                          }}
+                        >
+                          <SelectTrigger
+                            className="h-9 w-44 bg-white border-gray-200 text-gray-700 shadow-sm"
+                            disabled={!isImageToImage}
+                            title={
+                              isImageToImage
+                                ? 'Optional: override the transition into the next scene'
+                                : 'Transitions are only applied on image-to-image cuts'
+                            }
+                          >
+                            <SelectValue placeholder="Transition (Auto)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__auto__">Transition (Random)</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
+                            <SelectItem value="glitch">Glitch</SelectItem>
+                            <SelectItem value="whip">Whip</SelectItem>
+                            <SelectItem value="flash">Flash</SelectItem>
+                            <SelectItem value="fade">Fade</SelectItem>
+                            <SelectItem value="chromaLeak">Chroma leak</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
                     <Button
                       type="button"
                       size="sm"
@@ -332,7 +423,7 @@ export function SceneEditorSection({
                       title="Insert a new empty sentence here"
                     >
                       <Plus className="h-4 w-4" />
-                      <span className="text-xs font-semibold">Add sentence</span>
+                      <span className="text-xs font-semibold">Add Sentence</span>
                     </Button>
                   </div>
                 </div>

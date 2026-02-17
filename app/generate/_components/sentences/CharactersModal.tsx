@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Plus, Users, X, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Sparkles, Users, X, Trash2 } from 'lucide-react';
+import { API_URL } from '@/lib/api';
 
 export type ScriptCharacter = {
   key: string;
@@ -30,6 +31,7 @@ export function CharactersModal({
 
   const [draft, setDraft] = useState<ScriptCharacter[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [enhancingKey, setEnhancingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -38,6 +40,84 @@ export function CharactersModal({
   }, [isOpen, initial]);
 
   if (!isOpen) return null;
+
+  const streamEnhanceCharacterPrompt = async (params: {
+    name: string;
+    description: string;
+    onChunk?: (chunk: string) => void;
+  }) => {
+    const baseName = String(params.name ?? '').trim();
+    const baseDescription = String(params.description ?? '').trim();
+    const baseSentence = baseDescription
+      ? `${baseName ? `${baseName}: ` : ''}${baseDescription}`
+      : baseName;
+
+    const res = await fetch(`${API_URL}/ai/enhance-sentence`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sentence: baseSentence,
+        style: 'Descriptive',
+        userPrompt:
+          'Expand this into a more detailed image-generation character prompt while keeping the same person/identity. ' +
+          'Add specific facial features, hairstyle, age range, clothing/dressing details, physique/body type, and any small accessories if fitting. ' +
+          'Keep it as exactly ONE sentence, but it can be long with commas/semicolons. ' +
+          'Do not add any extra characters. Do not mention being Sahaba/Prophet/Woman. Do not add any religious figures. ' +
+          'Return only the final prompt text.',
+      }),
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error('Failed to generate detailed character prompt');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (!chunk) continue;
+      fullText += chunk;
+      params.onChunk?.(chunk);
+    }
+
+    return fullText.trim();
+  };
+
+  const handleEnhanceCharacterPrompt = async (idx: number) => {
+    const c = draft[idx];
+    if (!c) return;
+    const blocked = Boolean(c.isSahaba || c.isProphet || c.isWoman);
+    if (blocked) return;
+
+    try {
+      setError(null);
+      setEnhancingKey(c.key);
+
+      const enhanced = await streamEnhanceCharacterPrompt({
+        name: c.name,
+        description: c.description,
+      });
+
+      if (!enhanced) {
+        throw new Error('Empty enhanced prompt returned');
+      }
+
+      setDraft((prev) =>
+        prev.map((p, i) => (i === idx ? { ...p, description: enhanced } : p)),
+      );
+    } catch (e) {
+      console.error('Enhance character prompt failed', e);
+      setError('Failed to generate detailed character prompt. Please try again.');
+    } finally {
+      setEnhancingKey(null);
+    }
+  };
 
   const generateKey = () => {
     const base =
@@ -87,7 +167,7 @@ export function CharactersModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-300"
+      className="fixed inset-0 z-60 min-h-screen flex items-center justify-center p-4 backdrop-blur-lg animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
@@ -95,7 +175,7 @@ export function CharactersModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-8 py-6 border-b border-gray-100 bg-linear-to-br from-slate-50 to-white">
+        <div className="px-8 py-6 border-b border-gray-200/80 bg-linear-to-r from-indigo-50 via-purple-50 to-pink-50">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-linear-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-md shadow-blue-500/20">
@@ -149,15 +229,40 @@ export function CharactersModal({
                         <span className="text-xs font-bold text-blue-700">#{idx + 1}</span>
                       </div>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setDraft((prev) => prev.filter((_, i) => i !== idx))}
-                      className="h-8 w-8 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleEnhanceCharacterPrompt(idx)}
+                        disabled={
+                          Boolean(c.isSahaba || c.isProphet || c.isWoman) ||
+                          enhancingKey === c.key
+                        }
+                        title={
+                          c.isSahaba || c.isProphet || c.isWoman
+                            ? 'Prompt enhancement is disabled for Sahaba/Prophet/Woman characters'
+                            : 'Generate a more detailed facial/dressing/physique prompt'
+                        }
+                        className="h-9 px-3 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm hover:shadow-md transition-all disabled:opacity-60 disabled:hover:from-blue-600 disabled:hover:to-indigo-600"
+                      >
+                        {enhancingKey === c.key ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                        <span className="text-xs font-semibold">Enhance prompt</span>
+                      </Button>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setDraft((prev) => prev.filter((_, i) => i !== idx))}
+                        className="h-8 w-8 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Form fields */}
@@ -188,7 +293,7 @@ export function CharactersModal({
                           );
                         }}
                         className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-shadow"
-                        rows={3}
+                        rows={5}
                         placeholder="Visual description and attributes for image generation..."
                       />
                     </div>

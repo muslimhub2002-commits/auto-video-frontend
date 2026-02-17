@@ -25,19 +25,16 @@ import { SentencesImagesSection } from './_components/SentencesImagesSection';
 import { VoiceOverSection } from './_components/VoiceOverSection';
 import { GenerateVideoButton } from './_components/GenerateVideoButton';
 import { VideoJobSection } from './_components/VideoJobSection';
-import { ImageLibraryModal } from './_components/ImageLibraryModal';
-import { ScriptLibraryModal } from './_components/ScriptLibraryModal';
-import {
-  ScriptReferencesModal,
-  type ScriptReferenceDto,
-} from './_components/ScriptReferencesModal';
-import { VoiceLibraryModal } from './_components/VoiceLibraryModal';
+import type { ScriptReferenceDto } from './_components/ScriptReferencesModal';
 import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
+import { RenderSettingsSection } from './_components/RenderSettingsSection';
+import { GenerateModalsHost } from './_components/GenerateModalsHost';
 import { useAuthGuard } from './_hooks/useAuthGuard';
+import { useSentencesEditor } from './_hooks/useSentencesEditor';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
-import { AlertModal, useAlertModal } from '@/components/ui/alert-modal';
+import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import type { SentenceItem } from './_types/sentences';
@@ -61,6 +58,8 @@ type BackendSentenceDto = {
   video?: { id: string; video: string } | null;
   isSuspense?: boolean;
   forced_character_keys?: string[] | null;
+  transition_to_next?: SentenceItem['transitionToNext'] | null;
+  visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
@@ -236,6 +235,7 @@ export function GeneratePageInner() {
   const previewAudioUrlRef = useRef<string | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [isRandomScriptLoading, setIsRandomScriptLoading] = useState(false);
   const [randomScriptError, setRandomScriptError] = useState<string | null>(
     null,
@@ -244,7 +244,19 @@ export function GeneratePageInner() {
   // Track the original config used to produce the current script
   const [originalScriptSubject, setOriginalScriptSubject] = useState<string | undefined>(undefined);
   const [originalScriptSubjectContent, setOriginalScriptSubjectContent] = useState<string | undefined>(undefined);
-  const [sentences, setSentences] = useState<SentenceItem[]>([]);
+  const {
+    sentences,
+    setSentences,
+    handleSentenceForcedCharacterKeysChange,
+    handleSentenceVisualEffectChange,
+    handleTransitionToNextChange,
+    handleSentenceTextChange,
+    handleMergeSentenceIntoPrevious,
+    handleMergeSentenceIntoNext,
+    handleDeleteSentence,
+    handleInsertEmptySentenceAfter,
+    handleAddSuspenseScene,
+  } = useSentencesEditor();
   const [isSplitting, setIsSplitting] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -320,6 +332,7 @@ export function GeneratePageInner() {
   const [isShort, setIsShort] = useState(true);
   const [useLowerFps, setUseLowerFps] = useState(false);
   const [useLowerResolution, setUseLowerResolution] = useState(false);
+  const [addSubtitles, setAddSubtitles] = useState(true);
   const [enableGlitchTransitions, setEnableGlitchTransitions] = useState(true);
   const [enableZoomRotateTransitions, setEnableZoomRotateTransitions] = useState(true);
   const {
@@ -332,6 +345,69 @@ export function GeneratePageInner() {
     setVideoJobError,
     setVideoUrl,
   } = useVideoJob(API_URL);
+
+  const handleUploadFinalVideo = async (file: File) => {
+    if (!file) return;
+
+    const MAX_UPLOAD_MB = 250;
+    const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+    const isVideoMime = String(file.type || '').toLowerCase().startsWith('video/');
+    if (!isVideoMime) {
+      showToast('Please choose a valid video file.', 'error');
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      showToast(`Video is too large. Max size is ${MAX_UPLOAD_MB} MB.`, 'error');
+      return;
+    }
+
+    setVideoJobError(null);
+    resetJob();
+
+    setIsUploadingVideo(true);
+    try {
+      const form = new FormData();
+      form.append('video', file);
+
+      const res = await fetch(`${API_URL}/videos/upload`, {
+        method: 'POST',
+        body: form,
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || 'Failed to upload video');
+      }
+
+      const data = (await res.json()) as {
+        id?: string;
+        status?: string;
+        videoUrl?: string | null;
+      };
+
+      const id = String(data.id ?? '').trim();
+      const status = String(data.status ?? '').trim() || 'completed';
+      const url = data.videoUrl ? String(data.videoUrl).trim() : '';
+
+      if (!id || !url) {
+        throw new Error('Upload succeeded but response was missing id/videoUrl');
+      }
+
+      setJobFromResponse(id, status);
+      setVideoUrl(url);
+      showToast('Video uploaded successfully.', 'success');
+    } catch (error) {
+      console.error('Upload video failed', error);
+      setVideoJobError('Failed to upload video. Please try again.');
+      showAlert('Failed to upload video. Please try again in a moment.', {
+        type: 'error',
+      });
+    } finally {
+      setIsUploadingVideo(false);
+    }
+  };
 
   const voices = voicesByProvider[voiceProvider];
   const isLoadingVoices = isLoadingVoicesByProvider[voiceProvider];
@@ -1112,12 +1188,17 @@ export function GeneratePageInner() {
       const sentencePayload = sentences.map((s) => {
         const text = String(s.text ?? '');
         const trimmed = text.trim();
+
+        const transitionToNext = s.transitionToNext ?? null;
+        const visualEffect = s.visualEffect ?? null;
         if (trimmed === subscribeSentence) {
           return {
             text,
             isSuspense: Boolean(s.isSuspense),
             mediaType: 'video' as const,
             videoUrl: '/subscribe.mp4',
+            ...(transitionToNext ? { transitionToNext } : {}),
+            ...(visualEffect ? { visualEffect } : {}),
           };
         }
 
@@ -1128,6 +1209,8 @@ export function GeneratePageInner() {
             isSuspense: Boolean(s.isSuspense),
             mediaType: 'video' as const,
             videoUrl: String(s.videoUrl ?? '').trim(),
+            ...(transitionToNext ? { transitionToNext } : {}),
+            ...(visualEffect ? { visualEffect } : {}),
           };
         }
 
@@ -1135,6 +1218,8 @@ export function GeneratePageInner() {
           text,
           isSuspense: Boolean(s.isSuspense),
           mediaType: 'image' as const,
+          ...(transitionToNext ? { transitionToNext } : {}),
+          ...(visualEffect ? { visualEffect } : {}),
         };
       });
       form.append('sentences', JSON.stringify(sentencePayload));
@@ -1150,6 +1235,7 @@ export function GeneratePageInner() {
         'useLowerResolution',
         useLowerResolution ? 'true' : 'false',
       );
+      form.append('addSubtitles', addSubtitles ? 'true' : 'false');
       form.append(
         'enableGlitchTransitions',
         enableGlitchTransitions ? 'true' : 'false',
@@ -1430,25 +1516,6 @@ export function GeneratePageInner() {
     setScriptCharacters(Array.isArray(next) ? next : []);
   };
 
-  const handleSentenceForcedCharacterKeysChange = (
-    index: number,
-    next: string[] | null,
-  ) => {
-    setSentences((prev) =>
-      prev.map((s, i) =>
-        i === index
-          ? {
-              ...s,
-              forcedCharacterKeys:
-                Array.isArray(next) && next.length
-                  ? Array.from(new Set(next.filter(Boolean)))
-                  : null,
-            }
-          : s,
-      ),
-    );
-  };
-
   const handleOpenScriptLibrary = () => {
     setIsScriptLibraryOpen(true);
   };
@@ -1511,6 +1578,8 @@ export function GeneratePageInner() {
         forcedCharacterKeys: Array.isArray(s.forced_character_keys)
           ? s.forced_character_keys
           : null,
+        transitionToNext: s.transition_to_next ?? null,
+        visualEffect: s.visual_effect ?? null,
         image: null,
         imageUrl: s.image?.image ?? null,
         startImage: null,
@@ -1777,134 +1846,6 @@ export function GeneratePageInner() {
           : item,
       ),
     );
-  };
-
-  const handleSentenceTextChange = (index: number, text: string) => {
-    setSentences((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, text } : item)),
-    );
-  };
-
-  const mergeSentenceText = (targetText: string, sourceText: string) => {
-    const parts = [targetText, sourceText]
-      .map((t) => (t ?? '').trim())
-      .filter(Boolean);
-    return parts.join(' ');
-  };
-
-  const handleMergeSentenceIntoPrevious = (index: number) => {
-    setSentences((prev) => {
-      if (index <= 0 || index >= prev.length) return prev;
-      const targetIndex = index - 1;
-      const target = prev[targetIndex];
-      const source = prev[index];
-      if (!target || !source) return prev;
-
-      const next = prev.map((item, i) =>
-        i === targetIndex
-          ? { ...item, text: mergeSentenceText(item.text, source.text) }
-          : item,
-      );
-      next.splice(index, 1);
-      return next;
-    });
-  };
-
-  const handleMergeSentenceIntoNext = (index: number) => {
-    setSentences((prev) => {
-      if (index < 0 || index >= prev.length - 1) return prev;
-      const targetIndex = index + 1;
-      const target = prev[targetIndex];
-      const source = prev[index];
-      if (!target || !source) return prev;
-
-      const next = prev.map((item, i) =>
-        i === targetIndex
-          ? { ...item, text: mergeSentenceText(item.text, source.text) }
-          : item,
-      );
-      next.splice(index, 1);
-      return next;
-    });
-  };
-
-  const handleDeleteSentence = (index: number) => {
-    setSentences((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-      return prev.filter((_, i) => i !== index);
-    });
-  };
-
-  const handleInsertEmptySentenceAfter = (index: number): string => {
-    const newId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `sentence-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-    setSentences((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-
-      const empty: SentenceItem = {
-        id: newId,
-        text: '',
-        sceneTab: 'image',
-        mediaMode: 'single',
-        forcedCharacterKeys: null,
-        image: null,
-        imageUrl: null,
-        imagePrompt: null,
-        savedImageId: null,
-        startImage: null,
-        startImageUrl: null,
-        startImagePrompt: null,
-        startSavedImageId: null,
-        endImage: null,
-        endImageUrl: null,
-        endImagePrompt: null,
-        endSavedImageId: null,
-        video: null,
-        videoUrl: null,
-        savedVideoId: null,
-        isGeneratingImage: false,
-        isGeneratingStartImage: false,
-        isGeneratingEndImage: false,
-        isSavingImage: false,
-        isFromLibrary: false,
-        isSuspense: false,
-      };
-
-      const next = [...prev];
-      next.splice(index + 1, 0, empty);
-      return next;
-    });
-
-    return newId;
-  };
-
-  const handleAddSuspenseScene = (sourceIndex: number) => {
-    setSentences((prev) => {
-      const source = prev[sourceIndex];
-      if (!source) return prev;
-
-      const newId =
-        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `suspense-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-      const copy: SentenceItem = {
-        ...source,
-        id: newId,
-        isSuspense: true,
-        isGeneratingImage: false,
-        isSavingImage: false,
-        // Keep the saved image reference so drafts can round-trip the suspense scene media.
-        savedImageId: source.savedImageId ?? null,
-      };
-
-      // Only one suspense scene should exist. Adding a new one replaces the previous.
-      const withoutExistingSuspense = prev.filter((s) => !s.isSuspense);
-      return [copy, ...withoutExistingSuspense];
-    });
   };
 
   const handleGenerateSentenceImage = async (index: number, promptOverride?: string) => {
@@ -2617,6 +2558,8 @@ export function GeneratePageInner() {
         video_id?: string;
         isSuspense?: boolean;
         forced_character_keys?: string[];
+        transition_to_next?: SentenceItem['transitionToNext'] | null;
+        visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
       }[] = [];
 
       // Ensure any uploaded or generated images are saved to the images table
@@ -2660,6 +2603,11 @@ export function GeneratePageInner() {
             Array.isArray(s.forcedCharacterKeys) && s.forcedCharacterKeys.length
               ? s.forcedCharacterKeys
               : undefined,
+          transition_to_next: s.transitionToNext ?? null,
+          visual_effect:
+            s.visualEffect === 'colorGrading' || s.visualEffect === 'animatedLighting'
+              ? s.visualEffect
+              : null,
         });
       }
 
@@ -2685,6 +2633,8 @@ export function GeneratePageInner() {
           video_id?: string;
           isSuspense?: boolean;
           forced_character_keys?: string[];
+          transition_to_next?: SentenceItem['transitionToNext'] | null;
+          visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
         }[];
         subject?: string;
         subject_content?: string | null;
@@ -2741,6 +2691,8 @@ export function GeneratePageInner() {
           forcedCharacterKeys: Array.isArray(s.forced_character_keys)
             ? s.forced_character_keys
             : null,
+          transitionToNext: s.transition_to_next ?? null,
+          visualEffect: s.visual_effect ?? null,
           image: null,
           imageUrl: s.image?.image ?? null,
           startImage: null,
@@ -3092,6 +3044,8 @@ export function GeneratePageInner() {
                   scriptCharacters={scriptCharacters}
                   onScriptCharactersChange={handleScriptCharactersChange}
                   onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
+                  onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
+                  onTransitionToNextChange={handleTransitionToNextChange}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
@@ -3154,141 +3108,16 @@ export function GeneratePageInner() {
                   onOpenLibrary={handleOpenVoiceLibrary}
                 />
               </Accordion>
-              {/* Render Settings */}
-              <div className="px-6 pb-5 pt-5 border-t border-gray-200 bg-linear-to-br from-gray-50 to-white">
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-linear-to-br from-indigo-400 to-purple-500 blur-md opacity-40 rounded-xl"></div>
-                    <div className="relative p-2.5 bg-linear-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg">
-                      <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold bg-linear-to-r from-gray-900 via-indigo-900 to-purple-900 bg-clip-text text-transparent">Render Configuration</h3>
-                    <p className="text-sm text-gray-600">Fine-tune quality and performance</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {/* Is Short Option */}
-                  <label
-                    className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${isShort
-                      ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                      : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
-                      }`}
-                  >
-                    <div className="relative mt-0.5">
-                      <input
-                        type="checkbox"
-                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
-                        checked={isShort}
-                        onChange={(e) => setIsShort(e.target.checked)}
-                      />
-                      <div
-                        className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${isShort ? 'animate-ping' : ''
-                          }`}
-                        style={{ animationIterationCount: 1, animationDuration: '0.5s' }}
-                      ></div>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">Is Short</span>
-                        <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">Aspect ratio</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">On: 9:16 (Shorts). Off: 16:9 (Regular)</p>
-                    </div>
-                  </label>
-
-                  {/* Lower FPS Option */}
-                  <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerFps
-                    ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                    : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
-                    }`}>
-                    <div className="relative mt-0.5">
-                      <input
-                        type="checkbox"
-                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
-                        checked={useLowerFps}
-                        onChange={(e) => setUseLowerFps(e.target.checked)}
-                      />
-                      <div className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${useLowerFps ? 'animate-ping' : ''
-                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">Lower FPS</span>
-                        <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Faster</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">24 fps instead of 30 fps (~20% faster)</p>
-                    </div>
-                  </label>
-
-                  {/* Lower Resolution Option */}
-                  <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${useLowerResolution
-                    ? 'border-indigo-400 shadow-lg shadow-indigo-100'
-                    : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
-                    }`}>
-                    <div className="relative mt-0.5">
-                      <input
-                        type="checkbox"
-                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
-                        checked={useLowerResolution}
-                        onChange={(e) =>
-                          setUseLowerResolution(e.target.checked)
-                        }
-                      />
-                      <div className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${useLowerResolution ? 'animate-ping' : ''
-                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">720p Resolution</span>
-                        <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full">Faster</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Use 720p instead of 1080p (~50% faster)</p>
-                    </div>
-                  </label>
-
-                  {/* Glitch Transitions Option */}
-                  {/* <label className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${enableGlitchTransitions
-                      ? 'border-purple-400 shadow-lg shadow-purple-100'
-                      : 'border-gray-200 hover:border-purple-300 hover:shadow-md'
-                    }`}>
-                    <div className="relative mt-0.5">
-                      <input
-                        type="checkbox"
-                        className="peer h-5 w-5 rounded border-2 border-gray-300 text-purple-600 focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-purple-500"
-                        checked={enableGlitchTransitions}
-                        onChange={(e) =>
-                          setEnableGlitchTransitions(e.target.checked)
-                        }
-                      />
-                      <div className={`absolute inset-0 rounded bg-purple-500 opacity-0 transition-opacity duration-300 pointer-events-none ${enableGlitchTransitions ? 'animate-ping' : ''
-                        }`} style={{ animationIterationCount: 1, animationDuration: '0.5s' }}></div>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900 group-hover:text-purple-700 transition-colors">Glitch Effect</span>
-                        <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">1x per video</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">RGB channel split effect on middle scene</p>
-                    </div>
-                  </label> */}
-                </div>
-
-                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <svg className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                    </svg>
-                    <p className="text-xs text-blue-800 leading-relaxed">
-                      <span className="font-semibold">Tip:</span> Enable performance options for faster previews, disable them for final high-quality exports.
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <RenderSettingsSection
+                isShort={isShort}
+                onIsShortChange={setIsShort}
+                useLowerFps={useLowerFps}
+                onUseLowerFpsChange={setUseLowerFps}
+                useLowerResolution={useLowerResolution}
+                onUseLowerResolutionChange={setUseLowerResolution}
+                addSubtitles={addSubtitles}
+                onAddSubtitlesChange={setAddSubtitles}
+              />
 
               {/* Generate Button */}
               <GenerateVideoButton
@@ -3297,6 +3126,8 @@ export function GeneratePageInner() {
                 script={script}
                 voiceOver={voiceOver}
                 onGenerate={handleGenerate}
+                onUploadVideo={handleUploadFinalVideo}
+                isUploadingVideo={isUploadingVideo}
               />
             </div>
 
@@ -3339,52 +3170,34 @@ export function GeneratePageInner() {
         </div>
       </div>
 
-      {/* Image Library Modal */}
-      <ImageLibraryModal
-        isOpen={isLibraryModalOpen}
-        selectedImageUrl={
-          libraryTarget
-            ? libraryTarget.which === 'single'
-              ? sentences[libraryTarget.index]?.imageUrl ?? null
-              : libraryTarget.which === 'start'
-                ? sentences[libraryTarget.index]?.startImageUrl ?? null
-                : sentences[libraryTarget.index]?.endImageUrl ?? null
-            : null
-        }
-        onClose={() => {
+      <GenerateModalsHost
+        isImageLibraryOpen={isLibraryModalOpen}
+        libraryTarget={libraryTarget}
+        sentences={sentences}
+        onCloseImageLibrary={() => {
           setIsLibraryModalOpen(false);
           setLibraryTarget(null);
         }}
         onSelectImage={handleLibraryImageSelect}
-      />
-
-      {/* Voice Library Modal */}
-      <VoiceLibraryModal
-        isOpen={isVoiceLibraryOpen}
+        isVoiceLibraryOpen={isVoiceLibraryOpen}
         selectedVoiceUrl={voiceLibraryUrl}
-        onClose={() => {
+        onCloseVoiceLibrary={() => {
           setIsVoiceLibraryOpen(false);
         }}
         onSelectVoice={handleVoiceLibrarySelect}
-      />
-
-      {/* Script Library Modal */}
-      <ScriptLibraryModal
-        isOpen={isScriptLibraryOpen}
-        onClose={() => setIsScriptLibraryOpen(false)}
+        isScriptLibraryOpen={isScriptLibraryOpen}
+        onCloseScriptLibrary={() => setIsScriptLibraryOpen(false)}
         onSelectScript={handleSelectScriptFromLibrary}
-      />
-
-      {/* Script References Modal */}
-      <ScriptReferencesModal
-        isOpen={isScriptReferencesOpen}
-        onClose={() => setIsScriptReferencesOpen(false)}
-        initialSelected={referenceScripts.map((s) => ({
+        isScriptReferencesOpen={isScriptReferencesOpen}
+        onCloseScriptReferences={() => setIsScriptReferencesOpen(false)}
+        initialSelectedReferenceScripts={referenceScripts.map((s) => ({
           id: s.id,
           title: s.title,
           script: s.script,
         }))}
-        onApply={handleApplyReferenceScripts}
+        onApplyReferenceScripts={handleApplyReferenceScripts}
+        alertState={alertState}
+        onCloseAlert={closeAlert}
       />
 
       {/* Generate All Images Confirmation */}
@@ -3454,14 +3267,6 @@ export function GeneratePageInner() {
         variant="warning"
       />
 
-      {/* Alert Modal */}
-      <AlertModal
-        isOpen={alertState.isOpen}
-        onClose={closeAlert}
-        title={alertState.title}
-        message={alertState.message}
-        type={alertState.type}
-      />
     </div>
   );
 }

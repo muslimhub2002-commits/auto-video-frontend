@@ -46,6 +46,25 @@ type SentencesImagesSectionProps = {
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
+  onSentenceVisualEffectChange: (
+    index: number,
+    value:
+      | 'none'
+      | 'colorGrading'
+      | 'animatedLighting'
+      | null,
+  ) => void;
+  onTransitionToNextChange: (
+    index: number,
+    value:
+      | 'none'
+      | 'glitch'
+      | 'whip'
+      | 'flash'
+      | 'fade'
+      | 'chromaLeak'
+      | null,
+  ) => void;
   imagePromptModel: string;
   onImagePromptModelChange: (value: string) => void;
   imageModel: string;
@@ -90,6 +109,8 @@ export function SentencesImagesSection({
   scriptCharacters,
   onScriptCharactersChange,
   onSentenceForcedCharacterKeysChange,
+  onSentenceVisualEffectChange,
+  onTransitionToNextChange,
   imagePromptModel,
   onImagePromptModelChange,
   imageModel,
@@ -138,6 +159,7 @@ export function SentencesImagesSection({
   });
 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewVisualEffect, setPreviewVisualEffect] = useState<SentenceItem['visualEffect'] | null>(null);
   const [isPreviewClosing, setIsPreviewClosing] = useState(false);
 
   const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
@@ -247,6 +269,8 @@ export function SentencesImagesSection({
               scriptCharacters={scriptCharacters}
               onScriptCharactersChange={onScriptCharactersChange}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
+              onSentenceVisualEffectChange={onSentenceVisualEffectChange}
+              onTransitionToNextChange={onTransitionToNextChange}
               onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
               onOpenAddSuspense={() => {
                 setSuspenseSelectedIndex(null);
@@ -280,9 +304,10 @@ export function SentencesImagesSection({
               onSelectFromLibrary={onSelectFromLibrary}
               onRemoveSentenceImage={onRemoveSentenceImage}
               onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
-              onPreviewImage={(url) => {
+              onPreviewImage={(url, effect) => {
                 setIsPreviewClosing(false);
                 setPreviewImageUrl(url);
+                setPreviewVisualEffect(effect ?? null);
               }}
             />
           ) : (
@@ -291,10 +316,14 @@ export function SentencesImagesSection({
           {previewImageUrl ? (
             <ImagePreviewOverlay
               previewImageUrl={previewImageUrl}
+              visualEffect={previewVisualEffect}
               isPreviewClosing={isPreviewClosing}
               onRequestClose={() => {
                 setIsPreviewClosing(true);
-                setTimeout(() => setPreviewImageUrl(null), 200);
+                setTimeout(() => {
+                  setPreviewImageUrl(null);
+                  setPreviewVisualEffect(null);
+                }, 200);
               }}
             />
           ) : null}

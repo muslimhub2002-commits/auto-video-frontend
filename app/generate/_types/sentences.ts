@@ -4,6 +4,25 @@ export type SentenceItem = {
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
 
+  // Optional per-sentence visual effect applied on the media itself (not transitions).
+  // Null/undefined means no effect.
+  visualEffect?:
+    | 'none'
+    | 'colorGrading'
+    | 'animatedLighting'
+    | null;
+
+  // Optional override for the cut between this sentence and the next.
+  // When null/undefined, the renderer will pick a transition automatically.
+  transitionToNext?:
+    | 'none'
+    | 'glitch'
+    | 'whip'
+    | 'flash'
+    | 'fade'
+    | 'chromaLeak'
+    | null;
+
   // When set, image generation will reference ONLY these canonical character key(s)
   // and will skip LLM-based character mapping.
   forcedCharacterKeys?: string[] | null;
