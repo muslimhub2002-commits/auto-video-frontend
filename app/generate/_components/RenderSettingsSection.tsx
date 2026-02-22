@@ -3,6 +3,7 @@
 type RenderSettingsSectionProps = {
     isShort: boolean;
     onIsShortChange: (value: boolean) => void;
+    disableIsShort?: boolean;
     useLowerFps: boolean;
     onUseLowerFpsChange: (value: boolean) => void;
     useLowerResolution: boolean;
@@ -14,6 +15,7 @@ type RenderSettingsSectionProps = {
 export function RenderSettingsSection({
     isShort,
     onIsShortChange,
+    disableIsShort = false,
     useLowerFps,
     onUseLowerFpsChange,
     useLowerResolution,
@@ -56,13 +58,14 @@ export function RenderSettingsSection({
                     className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${isShort
                             ? 'border-indigo-400 shadow-lg shadow-indigo-100'
                             : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
-                        }`}
+                    } ${disableIsShort ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                     <div className="relative mt-0.5">
                         <input
                             type="checkbox"
                             className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
                             checked={isShort}
+                            disabled={disableIsShort}
                             onChange={(e) => onIsShortChange(e.target.checked)}
                         />
                         <div

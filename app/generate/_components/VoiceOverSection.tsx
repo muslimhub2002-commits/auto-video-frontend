@@ -3,6 +3,7 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { API_URL } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -89,6 +90,69 @@ export function VoiceOverSection({
   const haveStyleInstructions = Boolean(String(styleInstructions ?? '').trim());
   const [isGeneratingStyle, setIsGeneratingStyle] = useState(false);
   const [styleGenError, setStyleGenError] = useState<string | null>(null);
+
+  const [isAddElevenLabsVoiceOpen, setIsAddElevenLabsVoiceOpen] = useState(false);
+  const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState('');
+  const [isImportingElevenLabsVoice, setIsImportingElevenLabsVoice] = useState(false);
+  const [importElevenLabsError, setImportElevenLabsError] = useState<string | null>(
+    null,
+  );
+
+  const handleImportElevenLabsVoice = async () => {
+    if (voiceProvider !== 'elevenlabs') return;
+
+    const trimmed = String(elevenLabsVoiceId ?? '').trim();
+    if (!trimmed) {
+      setImportElevenLabsError('Please enter a voiceId.');
+      return;
+    }
+
+    setIsImportingElevenLabsVoice(true);
+    setImportElevenLabsError(null);
+
+    try {
+      const res = await fetch(`${API_URL}/voice-overs/elevenlabs/import`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ voiceId: trimmed }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = 'Failed to import voice.';
+        try {
+          const maybeJson = text ? JSON.parse(text) : null;
+          if (maybeJson && typeof maybeJson.message === 'string') {
+            message = maybeJson.message;
+          }
+        } catch {
+          // ignore JSON parse errors
+        }
+
+        console.error('Import ElevenLabs voice failed', res.status, text);
+        setImportElevenLabsError(message);
+        return;
+      }
+
+      const data = (await res.json()) as { voice_id?: string };
+      const importedVoiceId = String(data.voice_id ?? '').trim();
+      if (importedVoiceId) {
+        onSelectVoice(importedVoiceId);
+      }
+
+      setIsAddElevenLabsVoiceOpen(false);
+      setElevenLabsVoiceId('');
+      setImportElevenLabsError(null);
+      onRefreshVoices();
+    } catch (error) {
+      console.error('Import ElevenLabs voice failed', error);
+      setImportElevenLabsError('Failed to import voice. Please try again.');
+    } finally {
+      setIsImportingElevenLabsVoice(false);
+    }
+  };
 
   const handleGenerateStyleWithAi = async () => {
     if (!onStyleInstructionsChange) return;
@@ -239,24 +303,142 @@ export function VoiceOverSection({
                         Select {providerLabel} Voice
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={onRefreshVoices}
-                      disabled={isLoadingVoices}
-                      className="h-7 px-3 text-[11px] border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300 transition-all"
-                    >
-                      {isLoadingVoices ? (
-                        <>
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          Refreshing
-                        </>
-                      ) : (
-                        'Refresh'
-                      )}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {voiceProvider === 'elevenlabs' ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setImportElevenLabsError(null);
+                            setIsAddElevenLabsVoiceOpen(true);
+                          }}
+                          disabled={isLoadingVoices}
+                          className="h-7 px-3 text-[11px] border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300 transition-all"
+                        >
+                          Add Voice
+                        </Button>
+                      ) : null}
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={onRefreshVoices}
+                        disabled={isLoadingVoices}
+                        className="h-7 px-3 text-[11px] border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300 transition-all"
+                      >
+                        {isLoadingVoices ? (
+                          <>
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            Refreshing
+                          </>
+                        ) : (
+                          'Refresh'
+                        )}
+                      </Button>
+                    </div>
                   </div>
+
+                  {isAddElevenLabsVoiceOpen ? (
+                    <div
+                      className="fixed inset-0 z-60 min-h-screen flex items-center justify-center p-4 backdrop-blur-lg animate-in fade-in duration-200"
+                      onClick={() => {
+                        if (isImportingElevenLabsVoice) return;
+                        setIsAddElevenLabsVoiceOpen(false);
+                      }}
+                    >
+                      <div
+                        className="w-full max-w-xl rounded-3xl shadow-2xl border border-gray-200/80 overflow-hidden bg-white animate-in fade-in zoom-in-95 duration-300"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* Header */}
+                        <div className="px-6 py-5 border-b border-gray-200/80 bg-linear-to-r from-indigo-50 via-purple-50 to-pink-50">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <h3 className="text-lg font-semibold text-gray-900 tracking-tight">
+                                Add ElevenLabs voice
+                              </h3>
+                              <p className="text-sm text-gray-500 mt-0.5">
+                                Import a voice from ElevenLabs by voiceId
+                              </p>
+                            </div>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                if (isImportingElevenLabsVoice) return;
+                                setIsAddElevenLabsVoiceOpen(false);
+                              }}
+                              className="h-9 w-9 p-0 rounded-full hover:bg-gray-100 transition-colors"
+                            >
+                              <X className="h-4 w-4 text-gray-500" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Body */}
+                        <div className="px-6 py-5 space-y-3">
+                          {importElevenLabsError ? (
+                            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
+                              {importElevenLabsError}
+                            </div>
+                          ) : null}
+
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-gray-700">Voice ID</p>
+                            <Input
+                              value={elevenLabsVoiceId}
+                              onChange={(e) => setElevenLabsVoiceId(e.target.value)}
+                              placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+                              disabled={isImportingElevenLabsVoice}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleImportElevenLabsVoice();
+                                }
+                              }}
+                            />
+                            <p className="text-[11px] text-gray-500">
+                              Paste a voiceId from your ElevenLabs dashboard.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="px-6 py-4 border-t border-gray-100 bg-linear-to-br from-gray-50 to-white flex items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isImportingElevenLabsVoice}
+                            onClick={() => {
+                              setIsAddElevenLabsVoiceOpen(false);
+                            }}
+                            className="h-10 px-5 border-gray-300 hover:bg-gray-50 hover:border-gray-400 transition-colors"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={handleImportElevenLabsVoice}
+                            disabled={isImportingElevenLabsVoice}
+                            className="h-10 px-6 bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all"
+                          >
+                            {isImportingElevenLabsVoice ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Importing...
+                              </>
+                            ) : (
+                              'Import'
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {voicesError && (
                     <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">

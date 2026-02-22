@@ -26,8 +26,11 @@ type ScriptCharacter = {
 
 type SceneEditorSectionProps = {
   sentences: SentenceItem[];
+  isShortVideo: boolean;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+
+  videoModel: 'gemini' | 'grok';
 
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
@@ -86,13 +89,29 @@ type SceneEditorSectionProps = {
   ) => void;
 
   onGenerateSentenceImage: (index: number) => void | Promise<void>;
+  onGenerateSentenceReferenceImage?: (index: number) => void | Promise<void>;
   onGenerateSentenceFrameImage?: (index: number, which: 'start' | 'end') => void | Promise<void>;
 
   onGenerateSentenceVideo?: (index: number) => void | Promise<void>;
+  onRemoveSentenceGeneratedVideoForMode?: (
+    index: number,
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => void;
   isGeneratingVideoBySentenceId: Record<string, boolean>;
   setIsGeneratingVideoBySentenceId: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 
-  onSelectFromLibrary: (index: number, which: 'single' | 'start' | 'end') => void;
+  onSentenceVideoGenerationModeChange: (
+    index: number,
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => void;
+  onSentenceVideoPromptChange: (index: number, next: string) => void;
+  onSentenceReferenceImageUpload: (
+    index: number,
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => void;
+  onRemoveSentenceReferenceImage: (index: number) => void;
+
+  onSelectFromLibrary: (index: number, which: 'single' | 'start' | 'end' | 'reference') => void;
   onRemoveSentenceImage: (index: number) => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
 
@@ -101,8 +120,11 @@ type SceneEditorSectionProps = {
 
 export function SceneEditorSection({
   sentences,
+  isShortVideo,
   isGeneratingAllImages,
   onGenerateAllImages,
+
+  videoModel,
 
   scriptCharacters,
   onScriptCharactersChange,
@@ -136,11 +158,18 @@ export function SceneEditorSection({
   onSentenceFrameImageUpload,
 
   onGenerateSentenceImage,
+  onGenerateSentenceReferenceImage,
   onGenerateSentenceFrameImage,
 
   onGenerateSentenceVideo,
+  onRemoveSentenceGeneratedVideoForMode,
   isGeneratingVideoBySentenceId,
   setIsGeneratingVideoBySentenceId,
+
+  onSentenceVideoGenerationModeChange,
+  onSentenceVideoPromptChange,
+  onSentenceReferenceImageUpload,
+  onRemoveSentenceReferenceImage,
 
   onSelectFromLibrary,
   onRemoveSentenceImage,
@@ -269,8 +298,10 @@ export function SceneEditorSection({
                 <SentenceEditorCard
                   item={item}
                   index={index}
+                  isShortVideo={isShortVideo}
                   isFirst={index === 0}
                   isLast={index === sentences.length - 1}
+                  videoModel={videoModel}
                   scriptCharacters={scriptCharacters}
                   onForcedCharacterKeysChange={(next) =>
                     onSentenceForcedCharacterKeysChange(index, next)
@@ -301,6 +332,11 @@ export function SceneEditorSection({
                     onSentenceFrameImageUpload(index, which, e)
                   }
                   onGenerateSentenceImage={() => onGenerateSentenceImage(index)}
+                  onGenerateSentenceReferenceImage={
+                    onGenerateSentenceReferenceImage
+                      ? () => onGenerateSentenceReferenceImage(index)
+                      : undefined
+                  }
                   onGenerateSentenceFrameImage={
                     onGenerateSentenceFrameImage
                       ? (which) => onGenerateSentenceFrameImage(index, which)
@@ -319,24 +355,38 @@ export function SceneEditorSection({
                   isGeneratingVideo={Boolean(isGeneratingVideoBySentenceId[item.id])}
                   onGenerateVideo={
                     onGenerateSentenceVideo
-                      ? async (canGenerateVideo) => {
-                          if (!canGenerateVideo || item.videoUrl === '/subscribe.mp4') return;
-
-                          setIsGeneratingVideoBySentenceId((prev) => ({
-                            ...prev,
-                            [item.id]: true,
-                          }));
-
-                          try {
-                            await Promise.resolve(onGenerateSentenceVideo(index));
-                          } finally {
-                            setIsGeneratingVideoBySentenceId((prev) => ({
-                              ...prev,
-                              [item.id]: false,
-                            }));
-                          }
+                      ? async (_canGenerateVideo) => {
+                          if (item.videoUrl === '/subscribe.mp4') return;
+                          await Promise.resolve(onGenerateSentenceVideo(index));
                         }
                       : undefined
+                  }
+                  onRemoveGeneratedVideo={
+                    onRemoveSentenceGeneratedVideoForMode
+                      ? () => {
+                          const mode =
+                            (item.videoGenerationMode ??
+                              'referenceImage') as 'frames' | 'text' | 'referenceImage';
+                          onRemoveSentenceGeneratedVideoForMode(
+                            index,
+                            videoModel === 'grok' && mode === 'frames'
+                              ? 'referenceImage'
+                              : mode,
+                          );
+                        }
+                      : undefined
+                  }
+                  onVideoGenerationModeChange={(mode) =>
+                    onSentenceVideoGenerationModeChange(index, mode)
+                  }
+                  onVideoPromptChange={(next) =>
+                    onSentenceVideoPromptChange(index, next)
+                  }
+                  onSentenceReferenceImageUpload={(e) =>
+                    onSentenceReferenceImageUpload(index, e)
+                  }
+                  onRemoveReferenceImage={() =>
+                    onRemoveSentenceReferenceImage(index)
                   }
                   onPreviewImage={onPreviewImage}
                 />

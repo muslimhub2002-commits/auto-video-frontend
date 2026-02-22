@@ -4,6 +4,12 @@ export type SentenceItem = {
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
 
+  videoGenerationMode?: 'frames' | 'text' | 'referenceImage';
+  videoPrompt?: string | null;
+  referenceImage?: File | null;
+  referenceImageUrl?: string | null;
+  isGeneratingReferenceImage?: boolean;
+
   // Optional per-sentence visual effect applied on the media itself (not transitions).
   // Null/undefined means no effect.
   visualEffect?:
@@ -32,6 +38,15 @@ export type SentenceItem = {
   video?: File | null;
   videoUrl?: string | null;
   savedVideoId?: string | null;
+
+  // Generated video is mode-specific (frames/text/referenceImage). We keep the
+  // per-mode URLs so switching modes can hide/show the appropriate output.
+  framesVideoUrl?: string | null;
+  framesSavedVideoId?: string | null;
+  textVideoUrl?: string | null;
+  textSavedVideoId?: string | null;
+  referenceVideoUrl?: string | null;
+  referenceSavedVideoId?: string | null;
   startImage?: File | null;
   startImageUrl?: string | null;
   startImagePrompt?: string | null;

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -94,6 +95,63 @@ export function ScriptSection(props: ScriptSectionProps) {
     isEnhancingScript,
     onEnhanceScript,
   } = props;
+
+  const SUBJECT_CONTENT_CUSTOM_VALUE = '__custom__';
+  const subjectContentPresets = useMemo(
+    () => [
+      'Quranic Miracles',
+      'Quranic Stories',
+      'Hadith Stories',
+      'Stories of the Sahaba',
+      'Names and Attributes of Allah',
+      'Daily Duas and Remembrances',
+      'Islamic Morals and Manners',
+      'Seerah of the Prophet',
+      'Specific Prophet Story',
+      'Specific Enemy of Allah',
+      "Islam & Science",
+      "Islamic History",
+      "Lessons from the Quran",
+      "Islam Vs Christianity",
+      "Islam Vs Atheism",
+      "Ramadan Wisdom"
+    ],
+    [],
+  );
+  const subjectContentPresetSet = useMemo(
+    () => new Set(subjectContentPresets),
+    [subjectContentPresets],
+  );
+
+  const [subjectContentMode, setSubjectContentMode] = useState<
+    'preset' | 'custom'
+  >('preset');
+  const [customSubjectContent, setCustomSubjectContent] = useState('');
+
+  // Autofocus custom textarea when switching to custom mode.
+  useEffect(() => {
+    if (scriptSubject !== 'religious (Islam)') return;
+    if (subjectContentMode !== 'custom') return;
+
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById('customSubjectContent') as HTMLTextAreaElement | null;
+      el?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scriptSubject, subjectContentMode]);
+
+  // If a saved draft loads a non-preset subject content, treat it as custom.
+  useEffect(() => {
+    if (scriptSubject !== 'religious (Islam)') return;
+
+    const current = (scriptSubjectContent || '').trim();
+    if (!current) return;
+
+    if (!subjectContentPresetSet.has(current)) {
+      setSubjectContentMode('custom');
+      setCustomSubjectContent(current);
+    }
+  }, [scriptSubject, scriptSubjectContent, subjectContentPresetSet]);
 
   const isUsingReferences = (referenceScripts?.length ?? 0) > 0;
 
@@ -236,23 +294,34 @@ export function ScriptSection(props: ScriptSectionProps) {
               {/* Subject Content - only for Religious (Islam) */}
               {scriptSubject === 'religious (Islam)' ? (
                 <Select
-                  value={scriptSubjectContent}
-                  onValueChange={setScriptSubjectContent}
+                  value={
+                    subjectContentMode === 'custom'
+                      ? SUBJECT_CONTENT_CUSTOM_VALUE
+                      : subjectContentPresetSet.has(scriptSubjectContent)
+                        ? scriptSubjectContent
+                        : ''
+                  }
+                  onValueChange={(value) => {
+                    if (value === SUBJECT_CONTENT_CUSTOM_VALUE) {
+                      setSubjectContentMode('custom');
+                      setScriptSubjectContent(customSubjectContent);
+                      return;
+                    }
+
+                    setSubjectContentMode('preset');
+                    setScriptSubjectContent(value);
+                  }}
                 >
                   <SelectTrigger label="Subject Content">
                     <SelectValue placeholder="Select content" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Quranic Miracles">Quranic Miracles</SelectItem>
-                    <SelectItem value="Quranic Stories">Quranic Stories</SelectItem>
-                    <SelectItem value="Hadith Stories">Hadith Stories</SelectItem>
-                    <SelectItem value="Stories of the Sahaba">Stories of the Sahaba</SelectItem>
-                    <SelectItem value="Names and Attributes of Allah">Names and Attributes of Allah</SelectItem>
-                    <SelectItem value="Daily Duas and Remembrances">Daily Duas and Remembrances</SelectItem>
-                    <SelectItem value="Islamic Morals and Manners">Islamic Morals and Manners</SelectItem>
-                    <SelectItem value="Seerah of the Prophet">Seerah of the Prophet</SelectItem>
-                    <SelectItem value="Specific Prophet Story">Specific Prophet Story</SelectItem>
-                    <SelectItem value="Specific Enemy of Allah">Specific Enemy of Allah</SelectItem>
+                    {subjectContentPresets.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={SUBJECT_CONTENT_CUSTOM_VALUE}>Custom</SelectItem>
                   </SelectContent>
                 </Select>
               ) : null}
@@ -310,6 +379,33 @@ export function ScriptSection(props: ScriptSectionProps) {
 
               {/* Model */}
               <LlmModelSelect value={scriptModel} onValueChange={setScriptModel} label="Model" />
+
+              {/* Custom Subject Content */}
+              {scriptSubject === 'religious (Islam)' && subjectContentMode === 'custom' ? (
+                <div className="md:col-span-5">
+                  <Label
+                    htmlFor="customSubjectContent"
+                    className="text-xs font-semibold text-gray-600"
+                  >
+                    Custom Subject Content
+                  </Label>
+                  <Textarea
+                    id="customSubjectContent"
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setCustomSubjectContent(next);
+                      setScriptSubjectContent(next);
+                    }}
+                    onKeyDown={(e) => {
+                      // Prevent parent components from hijacking Space/Enter.
+                      e.stopPropagation();
+                    }}
+                    rows={3}
+                    placeholder="Write the exact topic you want..."
+                    className="mt-2 bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 resize-none rounded-lg shadow-sm"
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
 

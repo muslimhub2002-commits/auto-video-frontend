@@ -10,7 +10,7 @@ import { VoiceLibraryModal } from './VoiceLibraryModal';
 type LibraryTarget =
   | {
       index: number;
-      which: 'single' | 'start' | 'end';
+      which: 'single' | 'start' | 'end' | 'reference';
     }
   | null;
 
@@ -53,7 +53,8 @@ function selectedImageUrlFromTarget(sentences: SentenceItem[], libraryTarget: Li
 
   if (libraryTarget.which === 'single') return sentence.imageUrl ?? null;
   if (libraryTarget.which === 'start') return sentence.startImageUrl ?? null;
-  return sentence.endImageUrl ?? null;
+  if (libraryTarget.which === 'end') return sentence.endImageUrl ?? null;
+  return sentence.referenceImageUrl ?? null;
 }
 
 export function GenerateModalsHost({

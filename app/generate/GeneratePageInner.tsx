@@ -138,6 +138,25 @@ async function sha256HexForFile(file: File): Promise<string | null> {
   }
 }
 
+function parseScriptLengthMinutes(value: string): number | null {
+  const s = String(value ?? '').trim().toLowerCase();
+  if (!s) return null;
+
+  const secondsMatch = /([0-9]+(?:\.[0-9]+)?)\s*second/u.exec(s);
+  if (secondsMatch?.[1]) {
+    const seconds = Number(secondsMatch[1]);
+    return Number.isFinite(seconds) ? seconds / 60 : null;
+  }
+
+  const minutesMatch = /([0-9]+(?:\.[0-9]+)?)\s*minute/u.exec(s);
+  if (minutesMatch?.[1]) {
+    const minutes = Number(minutesMatch[1]);
+    return Number.isFinite(minutes) ? minutes : null;
+  }
+
+  return null;
+}
+
 // SentenceItem type is shared in ./_types/sentences
 
 export type VoiceOverOption = {
@@ -215,9 +234,10 @@ export function GeneratePageInner() {
   const [scriptCharacters, setScriptCharacters] = useState<ScriptCharacter[]>([]);
 
   // Sentence image generation configuration
-  const [imagePromptModel, setImagePromptModel] = useState('claude-sonnet-4-5');
+  const [imagePromptModel, setImagePromptModel] = useState('gpt-4.1-mini');
   const [imageModel, setImageModel] = useState('leonardo');
   const [imageStyle, setImageStyle] = useState<string>('anime');
+  const [videoModel, setVideoModel] = useState<'gemini' | 'grok'>('gemini');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);
@@ -236,6 +256,17 @@ export function GeneratePageInner() {
   const previewAbortRef = useRef<AbortController | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  type BackgroundSoundtrackItem = { id: string; title: string; url: string; is_favorite?: boolean };
+  const [backgroundSoundtracks, setBackgroundSoundtracks] = useState<BackgroundSoundtrackItem[]>([]);
+  const [isLoadingBackgroundSoundtracks, setIsLoadingBackgroundSoundtracks] = useState(false);
+  const [backgroundSoundtracksError, setBackgroundSoundtracksError] = useState<string | null>(null);
+  const [selectedBackgroundSoundtrackValue, setSelectedBackgroundSoundtrackValue] = useState<string>(
+    '__default__',
+  );
+  const [backgroundSoundtrackVolumePercent, setBackgroundSoundtrackVolumePercent] = useState<number>(100);
+  const [oneOffBackgroundSoundtrackUrl, setOneOffBackgroundSoundtrackUrl] = useState<string | null>(null);
+  const [isUploadingBackgroundSoundtrack, setIsUploadingBackgroundSoundtrack] = useState(false);
+  const [isSettingFavoriteBackgroundSoundtrack, setIsSettingFavoriteBackgroundSoundtrack] = useState(false);
   const [isRandomScriptLoading, setIsRandomScriptLoading] = useState(false);
   const [randomScriptError, setRandomScriptError] = useState<string | null>(
     null,
@@ -295,10 +326,11 @@ export function GeneratePageInner() {
   const [libraryTarget, setLibraryTarget] = useState<
     | {
       index: number;
-      which: 'single' | 'start' | 'end';
+      which: 'single' | 'start' | 'end' | 'reference';
     }
     | null
   >(null);
+  const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
   const [selectedChatId, setSelectedChatId] = useState<string | null>(
     routeChatId,
   );
@@ -335,6 +367,21 @@ export function GeneratePageInner() {
   const [addSubtitles, setAddSubtitles] = useState(true);
   const [enableGlitchTransitions, setEnableGlitchTransitions] = useState(true);
   const [enableZoomRotateTransitions, setEnableZoomRotateTransitions] = useState(true);
+
+  // Scripts longer than 3 minutes are treated as regular (non-shorts) videos.
+  const scriptLengthMinutes = parseScriptLengthMinutes(scriptLength);
+  const isLongForm =
+    typeof scriptLengthMinutes === 'number' &&
+    Number.isFinite(scriptLengthMinutes) &&
+    scriptLengthMinutes > 3;
+  const effectiveIsShort = isLongForm ? false : isShort;
+  const effectiveAspectRatio = effectiveIsShort ? '9:16' : '16:9';
+
+  useEffect(() => {
+    if (!isLongForm) return;
+    if (!isShort) return;
+    setIsShort(false);
+  }, [isLongForm, isShort]);
   const {
     videoJobId,
     videoJobStatus,
@@ -614,6 +661,165 @@ export function GeneratePageInner() {
 
   const fetchVoices = async () => fetchProviderVoices(voiceProvider);
 
+  const fetchBackgroundSoundtracks = async () => {
+    if (!user) return;
+
+    setIsLoadingBackgroundSoundtracks(true);
+    setBackgroundSoundtracksError(null);
+    try {
+      const res = await api.get<{
+        items: { id: string; title: string; url: string; is_favorite?: boolean }[];
+        total: number;
+        page: number;
+        limit: number;
+      }>('/background-soundtracks', { params: { page: 1, limit: 100 } });
+
+      const items = Array.isArray(res.data?.items) ? res.data.items : [];
+      setBackgroundSoundtracks(items);
+
+      setSelectedBackgroundSoundtrackValue((prev) => {
+        const current = String(prev ?? '').trim() || '__default__';
+
+        const favorite = items.find((t) => Boolean(t?.is_favorite));
+        const favoriteValue = favorite?.id ? `lib:${favorite.id}` : '__default__';
+
+        if (current === '__default__' && favoriteValue !== '__default__') {
+          return favoriteValue;
+        }
+
+        if (current.startsWith('lib:')) {
+          const id = current.slice('lib:'.length);
+          const exists = items.some((t) => t.id === id);
+          if (!exists) return favoriteValue;
+        }
+
+        return current;
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to load background soundtracks', error);
+      setBackgroundSoundtracksError('Failed to load soundtracks.');
+    } finally {
+      setIsLoadingBackgroundSoundtracks(false);
+    }
+  };
+
+  const handleSetFavoriteBackgroundSoundtrack = async (soundtrackId: string) => {
+    if (!user) {
+      showAlert('You must be logged in to set a favorite soundtrack.', { type: 'warning' });
+      return;
+    }
+
+    const id = String(soundtrackId ?? '').trim();
+    if (!id) return;
+
+    try {
+      setIsSettingFavoriteBackgroundSoundtrack(true);
+      const res = await api.patch<{ id: string }>('/background-soundtracks/favorite/' + encodeURIComponent(id));
+      const updatedId = String(res.data?.id ?? id).trim();
+
+      setBackgroundSoundtracks((prev) =>
+        prev.map((t) => ({
+          ...t,
+          is_favorite: t.id === updatedId,
+        })),
+      );
+      setSelectedBackgroundSoundtrackValue(`lib:${updatedId}`);
+      showToast('Favorite soundtrack updated', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to set favorite soundtrack', error);
+      showToast('Failed to set favorite soundtrack', 'error');
+    } finally {
+      setIsSettingFavoriteBackgroundSoundtrack(false);
+    }
+  };
+
+  const handleUploadBackgroundSoundtrackUseOnce = async (file: File) => {
+    if (!user) {
+      showAlert('You must be logged in to upload a soundtrack.', { type: 'warning' });
+      return;
+    }
+    if (!file) return;
+
+    setIsUploadingBackgroundSoundtrack(true);
+    try {
+      const form = new FormData();
+      form.append('soundtrack', file);
+
+      const res = await api.post<{ url: string }>('/background-soundtracks/upload', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const url = String(res.data?.url ?? '').trim();
+      if (!url) {
+        throw new Error('Upload succeeded but response was missing url');
+      }
+
+      setOneOffBackgroundSoundtrackUrl(url);
+      setSelectedBackgroundSoundtrackValue('__oneoff__');
+      showToast('Soundtrack uploaded (one-off).', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Upload soundtrack (one-off) failed', error);
+      showAlert('Failed to upload soundtrack. Please try again.', { type: 'error' });
+    } finally {
+      setIsUploadingBackgroundSoundtrack(false);
+    }
+  };
+
+  const handleUploadBackgroundSoundtrackAddToLibrary = async (params: { file: File; title: string }) => {
+    if (!user) {
+      showAlert('You must be logged in to add a soundtrack.', { type: 'warning' });
+      return;
+    }
+    const file = params.file;
+    const title = String(params.title ?? '').trim();
+    if (!file) return;
+    if (!title) {
+      showAlert('Please enter a title for this soundtrack.', { type: 'warning' });
+      return;
+    }
+
+    setIsUploadingBackgroundSoundtrack(true);
+    try {
+      const form = new FormData();
+      form.append('soundtrack', file);
+      form.append('title', title);
+
+      const res = await api.post<{ id: string; title: string; url: string }>(
+        '/background-soundtracks',
+        form,
+        {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        },
+      );
+
+      const created = {
+        id: String(res.data?.id ?? '').trim(),
+        title: String(res.data?.title ?? '').trim(),
+        url: String(res.data?.url ?? '').trim(),
+      };
+
+      if (!created.id || !created.url) {
+        throw new Error('Create succeeded but response was missing id/url');
+      }
+
+      setBackgroundSoundtracks((prev) => {
+        const withoutDup = prev.filter((t) => t.id !== created.id);
+        return [created, ...withoutDup];
+      });
+      setSelectedBackgroundSoundtrackValue(`lib:${created.id}`);
+      showToast('Soundtrack added to your library.', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Add soundtrack to library failed', error);
+      showAlert('Failed to add soundtrack. Please try again.', { type: 'error' });
+    } finally {
+      setIsUploadingBackgroundSoundtrack(false);
+    }
+  };
+
   const handleSetFavoriteVoice = async (voiceId: string) => {
     if (!user) {
       showAlert('You must be logged in to set a favorite voice.', { type: 'warning' });
@@ -707,6 +913,11 @@ export function GeneratePageInner() {
     void Promise.all([fetchProviderVoices('google'), fetchProviderVoices('elevenlabs')]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchBackgroundSoundtracks();
+  }, [user]);
 
   const stopVoicePreview = () => {
     try {
@@ -837,9 +1048,10 @@ export function GeneratePageInner() {
       // Cache the URL locally so next preview can play instantly.
       setVoicesByProvider((prev) => {
         const next = { ...prev } as typeof prev;
-        const list = next.google;
+        const providerKey = voiceProvider;
+        const list = next[providerKey];
         if (!Array.isArray(list) || list.length === 0) return prev;
-        next.google = list.map((v) =>
+        next[providerKey] = list.map((v) =>
           v.voice_id === voiceId ? { ...v, preview_url: url } : v,
         );
         return next;
@@ -1185,6 +1397,45 @@ export function GeneratePageInner() {
       const form = new FormData();
       form.append('voiceOver', voiceOver);
 
+      const resolveBackgroundMusicSrcForRender = (): string | undefined => {
+        const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
+        if (value === '__none__') return '__none__';
+
+        // If the user uploaded a one-off soundtrack, always use it for rendering
+        // even if another soundtrack is currently selected in the dropdown.
+        // (Unless the user explicitly chose "None" above.)
+        const oneOffUrl = String(oneOffBackgroundSoundtrackUrl ?? '').trim();
+        if (oneOffUrl) return oneOffUrl;
+
+        if (!value || value === '__default__') return undefined;
+        if (value === '__oneoff__') {
+          return undefined;
+        }
+        if (value.startsWith('lib:')) {
+          const id = value.slice('lib:'.length);
+          const found = backgroundSoundtracks.find((t) => t.id === id);
+          return found?.url ? String(found.url).trim() : undefined;
+        }
+        return undefined;
+      };
+
+      const backgroundMusicSrc = resolveBackgroundMusicSrcForRender();
+      if (backgroundMusicSrc) {
+        form.append('backgroundMusicSrc', backgroundMusicSrc);
+      }
+
+      const normalizedBackgroundMusicVolume = Math.max(
+        0,
+        Math.min(1, (backgroundSoundtrackVolumePercent ?? 100) / 100),
+      );
+      // Only send when it deviates from default (keeps payload minimal).
+      if (normalizedBackgroundMusicVolume !== 1) {
+        form.append(
+          'backgroundMusicVolume',
+          String(normalizedBackgroundMusicVolume),
+        );
+      }
+
       const sentencePayload = sentences.map((s) => {
         const text = String(s.text ?? '');
         const trimmed = text.trim();
@@ -1229,7 +1480,7 @@ export function GeneratePageInner() {
       }
 
       // Render configuration flags
-      form.append('isShort', isShort ? 'true' : 'false');
+      form.append('isShort', effectiveIsShort ? 'true' : 'false');
       form.append('useLowerFps', useLowerFps ? 'true' : 'false');
       form.append(
         'useLowerResolution',
@@ -1867,7 +2118,7 @@ export function GeneratePageInner() {
         subject: scriptSubject,
         style,
         scriptLength,
-        isShort,
+        isShort: effectiveIsShort,
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
@@ -1920,6 +2171,74 @@ export function GeneratePageInner() {
     }
   };
 
+  const handleGenerateSentenceReferenceImage = async (index: number) => {
+    const target = sentences[index];
+    if (!target) return;
+
+    const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
+
+    setSentences((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, isGeneratingReferenceImage: true } : item,
+      ),
+    );
+
+    try {
+      const res = await api.post('/ai/generate-image-from-sentence', {
+        sentence: target.text,
+        script,
+        subject: scriptSubject,
+        style,
+        scriptLength,
+        isShort: effectiveIsShort,
+        promptModel: imagePromptModel,
+        imageModel,
+        characters: scriptCharacters.length ? scriptCharacters : undefined,
+        forcedCharacterKeys:
+          Array.isArray(target.forcedCharacterKeys) && target.forcedCharacterKeys.length
+            ? target.forcedCharacterKeys
+            : undefined,
+      });
+
+      const data = res.data as {
+        prompt: string;
+        imageBase64?: string;
+        imageUrl?: string;
+      };
+
+      const imageUrl =
+        (data.imageUrl && String(data.imageUrl)) ||
+        (data.imageBase64
+          ? `data:image/png;base64,${data.imageBase64}`
+          : null);
+
+      if (!imageUrl) {
+        throw new Error('Image generation returned no imageUrl');
+      }
+
+      setSentences((prev) =>
+        prev.map((item, i) =>
+          i === index
+            ? {
+                ...item,
+                referenceImage: null,
+                referenceImageUrl: imageUrl,
+                isGeneratingReferenceImage: false,
+              }
+            : item,
+        ),
+      );
+    } catch (error) {
+      console.error('Generate reference image failed', error);
+      setSentences((prev) =>
+        prev.map((item, i) =>
+          i === index ? { ...item, isGeneratingReferenceImage: false } : item,
+        ),
+      );
+      setSplitError('Failed to generate reference image for this sentence.');
+    }
+  };
+
   const isUuid = (value: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       value,
@@ -1967,7 +2286,7 @@ export function GeneratePageInner() {
         subject: scriptSubject,
         style,
         scriptLength,
-        isShort,
+        isShort: effectiveIsShort,
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
@@ -2045,7 +2364,7 @@ export function GeneratePageInner() {
     }
   };
 
-  const handleGenerateSentenceVideo = async (index: number) => {
+  const handleGenerateSentenceVideoFrames = async (index: number) => {
     const sentence = sentences[index];
     if (!sentence) return;
 
@@ -2117,6 +2436,7 @@ export function GeneratePageInner() {
       }
       form.append('isLooping', isLooping ? 'true' : 'false');
       form.append('prompt', prompt);
+      form.append('aspectRatio', effectiveAspectRatio);
 
       let url: string | null = null;
       let savedVideoId: string | null = null;
@@ -2163,9 +2483,18 @@ export function GeneratePageInner() {
         return;
       }
 
+      // Persist per-mode video so it can be restored when switching modes.
       setSentences((prev) =>
         prev.map((s, i) =>
-          i === index ? { ...s, videoUrl: url, savedVideoId } : s,
+          i === index
+            ? {
+                ...s,
+                videoUrl: url,
+                savedVideoId,
+                framesVideoUrl: url,
+                framesSavedVideoId: savedVideoId,
+              }
+            : s,
         ),
       );
 
@@ -2173,6 +2502,293 @@ export function GeneratePageInner() {
     } catch (error) {
       console.error('Generate sentence video failed', error);
       showToast('Failed to generate sentence video. Please try again.', 'error');
+    }
+  };
+
+  const handleGenerateSentenceVideoFromText = async (index: number) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+
+    try {
+      showToast('Generating video for this sentence…', 'info');
+
+      const prompt = String(sentence.videoPrompt ?? '').trim();
+      if (!prompt) {
+        showToast('Video prompt is required.', 'error');
+        return;
+      }
+
+      const res = await api.post('/ai/generate-video-from-text', {
+        prompt,
+        aspectRatio: effectiveAspectRatio,
+        ...(videoModel === 'grok' ? { model: 'grok-imagine-video' } : {}),
+      });
+
+      const url = (res.data as { videoUrl?: string })?.videoUrl ?? null;
+      if (!url) {
+        showToast('Video generated but no URL was returned.', 'warning');
+        return;
+      }
+
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? {
+                ...s,
+                videoUrl: url,
+                savedVideoId: null,
+                textVideoUrl: url,
+                textSavedVideoId: null,
+              }
+            : s,
+        ),
+      );
+
+      showToast('Sentence video generated.', 'success');
+    } catch (error) {
+      console.error('Generate sentence video (text) failed', error);
+      showToast('Failed to generate sentence video. Please try again.', 'error');
+    }
+  };
+
+  const handleGenerateSentenceVideoFromReferenceImage = async (index: number) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+
+    try {
+      showToast('Generating video for this sentence…', 'info');
+
+      const prompt = String(sentence.videoPrompt ?? '').trim();
+      if (!prompt) {
+        showToast('Video prompt is required.', 'error');
+        return;
+      }
+
+      const resolveReferenceFile = async (): Promise<File | null> => {
+        if (sentence.referenceImage) return sentence.referenceImage;
+        if (sentence.referenceImageUrl?.startsWith('data:')) {
+          return dataUrlToFile(
+            sentence.referenceImageUrl,
+            `sentence-${index + 1}-reference.png`,
+          );
+        }
+        if (sentence.referenceImageUrl) {
+          const r = await fetch(sentence.referenceImageUrl);
+          if (!r.ok) return null;
+          const blob = await r.blob();
+          return new File([blob], `sentence-${index + 1}-reference.png`, {
+            type: blob.type || 'image/png',
+          });
+        }
+        return null;
+      };
+
+      const referenceImage = await resolveReferenceFile();
+      if (!referenceImage) {
+        showToast('Reference image is required.', 'error');
+        return;
+      }
+
+      const form = new FormData();
+      form.append('referenceImage', referenceImage);
+      form.append('prompt', prompt);
+      form.append('aspectRatio', effectiveAspectRatio);
+      if (videoModel === 'grok') {
+        form.append('model', 'grok-imagine-video');
+      }
+
+      const res = await api.post('/ai/generate-video-from-reference-image', form, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const url = (res.data as { videoUrl?: string })?.videoUrl ?? null;
+      if (!url) {
+        showToast('Video generated but no URL was returned.', 'warning');
+        return;
+      }
+
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? {
+                ...s,
+                videoUrl: url,
+                savedVideoId: null,
+                referenceVideoUrl: url,
+                referenceSavedVideoId: null,
+              }
+            : s,
+        ),
+      );
+
+      showToast('Sentence video generated.', 'success');
+    } catch (error) {
+      console.error('Generate sentence video (reference image) failed', error);
+      showToast('Failed to generate sentence video. Please try again.', 'error');
+    }
+  };
+
+  const handleSentenceVideoGenerationModeChange = (
+    index: number,
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => {
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? (() => {
+              if (s.videoUrl === '/subscribe.mp4') {
+                const nextSubscribe: SentenceItem = { ...s, videoGenerationMode: mode };
+                nextSubscribe.videoPrompt =
+                  mode === 'text' || mode === 'referenceImage'
+                    ? (nextSubscribe.videoPrompt ?? '')
+                    : nextSubscribe.videoPrompt ?? null;
+                return nextSubscribe;
+              }
+
+              const previousMode = (s.videoGenerationMode ?? 'referenceImage') as NonNullable<
+                SentenceItem['videoGenerationMode']
+              >;
+
+              const next: SentenceItem = { ...s, videoGenerationMode: mode };
+
+              // Migrate legacy surface fields into the previous mode slot once.
+              if (next.videoUrl && next.videoUrl !== '/subscribe.mp4') {
+                if (previousMode === 'frames' && !next.framesVideoUrl) {
+                  next.framesVideoUrl = next.videoUrl;
+                  next.framesSavedVideoId = next.savedVideoId ?? null;
+                } else if (previousMode === 'text' && !next.textVideoUrl) {
+                  next.textVideoUrl = next.videoUrl;
+                  next.textSavedVideoId = next.savedVideoId ?? null;
+                } else if (previousMode === 'referenceImage' && !next.referenceVideoUrl) {
+                  next.referenceVideoUrl = next.videoUrl;
+                  next.referenceSavedVideoId = next.savedVideoId ?? null;
+                }
+              }
+
+              // Restore the target mode's video into the surface fields.
+              if (mode === 'frames') {
+                next.videoUrl = next.framesVideoUrl ?? null;
+                next.savedVideoId = next.framesSavedVideoId ?? null;
+              } else if (mode === 'text') {
+                next.videoUrl = next.textVideoUrl ?? null;
+                next.savedVideoId = next.textSavedVideoId ?? null;
+              } else {
+                next.videoUrl = next.referenceVideoUrl ?? null;
+                next.savedVideoId = next.referenceSavedVideoId ?? null;
+              }
+
+              next.videoPrompt =
+                mode === 'text' || mode === 'referenceImage'
+                  ? (next.videoPrompt ?? '')
+                  : next.videoPrompt ?? null;
+
+              return next;
+            })()
+          : s,
+      ),
+    );
+  };
+
+  const handleRemoveSentenceGeneratedVideoForMode = (
+    index: number,
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => {
+    setSentences((prev) =>
+      prev.map((s, i) => {
+        if (i !== index) return s;
+
+        const next: typeof s = { ...s };
+
+        if (mode === 'frames') {
+          next.framesVideoUrl = null;
+          next.framesSavedVideoId = null;
+        } else if (mode === 'text') {
+          next.textVideoUrl = null;
+          next.textSavedVideoId = null;
+        } else {
+          next.referenceVideoUrl = null;
+          next.referenceSavedVideoId = null;
+        }
+
+        // Keep the active-mode surface fields in sync.
+        const activeMode = (next.videoGenerationMode ?? 'referenceImage') as NonNullable<SentenceItem['videoGenerationMode']>;
+        if (activeMode === mode) {
+          next.videoUrl = null;
+          next.savedVideoId = null;
+        }
+
+        return next;
+      }),
+    );
+  };
+
+  const handleSentenceVideoPromptChange = (index: number, next: string) => {
+    setSentences((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, videoPrompt: next } : s)),
+    );
+  };
+
+  const handleSentenceReferenceImageUpload = (
+    index: number,
+    e: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0] ?? null;
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? {
+              ...s,
+              referenceImage: file,
+              referenceImageUrl: file ? null : s.referenceImageUrl ?? null,
+            }
+          : s,
+      ),
+    );
+  };
+
+  const handleRemoveSentenceReferenceImage = (index: number) => {
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? { ...s, referenceImage: null, referenceImageUrl: null }
+          : s,
+      ),
+    );
+  };
+
+  const handleGenerateSentenceVideo = async (index: number) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+    if (sentence.videoUrl === '/subscribe.mp4') return;
+
+    setIsGeneratingVideoBySentenceId((prev) => ({
+      ...prev,
+      [sentence.id]: true,
+    }));
+
+    try {
+      const mode = (sentence.videoGenerationMode ?? 'referenceImage') as NonNullable<
+        SentenceItem['videoGenerationMode']
+      >;
+
+      if (mode === 'frames') {
+        if (videoModel === 'grok') {
+          showToast('Grok video generation does not support Frames mode.', 'error');
+          return;
+        }
+        await handleGenerateSentenceVideoFrames(index);
+      } else if (mode === 'text') {
+        await handleGenerateSentenceVideoFromText(index);
+      } else {
+        await handleGenerateSentenceVideoFromReferenceImage(index);
+      }
+    } finally {
+      setIsGeneratingVideoBySentenceId((prev) => ({
+        ...prev,
+        [sentence.id]: false,
+      }));
     }
   };
 
@@ -2234,6 +2850,33 @@ export function GeneratePageInner() {
     // None have images yet - generate all missing (which is all eligible).
     await runGenerateAll(missingIndices);
     return;
+  };
+
+  const handleVideoModelChange = (next: 'gemini' | 'grok') => {
+    setVideoModel(next);
+    if (next !== 'grok') return;
+
+    setSentences((prev) =>
+      prev.map((s) => {
+        const mode = (s.videoGenerationMode ?? 'referenceImage') as NonNullable<
+          SentenceItem['videoGenerationMode']
+        >;
+
+        if (mode !== 'frames') return s;
+
+        const keepSubscribe = s.videoUrl === '/subscribe.mp4';
+        const restoredUrl = keepSubscribe
+          ? s.videoUrl
+          : (s.referenceVideoUrl ?? null);
+
+        return {
+          ...s,
+          videoGenerationMode: 'referenceImage',
+          videoUrl: restoredUrl,
+          savedVideoId: keepSubscribe ? s.savedVideoId ?? null : null,
+        };
+      }),
+    );
   };
 
   const handleSaveSentenceImage = async (index: number) => {
@@ -2299,7 +2942,7 @@ export function GeneratePageInner() {
 
   const handleSelectFromLibrary = (
     index: number,
-    which: 'single' | 'start' | 'end' = 'single',
+    which: 'single' | 'start' | 'end' | 'reference' = 'single',
   ) => {
     setLibraryTarget({ index, which });
     setIsLibraryModalOpen(true);
@@ -2335,14 +2978,21 @@ export function GeneratePageInner() {
                 isFromLibrary: true,
                 startSavedImageId: id,
               }
-              : {
-                ...item,
-                endImageUrl: imageUrl,
-                endImage: null,
-                endImagePrompt: prompt ?? null,
-                isFromLibrary: true,
-                endSavedImageId: id,
-              }
+              : which === 'end'
+                ? {
+                  ...item,
+                  endImageUrl: imageUrl,
+                  endImage: null,
+                  endImagePrompt: prompt ?? null,
+                  isFromLibrary: true,
+                  endSavedImageId: id,
+                }
+                : {
+                  ...item,
+                  referenceImageUrl: imageUrl,
+                  referenceImage: null,
+                  isFromLibrary: true,
+                }
           : item,
       ),
     );
@@ -3035,12 +3685,15 @@ export function GeneratePageInner() {
 
                 <SentencesImagesSection
                   sentences={sentences}
+                  isShortVideo={effectiveIsShort}
                   imagePromptModel={imagePromptModel}
                   onImagePromptModelChange={setImagePromptModel}
                   imageModel={imageModel}
                   onImageModelChange={setImageModel}
                   imageStyle={imageStyle}
                   onImageStyleChange={setImageStyle}
+                  videoModel={videoModel}
+                  onVideoModelChange={handleVideoModelChange}
                   scriptCharacters={scriptCharacters}
                   onScriptCharactersChange={handleScriptCharactersChange}
                   onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
@@ -3054,8 +3707,22 @@ export function GeneratePageInner() {
                   onSentenceMediaModeChange={handleSentenceMediaModeChange}
                   onGenerateSentenceFrameImage={handleGenerateSentenceFrameImage}
                   onGenerateSentenceVideo={handleGenerateSentenceVideo}
+                  onRemoveSentenceGeneratedVideoForMode={handleRemoveSentenceGeneratedVideoForMode}
+                  onSentenceVideoGenerationModeChange={
+                    handleSentenceVideoGenerationModeChange
+                  }
+                  onSentenceVideoPromptChange={handleSentenceVideoPromptChange}
+                  onSentenceReferenceImageUpload={
+                    handleSentenceReferenceImageUpload
+                  }
+                  onRemoveSentenceReferenceImage={
+                    handleRemoveSentenceReferenceImage
+                  }
+                  isGeneratingVideoBySentenceId={isGeneratingVideoBySentenceId}
+                  setIsGeneratingVideoBySentenceId={setIsGeneratingVideoBySentenceId}
                   onDeleteSentence={handleDeleteSentence}
                   onGenerateSentenceImage={handleGenerateSentenceImage}
+                  onGenerateSentenceReferenceImage={handleGenerateSentenceReferenceImage}
                   onGenerateAllImages={handleGenerateAllSentenceImages}
                   isGeneratingAllImages={isGeneratingAllImages}
                   onSentenceTextChange={handleSentenceTextChange}
@@ -3100,9 +3767,7 @@ export function GeneratePageInner() {
                   isSettingFavoriteVoice={isSettingFavoriteVoice}
                   onVoiceUpload={handleVoiceUpload}
                   onGenerateVoice={handleGenerateVoice}
-                  onPreviewVoice={
-                    voiceProvider === 'google' ? handlePreviewVoice : undefined
-                  }
+                  onPreviewVoice={handlePreviewVoice}
                   onRemoveVoice={removeVoice}
                   onSaveVoice={handleSaveVoice}
                   onOpenLibrary={handleOpenVoiceLibrary}
@@ -3111,6 +3776,7 @@ export function GeneratePageInner() {
               <RenderSettingsSection
                 isShort={isShort}
                 onIsShortChange={setIsShort}
+                disableIsShort={isLongForm}
                 useLowerFps={useLowerFps}
                 onUseLowerFpsChange={setUseLowerFps}
                 useLowerResolution={useLowerResolution}
@@ -3128,6 +3794,25 @@ export function GeneratePageInner() {
                 onGenerate={handleGenerate}
                 onUploadVideo={handleUploadFinalVideo}
                 isUploadingVideo={isUploadingVideo}
+                backgroundSoundtracks={backgroundSoundtracks}
+                selectedBackgroundSoundtrackValue={selectedBackgroundSoundtrackValue}
+                backgroundSoundtrackVolumePercent={backgroundSoundtrackVolumePercent}
+                onBackgroundSoundtrackVolumePercentChange={setBackgroundSoundtrackVolumePercent}
+                onSelectedBackgroundSoundtrackValueChange={(value) => {
+                  setSelectedBackgroundSoundtrackValue(value);
+
+                  if (value !== '__oneoff__') return;
+                  if (oneOffBackgroundSoundtrackUrl) return;
+                  setSelectedBackgroundSoundtrackValue('__default__');
+                }}
+                hasOneOffBackgroundSoundtrack={Boolean(oneOffBackgroundSoundtrackUrl)}
+                oneOffBackgroundSoundtrackUrl={oneOffBackgroundSoundtrackUrl}
+                onToast={showToast}
+                onSetFavoriteBackgroundSoundtrack={handleSetFavoriteBackgroundSoundtrack}
+                isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
+                onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
+                onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
+                isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}
               />
             </div>
 

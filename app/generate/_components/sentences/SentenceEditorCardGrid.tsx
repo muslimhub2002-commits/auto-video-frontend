@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -21,6 +21,7 @@ import {
   ArrowDown,
   Trash2,
   Users,
+  Repeat2,
 } from 'lucide-react';
 
 import { ForcedCharactersModal } from './ForcedCharactersModal';
@@ -87,8 +88,11 @@ type ScriptCharacter = {
 type SentenceEditorCardProps = {
   item: SentenceItem;
   index: number;
+  isShortVideo: boolean;
   isFirst: boolean;
   isLast: boolean;
+
+  videoModel: 'gemini' | 'grok';
 
   scriptCharacters: ScriptCharacter[];
   onForcedCharacterKeysChange: (next: string[] | null) => void;
@@ -120,10 +124,18 @@ type SentenceEditorCardProps = {
   onSentenceFrameImageUpload: (which: 'start' | 'end', e: ChangeEvent<HTMLInputElement>) => void;
 
   onGenerateSentenceImage: () => void | Promise<void>;
+  onGenerateSentenceReferenceImage?: () => void | Promise<void>;
   onGenerateSentenceFrameImage?: (which: 'start' | 'end') => void | Promise<void>;
-  onSelectFromLibrary: (which: 'single' | 'start' | 'end') => void;
+  onSelectFromLibrary: (which: 'single' | 'start' | 'end' | 'reference') => void;
   onRemoveSentenceImage: () => void;
   onRemoveSentenceFrameImage: (which: 'start' | 'end') => void;
+
+  onVideoGenerationModeChange?: (
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => void;
+  onVideoPromptChange?: (next: string) => void;
+  onSentenceReferenceImageUpload?: (e: ChangeEvent<HTMLInputElement>) => void;
+  onRemoveReferenceImage?: () => void;
 
   onOpenEnhanceImagePromptModal: () => void;
   isApplyingImagePrompt: boolean;
@@ -131,6 +143,7 @@ type SentenceEditorCardProps = {
 
   isGeneratingVideo: boolean;
   onGenerateVideo?: (canGenerateVideo: boolean) => void | Promise<void>;
+  onRemoveGeneratedVideo?: () => void;
 
   onPreviewImage: (url: string, effect: SentenceItem['visualEffect'] | null) => void;
 };
@@ -138,8 +151,11 @@ type SentenceEditorCardProps = {
 export function SentenceEditorCard({
   item,
   index,
+  isShortVideo,
   isFirst,
   isLast,
+
+  videoModel,
 
   scriptCharacters,
   onForcedCharacterKeysChange,
@@ -165,6 +181,7 @@ export function SentenceEditorCard({
   onSentenceFrameImageUpload,
 
   onGenerateSentenceImage,
+  onGenerateSentenceReferenceImage,
   onGenerateSentenceFrameImage,
   onSelectFromLibrary,
   onRemoveSentenceImage,
@@ -176,12 +193,31 @@ export function SentenceEditorCard({
 
   isGeneratingVideo,
   onGenerateVideo,
+  onRemoveGeneratedVideo,
+  onVideoGenerationModeChange,
+  onVideoPromptChange,
+  onSentenceReferenceImageUpload,
+  onRemoveReferenceImage,
 
   onPreviewImage,
 }: SentenceEditorCardProps) {
+  const videoAspectClass = isShortVideo ? 'aspect-9/16' : 'aspect-video';
+  const generatedVideoClassName = isShortVideo
+    ? 'block w-full aspect-9/16 object-cover h-96'
+    : 'block w-full aspect-video object-cover';
   const hasAnyVideo = Boolean(item.video || item.videoUrl);
   const hasAnyImage = Boolean(item.image || item.imageUrl);
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
+
+  const videoGenerationMode =
+    (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
+      SentenceItem['videoGenerationMode']
+    >;
+
+  const effectiveVideoGenerationMode =
+    videoModel === 'grok' && videoGenerationMode === 'frames'
+      ? 'referenceImage'
+      : videoGenerationMode;
 
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
 
@@ -203,9 +239,65 @@ export function SentenceEditorCard({
 
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
   const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
+  const referencePreviewUrl = item.referenceImage
+    ? URL.createObjectURL(item.referenceImage)
+    : item.referenceImageUrl;
   const hasStart = Boolean(startPreviewUrl);
   const hasEnd = Boolean(endPreviewUrl);
-  const canGenerateVideo = mediaMode === 'frames' && hasStart && hasEnd;
+  const canGenerateVideo =
+    mediaMode === 'frames' &&
+    (effectiveVideoGenerationMode === 'frames'
+      ? hasStart && hasEnd
+      : effectiveVideoGenerationMode === 'text'
+        ? Boolean(String(item.videoPrompt ?? '').trim())
+        : Boolean(referencePreviewUrl) && Boolean(String(item.videoPrompt ?? '').trim()));
+
+  const videoModeLabel =
+    effectiveVideoGenerationMode === 'text'
+      ? 'Text'
+      : effectiveVideoGenerationMode === 'referenceImage'
+        ? 'Reference'
+        : 'Frames';
+
+  const [isVideoModeMenuOpen, setIsVideoModeMenuOpen] = useState(false);
+  const [isVideoModeMenuMounted, setIsVideoModeMenuMounted] = useState(false);
+  const [isVideoModeMenuShown, setIsVideoModeMenuShown] = useState(false);
+  const videoModeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const openVideoModeMenu = () => {
+    setIsVideoModeMenuMounted(true);
+    setIsVideoModeMenuOpen(true);
+    setIsVideoModeMenuShown(false);
+    window.requestAnimationFrame(() => {
+      setIsVideoModeMenuShown(true);
+    });
+  };
+
+  const closeVideoModeMenu = () => {
+    setIsVideoModeMenuShown(false);
+    setIsVideoModeMenuOpen(false);
+  };
+
+  useEffect(() => {
+    if (isVideoModeMenuOpen) return;
+    if (!isVideoModeMenuMounted) return;
+    const t = window.setTimeout(() => {
+      setIsVideoModeMenuMounted(false);
+    }, 170);
+    return () => window.clearTimeout(t);
+  }, [isVideoModeMenuOpen, isVideoModeMenuMounted]);
+
+  useEffect(() => {
+    if (!isVideoModeMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const el = videoModeMenuRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      closeVideoModeMenu();
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [isVideoModeMenuOpen]);
 
   return (
     <div
@@ -550,234 +642,377 @@ export function SentenceEditorCard({
               </div>
             )}
 
-            {/* Start/End Frame Uploads */}
+            {/* Video inputs */}
             {mediaMode === 'frames' && (
               <div className="space-y-4">
-                {!hasAnyVideo ? (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
-                      {/* Start Frame */}
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-2 rounded-full bg-linear-to-r from-indigo-600 to-purple-600 shadow-sm"></div>
-                          <p className="text-sm font-bold text-gray-800">Start Frame</p>
-                        </div>
-                        {startPreviewUrl ? (
-                          <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                            <VisualEffectPreview effect={item.visualEffect}>
-                              <img
-                                src={startPreviewUrl}
-                                alt="Start frame"
-                                className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                                onClick={() => onPreviewImage(startPreviewUrl, item.visualEffect ?? null)}
-                              />
-                            </VisualEffectPreview>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSelectFromLibrary('start');
-                              }}
-                              className="absolute top-2 left-2 p-2 bg-white/90 text-indigo-700 rounded-xl hover:bg-white shadow-lg transition-all hover:scale-110"
-                              title="Choose start frame from library"
-                            >
-                              <Library className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onRemoveSentenceFrameImage('start')}
-                              className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
-                              title="Remove start frame"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
+                {effectiveVideoGenerationMode === 'frames' ? (
+                  !hasAnyVideo ? (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
+                        {/* Start Frame */}
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full bg-linear-to-r from-indigo-600 to-purple-600 shadow-sm"></div>
+                            <p className="text-sm font-bold text-gray-800">Start Frame</p>
                           </div>
-                        ) : (
-                          <div
-                            className="bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-5 text-center hover:border-indigo-400 hover:shadow-lg transition-all duration-300 cursor-pointer group/upload"
-                            onClick={() => document.getElementById(`sentence-start-image-${item.id}`)?.click()}
-                          >
-                            <input
-                              type="file"
-                              id={`sentence-start-image-${item.id}`}
-                              accept="image/*"
-                              onChange={(e) => onSentenceFrameImageUpload('start', e)}
-                              className="hidden"
-                            />
-                            <div className="flex flex-col items-center gap-3 pointer-events-none">
-                              <div className="p-3 bg-white rounded-xl shadow-md group-hover/upload:scale-110 transition-transform duration-300">
-                                <ImageIcon className="h-6 w-6 text-indigo-500" />
-                              </div>
-                              <span className="text-sm font-semibold text-gray-800">Click to upload</span>
-                            </div>
-
-                            {onGenerateSentenceFrameImage && (
-                              <div className="mt-4 pointer-events-auto">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void Promise.resolve(onGenerateSentenceFrameImage('start'));
-                                  }}
-                                  disabled={Boolean(item.isGeneratingStartImage)}
-                                  className="h-9 w-full gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all"
-                                >
-                                  {item.isGeneratingStartImage ? (
-                                    <>
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                      <span className="text-xs font-bold">Generating...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Sparkles className="h-4 w-4" />
-                                      <span className="text-xs font-bold">Generate AI</span>
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
-                            )}
-
-                            <div className="mt-3 pointer-events-auto">
-                              <Button
+                          {startPreviewUrl ? (
+                            <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
+                              <VisualEffectPreview effect={item.visualEffect}>
+                                <img
+                                  src={startPreviewUrl}
+                                  alt="Start frame"
+                                  className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
+                                  onClick={() => onPreviewImage(startPreviewUrl, item.visualEffect ?? null)}
+                                />
+                              </VisualEffectPreview>
+                              <button
                                 type="button"
-                                size="sm"
-                                variant="outline"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onSelectFromLibrary('start');
                                 }}
-                                className="h-9 w-full gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                                className="absolute top-2 left-2 p-2 bg-white/90 text-indigo-700 rounded-xl hover:bg-white shadow-lg transition-all hover:scale-110"
+                                title="Choose start frame from library"
                               >
                                 <Library className="h-4 w-4" />
-                                <span className="text-xs font-bold">From Library</span>
-                              </Button>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onRemoveSentenceFrameImage('start')}
+                                className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                                title="Remove start frame"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
                             </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* End Frame */}
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-2 rounded-full bg-linear-to-r from-purple-600 to-pink-600 shadow-sm"></div>
-                          <p className="text-sm font-bold text-gray-800">End Frame</p>
-                        </div>
-                        {endPreviewUrl ? (
-                          <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                            <VisualEffectPreview effect={item.visualEffect}>
-                              <img
-                                src={endPreviewUrl}
-                                alt="End frame"
-                                className="w-full h-58 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                                onClick={() => onPreviewImage(endPreviewUrl, item.visualEffect ?? null)}
+                          ) : (
+                            <div
+                              className="bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-5 text-center hover:border-indigo-400 hover:shadow-lg transition-all duration-300 cursor-pointer group/upload"
+                              onClick={() => document.getElementById(`sentence-start-image-${item.id}`)?.click()}
+                            >
+                              <input
+                                type="file"
+                                id={`sentence-start-image-${item.id}`}
+                                accept="image/*"
+                                onChange={(e) => onSentenceFrameImageUpload('start', e)}
+                                className="hidden"
                               />
-                            </VisualEffectPreview>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSelectFromLibrary('end');
-                              }}
-                              className="absolute top-2 left-2 p-2 bg-white/90 text-indigo-700 rounded-xl hover:bg-white shadow-lg transition-all hover:scale-110"
-                              title="Choose end frame from library"
-                            >
-                              <Library className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onRemoveSentenceFrameImage('end')}
-                              className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
-                              title="Remove end frame"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div
-                            className="bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-5 text-center hover:border-indigo-400 hover:shadow-lg transition-all duration-300 cursor-pointer group/upload"
-                            onClick={() => document.getElementById(`sentence-end-image-${item.id}`)?.click()}
-                          >
-                            <input
-                              type="file"
-                              id={`sentence-end-image-${item.id}`}
-                              accept="image/*"
-                              onChange={(e) => onSentenceFrameImageUpload('end', e)}
-                              className="hidden"
-                            />
-                            <div className="flex flex-col items-center gap-3 pointer-events-none">
-                              <div className="p-3 bg-white rounded-xl shadow-md group-hover/upload:scale-110 transition-transform duration-300">
-                                <ImageIcon className="h-6 w-6 text-indigo-500" />
+                              <div className="flex flex-col items-center gap-3 pointer-events-none">
+                                <div className="p-3 bg-white rounded-xl shadow-md group-hover/upload:scale-110 transition-transform duration-300">
+                                  <ImageIcon className="h-6 w-6 text-indigo-500" />
+                                </div>
+                                <span className="text-sm font-semibold text-gray-800">Click to upload</span>
                               </div>
-                              <span className="text-sm font-semibold text-gray-800">Click to upload</span>
-                            </div>
 
-                            {onGenerateSentenceFrameImage && (
-                              <div className="mt-4 pointer-events-auto">
+                              {onGenerateSentenceFrameImage && (
+                                <div className="mt-4 pointer-events-auto">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void Promise.resolve(onGenerateSentenceFrameImage('start'));
+                                    }}
+                                    disabled={Boolean(item.isGeneratingStartImage)}
+                                    className="h-9 w-full gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all"
+                                  >
+                                    {item.isGeneratingStartImage ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span className="text-xs font-bold">Generating...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Sparkles className="h-4 w-4" />
+                                        <span className="text-xs font-bold">Generate AI</span>
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              )}
+
+                              <div className="mt-3 pointer-events-auto">
                                 <Button
                                   type="button"
                                   size="sm"
+                                  variant="outline"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    void Promise.resolve(onGenerateSentenceFrameImage('end'));
+                                    onSelectFromLibrary('start');
                                   }}
-                                  disabled={Boolean(item.isGeneratingEndImage)}
-                                  className="h-9 w-full gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all"
+                                  className="h-9 w-full gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
                                 >
-                                  {item.isGeneratingEndImage ? (
-                                    <>
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                      <span className="text-xs font-bold">Generating...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Sparkles className="h-4 w-4" />
-                                      <span className="text-xs font-bold">Generate AI</span>
-                                    </>
-                                  )}
+                                  <Library className="h-4 w-4" />
+                                  <span className="text-xs font-bold">From Library</span>
                                 </Button>
                               </div>
-                            )}
+                            </div>
+                          )}
+                        </div>
 
-                            <div className="mt-3 pointer-events-auto">
-                              <Button
+                        {/* End Frame */}
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full bg-linear-to-r from-purple-600 to-pink-600 shadow-sm"></div>
+                            <p className="text-sm font-bold text-gray-800">End Frame</p>
+                          </div>
+                          {endPreviewUrl ? (
+                            <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
+                              <VisualEffectPreview effect={item.visualEffect}>
+                                <img
+                                  src={endPreviewUrl}
+                                  alt="End frame"
+                                  className="w-full h-58 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
+                                  onClick={() => onPreviewImage(endPreviewUrl, item.visualEffect ?? null)}
+                                />
+                              </VisualEffectPreview>
+                              <button
                                 type="button"
-                                size="sm"
-                                variant="outline"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onSelectFromLibrary('end');
                                 }}
-                                className="h-9 w-full gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                                className="absolute top-2 left-2 p-2 bg-white/90 text-indigo-700 rounded-xl hover:bg-white shadow-lg transition-all hover:scale-110"
+                                title="Choose end frame from library"
                               >
                                 <Library className="h-4 w-4" />
-                                <span className="text-xs font-bold">From Library</span>
-                              </Button>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onRemoveSentenceFrameImage('end')}
+                                className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                                title="Remove end frame"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
                             </div>
-                          </div>
-                        )}
+                          ) : (
+                            <div
+                              className="bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-5 text-center hover:border-indigo-400 hover:shadow-lg transition-all duration-300 cursor-pointer group/upload"
+                              onClick={() => document.getElementById(`sentence-end-image-${item.id}`)?.click()}
+                            >
+                              <input
+                                type="file"
+                                id={`sentence-end-image-${item.id}`}
+                                accept="image/*"
+                                onChange={(e) => onSentenceFrameImageUpload('end', e)}
+                                className="hidden"
+                              />
+                              <div className="flex flex-col items-center gap-3 pointer-events-none">
+                                <div className="p-3 bg-white rounded-xl shadow-md group-hover/upload:scale-110 transition-transform duration-300">
+                                  <ImageIcon className="h-6 w-6 text-indigo-500" />
+                                </div>
+                                <span className="text-sm font-semibold text-gray-800">Click to upload</span>
+                              </div>
+
+                              {onGenerateSentenceFrameImage && (
+                                <div className="mt-4 pointer-events-auto">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void Promise.resolve(onGenerateSentenceFrameImage('end'));
+                                    }}
+                                    disabled={Boolean(item.isGeneratingEndImage)}
+                                    className="h-9 w-full gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all"
+                                  >
+                                    {item.isGeneratingEndImage ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span className="text-xs font-bold">Generating...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Sparkles className="h-4 w-4" />
+                                        <span className="text-xs font-bold">Generate AI</span>
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              )}
+
+                              <div className="mt-3 pointer-events-auto">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectFromLibrary('end');
+                                  }}
+                                  className="h-9 w-full gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                                >
+                                  <Library className="h-4 w-4" />
+                                  <span className="text-xs font-bold">From Library</span>
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
+
+                      {!canGenerateVideo && (
+                        <div className="rounded-2xl border-2 border-amber-200 bg-linear-to-r from-amber-50 to-orange-50 px-5 py-4 flex items-start gap-3 shadow-sm">
+                          <div className="p-2 bg-amber-100 rounded-xl shrink-0">
+                            <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                              />
+                            </svg>
+                          </div>
+                          <p className="text-sm text-amber-900 leading-relaxed font-medium">
+                            Upload both <span className="font-bold">Start</span> and <span className="font-bold">End</span> frames to enable video generation.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : null
+                ) : effectiveVideoGenerationMode === 'text' ? (
+                  hasAnyVideo ? null : (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-linear-to-r from-emerald-600 to-teal-600 shadow-sm"></div>
+                        <p className="text-sm font-bold text-gray-800">Video Prompt</p>
+                      </div>
+                      <textarea
+                        value={String(item.videoPrompt ?? '')}
+                        onChange={(e) => onVideoPromptChange?.(e.target.value)}
+                        className="w-full px-4 py-3 text-sm text-gray-800 leading-relaxed bg-gray-50/50 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none transition-all duration-200 hover:border-gray-300 hover:bg-gray-50"
+                        rows={4}
+                        placeholder="Describe the video you want (e.g. cinematic close-up, slow camera move, dramatic lighting...)"
+                      />
+                      <p className="text-xs text-gray-500">Hint: Generates video directly from text (no frames needed).</p>
+                      {!canGenerateVideo ? (
+                        <p className="text-xs font-semibold text-amber-700">Enter a prompt to enable generation.</p>
+                      ) : null}
+                    </div>
+                  )
+                ) : (
+                  hasAnyVideo ? null : (
+                    <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full bg-linear-to-r from-indigo-600 to-purple-600 shadow-sm"></div>
+                      <p className="text-sm font-bold text-gray-800">Reference Image</p>
                     </div>
 
-                    {!canGenerateVideo && (
-                      <div className="rounded-2xl border-2 border-amber-200 bg-linear-to-r from-amber-50 to-orange-50 px-5 py-4 flex items-start gap-3 shadow-sm">
-                        <div className="p-2 bg-amber-100 rounded-xl shrink-0">
-                          <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                          </svg>
+                    {referencePreviewUrl ? (
+                      <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
+                        <img
+                          src={referencePreviewUrl}
+                          alt="Reference"
+                          className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
+                          onClick={() => onPreviewImage(referencePreviewUrl, item.visualEffect ?? null)}
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectFromLibrary('reference');
+                          }}
+                          className="absolute top-2 left-2 p-2 bg-white/90 text-indigo-700 rounded-xl hover:bg-white shadow-lg transition-all hover:scale-110"
+                          title="Choose reference image from library"
+                        >
+                          <Library className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveReferenceImage?.();
+                          }}
+                          className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                          title="Remove reference image"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-5 text-center hover:border-indigo-400 hover:shadow-lg transition-all duration-300 cursor-pointer group/upload"
+                        onClick={() => document.getElementById(`sentence-reference-image-${item.id}`)?.click()}
+                      >
+                        <input
+                          type="file"
+                          id={`sentence-reference-image-${item.id}`}
+                          accept="image/*"
+                          onChange={(e) => onSentenceReferenceImageUpload?.(e)}
+                          className="hidden"
+                        />
+                        <div className="flex flex-col items-center gap-3 pointer-events-none">
+                          <div className="p-3 bg-white rounded-xl shadow-md group-hover/upload:scale-110 transition-transform duration-300">
+                            <ImageIcon className="h-6 w-6 text-indigo-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-gray-800">Click to upload</span>
                         </div>
-                        <p className="text-sm text-amber-900 leading-relaxed font-medium">
-                          Upload both <span className="font-bold">Start</span> and <span className="font-bold">End</span> frames to enable video generation.
-                        </p>
+
+                        <div className="mt-3 pointer-events-auto">
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void Promise.resolve(onGenerateSentenceReferenceImage?.());
+                              }}
+                              disabled={!onGenerateSentenceReferenceImage || item.isGeneratingReferenceImage}
+                              className="h-9 w-full gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {item.isGeneratingReferenceImage ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span className="text-xs font-bold">Generating...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="h-4 w-4" />
+                                  <span className="text-xs font-bold">Generate with AI</span>
+                                </>
+                              )}
+                            </Button>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectFromLibrary('reference');
+                              }}
+                              className="h-9 w-full gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                            >
+                              <Library className="h-4 w-4" />
+                              <span className="text-xs font-bold">From Library</span>
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     )}
-                  </>
-                ) : null}
+
+                    <div className="pt-1 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-linear-to-r from-emerald-600 to-teal-600 shadow-sm"></div>
+                        <p className="text-sm font-bold text-gray-800">Video Prompt</p>
+                      </div>
+                      <textarea
+                        value={String(item.videoPrompt ?? '')}
+                        onChange={(e) => onVideoPromptChange?.(e.target.value)}
+                        className="w-full px-4 py-3 text-sm text-gray-800 leading-relaxed bg-gray-50/50 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none transition-all duration-200 hover:border-gray-300 hover:bg-gray-50"
+                        rows={4}
+                        placeholder="Describe the video you want (e.g. cinematic close-up, slow camera move, dramatic lighting...)"
+                      />
+                    </div>
+
+                    <p className="text-xs text-gray-500">Hint: Uses your prompt + the reference image to guide the generation.</p>
+                    {!canGenerateVideo ? (
+                      <p className="text-xs font-semibold text-amber-700">Add a reference image and a prompt to enable generation.</p>
+                    ) : null}
+                    </div>
+                  )
+                )}
 
                 {/* Generated Video + (Re)Generate Button */}
                 {item.video || item.videoUrl ? (
@@ -787,17 +1022,210 @@ export function SentenceEditorCard({
                         <video
                           src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
                           controls
-                          className="block w-full aspect-9/16 object-cover h-96"
+                          className={generatedVideoClassName}
                         />
                       </VisualEffectPreview>
+
+                      {item.videoUrl && item.videoUrl !== '/subscribe.mp4' ? (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveGeneratedVideo?.()}
+                          className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                          title="Remove generated video"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative" ref={videoModeMenuRef}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isVideoModeMenuOpen) {
+                              closeVideoModeMenu();
+                              return;
+                            }
+                            openVideoModeMenu();
+                          }}
+                          className="h-10 w-10 rounded-xl bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center"
+                          title={`Video mode: ${videoModeLabel}`}
+                        >
+                          <Repeat2 className="h-4 w-4" />
+                        </button>
+
+                        {isVideoModeMenuMounted ? (
+                          <div
+                            className={
+                              isVideoModeMenuShown
+                                ? 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-100 scale-100 translate-y-0 pointer-events-auto transition duration-150 ease-out'
+                                : 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-0 scale-95 translate-y-2 pointer-events-none transition duration-150 ease-in'
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="p-2 space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onVideoGenerationModeChange?.('referenceImage');
+                                  closeVideoModeMenu();
+                                }}
+                                className={
+                                  effectiveVideoGenerationMode === 'referenceImage'
+                                    ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-indigo-50 to-purple-50 border border-indigo-200'
+                                    : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                }
+                              >
+                                <p className="text-sm font-bold text-gray-900">Reference image</p>
+                                <p className="text-xs text-gray-500">One image + sentence text</p>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onVideoGenerationModeChange?.('text');
+                                  closeVideoModeMenu();
+                                }}
+                                className={
+                                  effectiveVideoGenerationMode === 'text'
+                                    ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200'
+                                    : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                }
+                              >
+                                <p className="text-sm font-bold text-gray-900">Text to video</p>
+                                <p className="text-xs text-gray-500">Prompt only (no images)</p>
+                              </button>
+                              {videoModel !== 'grok' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onVideoGenerationModeChange?.('frames');
+                                    closeVideoModeMenu();
+                                  }}
+                                  className={
+                                    effectiveVideoGenerationMode === 'frames'
+                                      ? 'w-full text-left rounded-xl px-3 py-2 bg-gray-50 border border-gray-200'
+                                      : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                  }
+                                >
+                                  <p className="text-sm font-bold text-gray-900">Frames</p>
+                                  <p className="text-xs text-gray-500">Start + end frames</p>
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
+                        disabled={!onGenerateVideo || item.videoUrl === '/subscribe.mp4' || isGeneratingVideo}
+                        className="h-10 flex-1 min-w-0 gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isGeneratingVideo ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span className="text-sm font-bold">Generating Video...</span>
+                          </>
+                        ) : (
+                          <>
+                            <VideoIcon className="h-4 w-4" />
+                            <span className="text-sm font-bold">Regenerate Video</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="relative" ref={videoModeMenuRef}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isVideoModeMenuOpen) {
+                            closeVideoModeMenu();
+                            return;
+                          }
+                          openVideoModeMenu();
+                        }}
+                        className="h-10 w-10 rounded-xl bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center"
+                        title={`Video mode: ${videoModeLabel}`}
+                      >
+                        <Repeat2 className="h-4 w-4" />
+                      </button>
+
+                      {isVideoModeMenuMounted ? (
+                        <div
+                          className={
+                            isVideoModeMenuShown
+                              ? 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-100 scale-100 translate-y-0 pointer-events-auto transition duration-150 ease-out'
+                              : 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-0 scale-95 translate-y-2 pointer-events-none transition duration-150 ease-in'
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="p-2 space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onVideoGenerationModeChange?.('referenceImage');
+                                  closeVideoModeMenu();
+                              }}
+                              className={
+                                  effectiveVideoGenerationMode === 'referenceImage'
+                                  ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-indigo-50 to-purple-50 border border-indigo-200'
+                                  : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                              }
+                            >
+                              <p className="text-sm font-bold text-gray-900">Reference image</p>
+                              <p className="text-xs text-gray-500">One image + sentence text</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onVideoGenerationModeChange?.('text');
+                                  closeVideoModeMenu();
+                              }}
+                              className={
+                                  effectiveVideoGenerationMode === 'text'
+                                  ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200'
+                                  : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                              }
+                            >
+                              <p className="text-sm font-bold text-gray-900">Text to video</p>
+                              <p className="text-xs text-gray-500">Prompt only (no images)</p>
+                            </button>
+                            {videoModel !== 'grok' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onVideoGenerationModeChange?.('frames');
+                                    closeVideoModeMenu();
+                                }}
+                                className={
+                                  effectiveVideoGenerationMode === 'frames'
+                                    ? 'w-full text-left rounded-xl px-3 py-2 bg-gray-50 border border-gray-200'
+                                    : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                }
+                              >
+                                <p className="text-sm font-bold text-gray-900">Frames</p>
+                                <p className="text-xs text-gray-500">Start + end frames</p>
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
 
                     <Button
                       type="button"
                       size="sm"
                       onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
-                      disabled={!onGenerateVideo || !canGenerateVideo || item.videoUrl === '/subscribe.mp4' || isGeneratingVideo}
-                      className="h-10 w-full gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      disabled={!onGenerateVideo || item.videoUrl === '/subscribe.mp4' || isGeneratingVideo}
+                      className="h-10 flex-1 min-w-0 gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {isGeneratingVideo ? (
                         <>
@@ -807,31 +1235,11 @@ export function SentenceEditorCard({
                       ) : (
                         <>
                           <VideoIcon className="h-4 w-4" />
-                          <span className="text-sm font-bold">Regenerate Video</span>
+                          <span className="text-sm font-bold">Generate Video</span>
                         </>
                       )}
                     </Button>
                   </div>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
-                    disabled={!onGenerateVideo || !canGenerateVideo || item.videoUrl === '/subscribe.mp4' || isGeneratingVideo}
-                    className="h-10 w-full gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {isGeneratingVideo ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span className="text-sm font-bold">Generating Video...</span>
-                      </>
-                    ) : (
-                      <>
-                        <VideoIcon className="h-4 w-4" />
-                        <span className="text-sm font-bold">Generate Video</span>
-                      </>
-                    )}
-                  </Button>
                 )}
               </div>
             )}
@@ -860,7 +1268,7 @@ export function SentenceEditorCard({
                         <video
                           src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
                           controls
-                          className="block w-full max-w-65 mx-auto aspect-9/16 object-cover"
+                          className={`block w-full max-w-65 mx-auto ${videoAspectClass} object-cover`}
                         />
                       </VisualEffectPreview>
                     )}

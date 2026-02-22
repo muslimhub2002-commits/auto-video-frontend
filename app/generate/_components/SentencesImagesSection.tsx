@@ -1,6 +1,11 @@
 'use client';
 
-import { useState, type ChangeEvent } from 'react';
+import {
+  useState,
+  type ChangeEvent,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import {
   AccordionItem,
   AccordionTrigger,
@@ -40,6 +45,7 @@ type ScriptCharacter = {
 
 type SentencesImagesSectionProps = {
   sentences: SentenceItem[];
+  isShortVideo: boolean;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
 
@@ -71,6 +77,9 @@ type SentencesImagesSectionProps = {
   onImageModelChange: (value: string) => void;
   imageStyle: string;
   onImageStyleChange: (value: string) => void;
+
+  videoModel: 'gemini' | 'grok';
+  onVideoModelChange: (value: 'gemini' | 'grok') => void;
   onInsertEmptySentenceAfter: (index: number) => string;
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
@@ -81,12 +90,33 @@ type SentencesImagesSectionProps = {
     e: ChangeEvent<HTMLInputElement>,
   ) => void;
   onGenerateSentenceImage: (index: number, promptOverride?: string) => void | Promise<void>;
+  onGenerateSentenceReferenceImage?: (index: number) => void | Promise<void>;
   onGenerateSentenceFrameImage?: (
     index: number,
     which: 'start' | 'end',
   ) => void | Promise<void>;
   onGenerateSentenceVideo?: (index: number) => void | Promise<void>;
-  onSelectFromLibrary: (index: number, which: 'single' | 'start' | 'end') => void;
+  onRemoveSentenceGeneratedVideoForMode?: (
+    index: number,
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => void;
+
+  onSentenceVideoGenerationModeChange: (
+    index: number,
+    mode: 'frames' | 'text' | 'referenceImage',
+  ) => void;
+  onSentenceVideoPromptChange: (index: number, next: string) => void;
+  onSentenceReferenceImageUpload: (
+    index: number,
+    e: ChangeEvent<HTMLInputElement>,
+  ) => void;
+  onRemoveSentenceReferenceImage: (index: number) => void;
+  onSelectFromLibrary: (
+    index: number,
+    which: 'single' | 'start' | 'end' | 'reference',
+  ) => void;
+  isGeneratingVideoBySentenceId: Record<string, boolean>;
+  setIsGeneratingVideoBySentenceId: Dispatch<SetStateAction<Record<string, boolean>>>;
   onSaveSentenceImage?: (index: number) => void | Promise<void>;
   onRemoveSentenceImage: (index: number) => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
@@ -103,6 +133,7 @@ type SentencesImagesSectionProps = {
 
 export function SentencesImagesSection({
   sentences,
+  isShortVideo,
   isGeneratingAllImages,
   onGenerateAllImages,
 
@@ -117,14 +148,25 @@ export function SentencesImagesSection({
   onImageModelChange,
   imageStyle,
   onImageStyleChange,
+  videoModel,
+  onVideoModelChange,
   onInsertEmptySentenceAfter,
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
   onSentenceFrameImageUpload,
   onGenerateSentenceImage,
+  onGenerateSentenceReferenceImage,
   onGenerateSentenceFrameImage,
   onGenerateSentenceVideo,
+  onRemoveSentenceGeneratedVideoForMode,
+
+  onSentenceVideoGenerationModeChange,
+  onSentenceVideoPromptChange,
+  onSentenceReferenceImageUpload,
+  onRemoveSentenceReferenceImage,
+  isGeneratingVideoBySentenceId,
+  setIsGeneratingVideoBySentenceId,
   onSelectFromLibrary,
   onRemoveSentenceImage,
   onRemoveSentenceFrameImage,
@@ -161,8 +203,6 @@ export function SentencesImagesSection({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewVisualEffect, setPreviewVisualEffect] = useState<SentenceItem['visualEffect'] | null>(null);
   const [isPreviewClosing, setIsPreviewClosing] = useState(false);
-
-  const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
 
   const {
     applyingImagePromptById,
@@ -218,7 +258,7 @@ export function SentencesImagesSection({
               <div className="w-1 h-4 bg-primary rounded-full"></div>
               Sentence Configuration
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <LlmModelSelect
                 value={imagePromptModel}
                 onValueChange={onImagePromptModelChange}
@@ -235,6 +275,16 @@ export function SentencesImagesSection({
                       {opt.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={videoModel} onValueChange={onVideoModelChange}>
+                <SelectTrigger label="Video Model">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini">Gemini</SelectItem>
+                  <SelectItem value="grok">Grok</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -264,8 +314,10 @@ export function SentencesImagesSection({
           {sentences.length > 0 ? (
             <SceneEditorSection
               sentences={sentences}
+              isShortVideo={isShortVideo}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
+              videoModel={videoModel}
               scriptCharacters={scriptCharacters}
               onScriptCharactersChange={onScriptCharactersChange}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
@@ -297,10 +349,18 @@ export function SentencesImagesSection({
               onSentenceImageUpload={onSentenceImageUpload}
               onSentenceFrameImageUpload={onSentenceFrameImageUpload}
               onGenerateSentenceImage={onGenerateSentenceImage}
+              onGenerateSentenceReferenceImage={onGenerateSentenceReferenceImage}
               onGenerateSentenceFrameImage={onGenerateSentenceFrameImage}
               onGenerateSentenceVideo={onGenerateSentenceVideo}
+              onRemoveSentenceGeneratedVideoForMode={onRemoveSentenceGeneratedVideoForMode}
               isGeneratingVideoBySentenceId={isGeneratingVideoBySentenceId}
               setIsGeneratingVideoBySentenceId={setIsGeneratingVideoBySentenceId}
+              onSentenceVideoGenerationModeChange={
+                onSentenceVideoGenerationModeChange
+              }
+              onSentenceVideoPromptChange={onSentenceVideoPromptChange}
+              onSentenceReferenceImageUpload={onSentenceReferenceImageUpload}
+              onRemoveSentenceReferenceImage={onRemoveSentenceReferenceImage}
               onSelectFromLibrary={onSelectFromLibrary}
               onRemoveSentenceImage={onRemoveSentenceImage}
               onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
