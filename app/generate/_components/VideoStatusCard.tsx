@@ -10,7 +10,16 @@ interface VideoStatusCardProps {
     videoJobStatus: string | null;
     videoJobError: string | null;
     videoUrl: string | null;
+    isShortVideo: boolean;
     script: string;
+    scriptCharacters: Array<{
+        key: string;
+        name: string;
+        description: string;
+        isSahaba: boolean;
+        isProphet: boolean;
+        isWoman: boolean;
+    }>;
     onSaveGeneration: () => Promise<void>;
     isSavingGeneration: boolean;
     canSaveGeneration: boolean;
@@ -22,7 +31,9 @@ export function VideoStatusCard({
     videoJobStatus,
     videoJobError,
     videoUrl,
+    isShortVideo,
     script,
+    scriptCharacters,
     onSaveGeneration,
     isSavingGeneration,
     canSaveGeneration,
@@ -214,7 +225,9 @@ export function VideoStatusCard({
                 isOpen={showYouTubeModal}
                 onClose={() => setShowYouTubeModal(false)}
                 videoUrl={videoUrl}
+                isShortVideo={isShortVideo}
                 script={script}
+                scriptCharacters={scriptCharacters}
                 onSaveGeneration={onSaveGeneration}
             />
 

@@ -338,6 +338,11 @@ export function ScriptSection(props: ScriptSectionProps) {
                   <SelectItem value="3 minutes">3 minutes</SelectItem>
                   <SelectItem value="4 minutes">4 minutes</SelectItem>
                   <SelectItem value="5 minutes">5 minutes</SelectItem>
+                  <SelectItem value="6 minutes">6 minutes</SelectItem>
+                  <SelectItem value="7 minutes">7 minutes</SelectItem>
+                  <SelectItem value="8 minutes">8 minutes</SelectItem>
+                  <SelectItem value="9 minutes">9 minutes</SelectItem>
+                  <SelectItem value="10 minutes">10 minutes</SelectItem>
                 </SelectContent>
               </Select>
 

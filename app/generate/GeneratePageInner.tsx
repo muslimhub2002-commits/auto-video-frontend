@@ -237,6 +237,8 @@ export function GeneratePageInner() {
   const [imagePromptModel, setImagePromptModel] = useState('gpt-4.1-mini');
   const [imageModel, setImageModel] = useState('leonardo');
   const [imageStyle, setImageStyle] = useState<string>('anime');
+  const [imageAspectRatio, setImageAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('9:16');
+  const [hasTouchedImageAspectRatio, setHasTouchedImageAspectRatio] = useState(false);
   const [videoModel, setVideoModel] = useState<'gemini' | 'grok'>('gemini');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
@@ -256,7 +258,13 @@ export function GeneratePageInner() {
   const previewAbortRef = useRef<AbortController | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
-  type BackgroundSoundtrackItem = { id: string; title: string; url: string; is_favorite?: boolean };
+  type BackgroundSoundtrackItem = {
+    id: string;
+    title: string;
+    url: string;
+    is_favorite?: boolean;
+    volume_percent?: number;
+  };
   const [backgroundSoundtracks, setBackgroundSoundtracks] = useState<BackgroundSoundtrackItem[]>([]);
   const [isLoadingBackgroundSoundtracks, setIsLoadingBackgroundSoundtracks] = useState(false);
   const [backgroundSoundtracksError, setBackgroundSoundtracksError] = useState<string | null>(null);
@@ -267,6 +275,7 @@ export function GeneratePageInner() {
   const [oneOffBackgroundSoundtrackUrl, setOneOffBackgroundSoundtrackUrl] = useState<string | null>(null);
   const [isUploadingBackgroundSoundtrack, setIsUploadingBackgroundSoundtrack] = useState(false);
   const [isSettingFavoriteBackgroundSoundtrack, setIsSettingFavoriteBackgroundSoundtrack] = useState(false);
+  const [isSavingBackgroundSoundtrackVolume, setIsSavingBackgroundSoundtrackVolume] = useState(false);
   const [isRandomScriptLoading, setIsRandomScriptLoading] = useState(false);
   const [randomScriptError, setRandomScriptError] = useState<string | null>(
     null,
@@ -376,6 +385,11 @@ export function GeneratePageInner() {
     scriptLengthMinutes > 3;
   const effectiveIsShort = isLongForm ? false : isShort;
   const effectiveAspectRatio = effectiveIsShort ? '9:16' : '16:9';
+
+  useEffect(() => {
+    if (hasTouchedImageAspectRatio) return;
+    setImageAspectRatio(effectiveIsShort ? '9:16' : '16:9');
+  }, [effectiveIsShort, hasTouchedImageAspectRatio]);
 
   useEffect(() => {
     if (!isLongForm) return;
@@ -668,7 +682,7 @@ export function GeneratePageInner() {
     setBackgroundSoundtracksError(null);
     try {
       const res = await api.get<{
-        items: { id: string; title: string; url: string; is_favorite?: boolean }[];
+        items: { id: string; title: string; url: string; is_favorite?: boolean; volume_percent?: number }[];
         total: number;
         page: number;
         limit: number;
@@ -704,6 +718,20 @@ export function GeneratePageInner() {
     }
   };
 
+  useEffect(() => {
+    const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
+    if (!value.startsWith('lib:')) return;
+
+    const id = value.slice('lib:'.length);
+    const found = backgroundSoundtracks.find((t) => t.id === id);
+    const next = Number(found?.volume_percent);
+    if (Number.isFinite(next)) {
+      setBackgroundSoundtrackVolumePercent(next);
+    } else {
+      setBackgroundSoundtrackVolumePercent(100);
+    }
+  }, [backgroundSoundtracks, selectedBackgroundSoundtrackValue]);
+
   const handleSetFavoriteBackgroundSoundtrack = async (soundtrackId: string) => {
     if (!user) {
       showAlert('You must be logged in to set a favorite soundtrack.', { type: 'warning' });
@@ -732,6 +760,49 @@ export function GeneratePageInner() {
       showToast('Failed to set favorite soundtrack', 'error');
     } finally {
       setIsSettingFavoriteBackgroundSoundtrack(false);
+    }
+  };
+
+  const handleSaveBackgroundSoundtrackVolume = async (params: {
+    soundtrackId: string;
+    volumePercent: number;
+  }) => {
+    if (!user) {
+      showAlert('You must be logged in to save a soundtrack volume.', { type: 'warning' });
+      return;
+    }
+
+    const id = String(params.soundtrackId ?? '').trim();
+    if (!id) return;
+
+    const raw = Number(params.volumePercent);
+    const volumePercent = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 100;
+
+    try {
+      setIsSavingBackgroundSoundtrackVolume(true);
+      const res = await api.patch<{ id: string; volume_percent?: number }>(
+        '/background-soundtracks/volume/' + encodeURIComponent(id),
+        { volumePercent },
+      );
+
+      const updatedId = String(res.data?.id ?? id).trim();
+      const saved = Number(res.data?.volume_percent);
+
+      setBackgroundSoundtracks((prev) =>
+        prev.map((t) =>
+          t.id === updatedId
+            ? { ...t, volume_percent: Number.isFinite(saved) ? saved : volumePercent }
+            : t,
+        ),
+      );
+
+      showToast('Default volume saved.', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to save soundtrack volume', error);
+      showToast('Failed to save default volume.', 'error');
+    } finally {
+      setIsSavingBackgroundSoundtrackVolume(false);
     }
   };
 
@@ -799,6 +870,7 @@ export function GeneratePageInner() {
         id: String(res.data?.id ?? '').trim(),
         title: String(res.data?.title ?? '').trim(),
         url: String(res.data?.url ?? '').trim(),
+        volume_percent: 100,
       };
 
       if (!created.id || !created.url) {
@@ -2119,6 +2191,7 @@ export function GeneratePageInner() {
         style,
         scriptLength,
         isShort: effectiveIsShort,
+        aspectRatio: imageAspectRatio,
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
@@ -2191,6 +2264,7 @@ export function GeneratePageInner() {
         style,
         scriptLength,
         isShort: effectiveIsShort,
+        aspectRatio: imageAspectRatio,
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
@@ -2287,6 +2361,7 @@ export function GeneratePageInner() {
         style,
         scriptLength,
         isShort: effectiveIsShort,
+        aspectRatio: imageAspectRatio,
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
@@ -3686,6 +3761,11 @@ export function GeneratePageInner() {
                 <SentencesImagesSection
                   sentences={sentences}
                   isShortVideo={effectiveIsShort}
+                  imageAspectRatio={imageAspectRatio}
+                  onImageAspectRatioChange={(next) => {
+                    setHasTouchedImageAspectRatio(true);
+                    setImageAspectRatio(next);
+                  }}
                   imagePromptModel={imagePromptModel}
                   onImagePromptModelChange={setImagePromptModel}
                   imageModel={imageModel}
@@ -3810,6 +3890,8 @@ export function GeneratePageInner() {
                 onToast={showToast}
                 onSetFavoriteBackgroundSoundtrack={handleSetFavoriteBackgroundSoundtrack}
                 isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
+                onSaveBackgroundSoundtrackVolume={handleSaveBackgroundSoundtrackVolume}
+                isSavingBackgroundSoundtrackVolume={isSavingBackgroundSoundtrackVolume}
                 onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
                 onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
                 isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}
@@ -3823,7 +3905,9 @@ export function GeneratePageInner() {
                 videoJobStatus={videoJobStatus}
                 videoJobError={videoJobError}
                 videoUrl={videoUrl}
+                isShortVideo={effectiveIsShort}
                 script={script}
+                scriptCharacters={scriptCharacters}
                 onSaveGeneration={handleSaveGeneration}
                 isSavingGeneration={isSavingGeneration}
                 canSaveGeneration={!!videoUrl && !!script.trim() && !!voiceOver && sentences.length > 0}

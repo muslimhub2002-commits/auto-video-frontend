@@ -9,13 +9,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Pause, Play, Sparkles, Star, Upload, Video } from 'lucide-react';
+import { Loader2, Pause, Play, Save, Sparkles, Star, Upload, Video } from 'lucide-react';
 
 type BackgroundSoundtrackItem = {
   id: string;
   title: string;
   url: string;
   is_favorite?: boolean;
+  volume_percent?: number;
 };
 
 type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -39,6 +40,11 @@ interface GenerateVideoButtonProps {
   onToast?: (message: string, type?: ToastType, duration?: number) => void;
   onSetFavoriteBackgroundSoundtrack?: (soundtrackId: string) => Promise<void> | void;
   isSettingFavoriteBackgroundSoundtrack?: boolean;
+  onSaveBackgroundSoundtrackVolume?: (params: {
+    soundtrackId: string;
+    volumePercent: number;
+  }) => Promise<void> | void;
+  isSavingBackgroundSoundtrackVolume?: boolean;
   onUploadBackgroundSoundtrackUseOnce: (file: File) => Promise<void> | void;
   onUploadBackgroundSoundtrackAddToLibrary: (params: {
     file: File;
@@ -66,6 +72,8 @@ export function GenerateVideoButton({
   onToast,
   onSetFavoriteBackgroundSoundtrack,
   isSettingFavoriteBackgroundSoundtrack,
+  onSaveBackgroundSoundtrackVolume,
+  isSavingBackgroundSoundtrackVolume,
   onUploadBackgroundSoundtrackUseOnce,
   onUploadBackgroundSoundtrackAddToLibrary,
   isUploadingBackgroundSoundtrack,
@@ -231,6 +239,8 @@ export function GenerateVideoButton({
     const id = value.slice('lib:'.length);
     return backgroundSoundtracks.find((t) => t.id === id) ?? null;
   }, [backgroundSoundtracks, selectedBackgroundSoundtrackValue]);
+
+  const canSaveVolume = Boolean(selectedLibrarySoundtrack?.id);
 
   useEffect(() => {
     return () => {
@@ -549,6 +559,33 @@ export function GenerateVideoButton({
                     <span className="text-xs text-gray-600 w-12 text-right">
                       {Math.round(backgroundSoundtrackVolumePercent ?? 100)}%
                     </span>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-gray-300 hover:bg-gray-50 h-8 w-8 p-0 shrink-0"
+                      onClick={() => {
+                        const id = selectedLibrarySoundtrack?.id;
+                        if (!id) {
+                          onToast?.('Select a library soundtrack to save a default volume.', 'warning');
+                          return;
+                        }
+                        if (!onSaveBackgroundSoundtrackVolume) return;
+                        void onSaveBackgroundSoundtrackVolume({
+                          soundtrackId: id,
+                          volumePercent: backgroundSoundtrackVolumePercent ?? 100,
+                        });
+                      }}
+                      disabled={!canSaveVolume || !onSaveBackgroundSoundtrackVolume || Boolean(isSavingBackgroundSoundtrackVolume) || soundtrackUploadDisabled}
+                      aria-label="Save default volume for soundtrack"
+                      title="Save default volume for this soundtrack"
+                    >
+                      {isSavingBackgroundSoundtrackVolume ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
 
                   <p className="mt-1 text-[11px] text-gray-500">

@@ -7,7 +7,16 @@ interface VideoJobSectionProps {
   videoJobStatus: string | null;
   videoJobError: string | null;
   videoUrl: string | null;
+  isShortVideo: boolean;
   script: string;
+  scriptCharacters: Array<{
+    key: string;
+    name: string;
+    description: string;
+    isSahaba: boolean;
+    isProphet: boolean;
+    isWoman: boolean;
+  }>;
   onSaveGeneration: () => Promise<void>;
   isSavingGeneration: boolean;
   canSaveGeneration: boolean;
@@ -19,7 +28,9 @@ export function VideoJobSection({
   videoJobStatus,
   videoJobError,
   videoUrl,
+  isShortVideo,
   script,
+  scriptCharacters,
   onSaveGeneration,
   isSavingGeneration,
   canSaveGeneration,
@@ -49,7 +60,9 @@ export function VideoJobSection({
         videoJobStatus={videoJobStatus}
         videoJobError={videoJobError}
         videoUrl={videoUrl}
+        isShortVideo={isShortVideo}
         script={script}
+        scriptCharacters={scriptCharacters}
         onSaveGeneration={onSaveGeneration}
         isSavingGeneration={isSavingGeneration}
         canSaveGeneration={canSaveGeneration}

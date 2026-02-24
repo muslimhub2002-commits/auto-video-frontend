@@ -49,6 +49,9 @@ type SentencesImagesSectionProps = {
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
 
+  imageAspectRatio: '16:9' | '9:16' | '1:1';
+  onImageAspectRatioChange: (value: '16:9' | '9:16' | '1:1') => void;
+
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
@@ -136,6 +139,9 @@ export function SentencesImagesSection({
   isShortVideo,
   isGeneratingAllImages,
   onGenerateAllImages,
+
+  imageAspectRatio,
+  onImageAspectRatioChange,
 
   scriptCharacters,
   onScriptCharactersChange,
@@ -230,8 +236,9 @@ export function SentencesImagesSection({
     { value: 'anime', label: 'Anime' },
     { value: 'realism', label: 'Realism' },
     { value: 'cinematic', label: 'Cinematic' },
-    { value: '3d', label: '3D Render' },
     { value: 'watercolor', label: 'Watercolor' },
+    { value: 'classical oil-painting', label: 'Classical oil-painting' },
+    { value: '3d', label: '3D Render' },
   ];
 
   return (
@@ -258,7 +265,7 @@ export function SentencesImagesSection({
               <div className="w-1 h-4 bg-primary rounded-full"></div>
               Sentence Configuration
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <LlmModelSelect
                 value={imagePromptModel}
                 onValueChange={onImagePromptModelChange}
@@ -275,6 +282,22 @@ export function SentencesImagesSection({
                       {opt.label}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={imageAspectRatio}
+                onValueChange={(value) =>
+                  onImageAspectRatioChange(value as '16:9' | '9:16' | '1:1')
+                }
+              >
+                <SelectTrigger label="Aspect Ratio">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="16:9">Wide (16:9)</SelectItem>
+                  <SelectItem value="9:16">Shorts (9:16)</SelectItem>
+                  <SelectItem value="1:1">1:1 (Square)</SelectItem>
                 </SelectContent>
               </Select>
 

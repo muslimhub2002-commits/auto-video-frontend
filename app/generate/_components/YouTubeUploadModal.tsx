@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,12 +15,22 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { LlmModelSelect } from './LlmModelSelect';
 
 interface YouTubeUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   videoUrl: string | null;
+  isShortVideo: boolean;
   script: string;
+  scriptCharacters: Array<{
+    key: string;
+    name: string;
+    description: string;
+    isSahaba: boolean;
+    isProphet: boolean;
+    isWoman: boolean;
+  }>;
   onSaveGeneration: () => Promise<void>;
 }
 
@@ -28,7 +38,9 @@ export function YouTubeUploadModal({
   isOpen,
   onClose,
   videoUrl,
+  isShortVideo,
   script,
+  scriptCharacters,
   onSaveGeneration,
 }: YouTubeUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
@@ -65,6 +77,192 @@ export function YouTubeUploadModal({
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledHour, setScheduledHour] = useState('12');
   const [useWebSearchForSeo, setUseWebSearchForSeo] = useState(false);
+
+  // Wallpaper generation (only for non-shorts)
+  const [wallpaperPromptModel, setWallpaperPromptModel] = useState('claude-sonnet-4-5');
+  const [wallpaperImageStyle, setWallpaperImageStyle] = useState<string>('cinematic');
+  const [wallpaperImageModel, setWallpaperImageModel] = useState('leonardo');
+  const [isGeneratingWallpaper, setIsGeneratingWallpaper] = useState(false);
+  const [wallpaperError, setWallpaperError] = useState<string | null>(null);
+  const [isUploadingWallpaper, setIsUploadingWallpaper] = useState(false);
+  const [wallpaperUploadError, setWallpaperUploadError] = useState<string | null>(null);
+  const [wallpaperUploadedUrl, setWallpaperUploadedUrl] = useState<string | null>(null);
+  const [wallpaperLocalFileName, setWallpaperLocalFileName] = useState<string | null>(null);
+  const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  const [wallpaperHeadline, setWallpaperHeadline] = useState<string | null>(null);
+  const [wallpaperSafeCharacters, setWallpaperSafeCharacters] = useState<
+    Array<{ key: string; name: string; description: string }>
+  >([]);
+  const [wallpaperUsedCharacterKeys, setWallpaperUsedCharacterKeys] = useState<string[]>([]);
+
+  const WALLPAPER_STYLE_PRESETS = [
+    {
+      key: 'anime',
+      label: 'Anime',
+      style: 'Anime style, detailed, vibrant, high quality',
+    },
+    {
+      key: 'realism',
+      label: 'Realism',
+      style: 'Photorealistic, ultra-detailed, natural lighting, high quality',
+    },
+    {
+      key: 'cinematic',
+      label: 'Cinematic',
+      style: 'Cinematic film still, dramatic lighting, shallow depth of field, ultra-detailed',
+    },
+    {
+      key: '3d',
+      label: '3D Render',
+      style: '3D render, high detail, global illumination, physically based rendering, high quality',
+    },
+    {
+      key: 'watercolor',
+      label: 'Watercolor',
+      style: 'Watercolor illustration, soft washes, textured paper, high quality',
+    },
+    {
+      key: 'classical oil-painting',
+      label: 'Classical oil-painting',
+      style: 'Classical oil painting, rich brushwork, museum-quality, high detail, dramatic composition',
+    },
+  ] as const;
+
+  const wallpaperFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleGenerateWallpaper = async () => {
+    setWallpaperError(null);
+    setWallpaperUploadError(null);
+    setWallpaperUploadedUrl(null);
+    setWallpaperUrl(null);
+    setWallpaperHeadline(null);
+    setWallpaperSafeCharacters([]);
+    setWallpaperUsedCharacterKeys([]);
+
+    const trimmedScript = (script || '').trim();
+    if (!trimmedScript) {
+      setWallpaperError('No script available. Generate or paste a script first.');
+      return;
+    }
+
+    setIsGeneratingWallpaper(true);
+    try {
+      const stylePreset =
+        WALLPAPER_STYLE_PRESETS.find((s) => s.key === wallpaperImageStyle) ||
+        WALLPAPER_STYLE_PRESETS[0];
+
+      const res = await api.post('/ai/youtube-wallpaper', {
+        script: trimmedScript,
+        title: (youtubeTitle || '').trim() || undefined,
+        promptModel: wallpaperPromptModel,
+        imageModel: wallpaperImageModel,
+        style: stylePreset.style,
+        characters: Array.isArray(scriptCharacters) ? scriptCharacters : [],
+      });
+
+      const data = res.data as {
+        headline?: string;
+        usedCharacterKeys?: string[];
+        safeCharacters?: Array<{ key: string; name: string; description: string }>;
+        prompt?: string;
+        imageBase64?: string;
+        imageUrl?: string;
+      };
+
+      const nextUrl =
+        (data?.imageUrl && String(data.imageUrl)) ||
+        (data?.imageBase64
+          ? `data:image/png;base64,${data.imageBase64}`
+          : null);
+
+      if (!nextUrl) {
+        throw new Error('Wallpaper generated, but no image URL was returned.');
+      }
+
+      setWallpaperUrl(nextUrl);
+      if (typeof data?.headline === 'string' && data.headline.trim()) {
+        setWallpaperHeadline(data.headline.trim());
+      }
+      if (Array.isArray(data?.safeCharacters)) {
+        setWallpaperSafeCharacters(
+          data.safeCharacters
+            .map((c) => ({
+              key: String(c?.key ?? '').trim(),
+              name: String(c?.name ?? '').trim(),
+              description: String(c?.description ?? '').trim(),
+            }))
+            .filter((c) => c.key && c.name && c.description),
+        );
+      }
+      if (Array.isArray(data?.usedCharacterKeys)) {
+        setWallpaperUsedCharacterKeys(
+          data.usedCharacterKeys
+            .map((k) => String(k ?? '').trim())
+            .filter(Boolean),
+        );
+      }
+    } catch (err: unknown) {
+      const messageFromApi = (() => {
+        if (typeof err === 'object' && err !== null && 'response' in err) {
+          const response = (err as { response?: { data?: { message?: unknown } } }).response;
+          const message = response?.data?.message;
+          if (typeof message === 'string' && message.trim()) return message;
+        }
+        if (err instanceof Error && err.message.trim()) return err.message;
+        return null;
+      })();
+      setWallpaperError(messageFromApi ?? 'Failed to generate wallpaper. Please try again.');
+    } finally {
+      setIsGeneratingWallpaper(false);
+    }
+  };
+
+  const handleUploadWallpaper = async (file: File) => {
+    setWallpaperUploadError(null);
+    setWallpaperError(null);
+    setWallpaperLocalFileName(file.name || null);
+
+    const maxBytes = 15 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setWallpaperUploadError('Wallpaper image is too large. Please use an image under 15MB.');
+      return;
+    }
+
+    if (!file.type?.startsWith('image/')) {
+      setWallpaperUploadError('Please select a valid image file (PNG/JPG/WebP).');
+      return;
+    }
+
+    setIsUploadingWallpaper(true);
+    try {
+      const url = await uploadToCloudinaryUnsigned(file, {
+        resourceType: 'image',
+        folder: 'auto-video-generator/wallpapers',
+      });
+
+      setWallpaperUrl(url);
+      setWallpaperUploadedUrl(url);
+      setWallpaperHeadline(null);
+      setWallpaperSafeCharacters([]);
+      setWallpaperUsedCharacterKeys([]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : null;
+      setWallpaperUploadError(message || 'Failed to upload wallpaper. Please try again.');
+    } finally {
+      setIsUploadingWallpaper(false);
+    }
+  };
+
+  const handleWallpaperFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Allow selecting the same file twice.
+    e.target.value = '';
+    if (!file) return;
+
+    await handleUploadWallpaper(file);
+  };
 
   const getCairoTodayISODate = () => {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -360,6 +558,16 @@ export function YouTubeUploadModal({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    // Reset wallpaper preview/errors each time modal opens to avoid stale UI.
+    setWallpaperError(null);
+    setWallpaperUrl(null);
+    setWallpaperHeadline(null);
+    setWallpaperSafeCharacters([]);
+    setWallpaperUsedCharacterKeys([]);
+  }, [isOpen]);
+
+  useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) onClose();
     };
@@ -381,6 +589,7 @@ export function YouTubeUploadModal({
       const res = await api.post('/ai/youtube-seo', {
         script: trimmed,
         useWebSearch: useWebSearchForSeo,
+        isShort: isShortVideo,
       });
       const data = res.data as { title?: string; description?: string; tags?: string[] };
 
@@ -552,7 +761,10 @@ export function YouTubeUploadModal({
   if (!isRendered) return null;
 
   const isBusy =
-    isUploadingToYouTube || cloudinaryStage !== 'idle' || isConnectingYouTube;
+    isUploadingToYouTube ||
+    cloudinaryStage !== 'idle' ||
+    isConnectingYouTube ||
+    isGeneratingWallpaper;
 
   return (
     <div
@@ -786,6 +998,253 @@ export function YouTubeUploadModal({
               Separate multiple tags with commas
             </p>
           </div>
+
+          {/* Wallpaper Generator (Long-form only) */}
+          {!isShortVideo && (
+            <div className="bg-linear-to-br from-amber-50 via-rose-50 to-purple-50 border-2 border-amber-200/70 rounded-2xl p-6 space-y-5">
+              <div className="flex items-start gap-4">
+                <div className="shrink-0 w-10 h-10 rounded-xl bg-linear-to-br from-amber-500 to-rose-500 flex items-center justify-center shadow-sm">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-base font-bold text-gray-900">Wallpaper Generator</h4>
+                  <p className="text-sm text-gray-700 mt-1 leading-relaxed">
+                    For regular (16:9) videos, generate a high-quality wallpaper image based on your script.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <LlmModelSelect
+                  value={wallpaperPromptModel}
+                  onValueChange={setWallpaperPromptModel}
+                  label="Prompt Model"
+                  disabled={isBusy}
+                />
+
+                <Select
+                  value={wallpaperImageStyle}
+                  onValueChange={setWallpaperImageStyle}
+                  disabled={isBusy}
+                >
+                  <SelectTrigger label="Image Style">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WALLPAPER_STYLE_PRESETS.map((opt) => (
+                      <SelectItem key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={wallpaperImageModel}
+                  onValueChange={setWallpaperImageModel}
+                  disabled={isBusy}
+                >
+                  <SelectTrigger label="Image Model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="leonardo">Leonardo AI</SelectItem>
+                    <SelectItem value="grok-imagine-image">Grok — grok-imagine-image</SelectItem>
+                    <SelectItem value="gpt-image-1">OpenAI — gpt-image-1</SelectItem>
+                    <SelectItem value="gpt-image-1-mini">OpenAI — gpt-image-1-mini</SelectItem>
+                    <SelectItem value="gpt-image-1.5">OpenAI — gpt-image-1.5</SelectItem>
+                    <SelectItem value="modelslab:flux">Flux (ModelsLab)</SelectItem>
+                    <SelectItem value="modelslab:flux-2-pro">Flux 2 Pro (ModelsLab)</SelectItem>
+                    <SelectItem value="imagen-4">Imagen 4</SelectItem>
+                    <SelectItem value="imagen-4-ultra">Imagen 4 Ultra</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <Button
+                  type="button"
+                  onClick={handleGenerateWallpaper}
+                  disabled={isBusy || !(script || '').trim()}
+                  className="h-12 md:w-auto bg-linear-to-r from-amber-600 to-rose-600 hover:from-amber-700 hover:to-rose-700 text-white font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isGeneratingWallpaper ? (
+                    <>
+                      <Loader2 className="mr-2.5 h-5 w-5 animate-spin" />
+                      <span>Generating wallpaper...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2.5 h-5 w-5" />
+                      <span>Generate Wallpaper</span>
+                    </>
+                  )}
+                </Button>
+
+                <p className="text-sm text-gray-600">
+                  Uses your full script as the prompt to create a wallpaper image.
+                </p>
+              </div>
+
+              <div className="bg-white/80 backdrop-blur-sm border border-amber-200/60 rounded-2xl p-4">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                      Upload Wallpaper
+                    </p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      Prefer your own design? Upload a 16:9 image and we’ll use it as the current wallpaper preview.
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      PNG/JPG/WebP. Recommended 1280×720 or higher. Max 15MB.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 md:shrink-0">
+                    <input
+                      ref={wallpaperFileInputRef}
+                      id="wallpaper-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleWallpaperFileChange}
+                      disabled={isBusy || isUploadingWallpaper}
+                      className="hidden"
+                    />
+
+                    <Button
+                      type="button"
+                      onClick={() => wallpaperFileInputRef.current?.click()}
+                      disabled={isBusy || isUploadingWallpaper}
+                      className="h-12 bg-white hover:bg-gray-50 text-gray-900 font-semibold rounded-xl border-2 border-amber-200/80 shadow-sm hover:shadow-md transition-all duration-200"
+                    >
+                      {isUploadingWallpaper ? (
+                        <>
+                          <Loader2 className="mr-2.5 h-5 w-5 animate-spin" />
+                          <span>Uploading...</span>
+                        </>
+                      ) : (
+                        <span>Choose Image</span>
+                      )}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setWallpaperError(null);
+                        setWallpaperUploadError(null);
+                        setWallpaperUploadedUrl(null);
+                        setWallpaperLocalFileName(null);
+                        setWallpaperUrl(null);
+                        setWallpaperHeadline(null);
+                        setWallpaperSafeCharacters([]);
+                        setWallpaperUsedCharacterKeys([]);
+                      }}
+                      disabled={isBusy || (!wallpaperUrl && !wallpaperUploadedUrl)}
+                      className="h-12 rounded-xl"
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="text-sm text-gray-700">
+                    <span className="font-semibold text-gray-900">Selected:</span>{' '}
+                    {wallpaperLocalFileName ? (
+                      <span className="font-medium">{wallpaperLocalFileName}</span>
+                    ) : (
+                      <span className="text-gray-500">No file selected</span>
+                    )}
+                  </div>
+
+                  {wallpaperUploadedUrl && (
+                    <div className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 w-fit">
+                      Uploaded and set as current wallpaper
+                    </div>
+                  )}
+                </div>
+
+                {wallpaperUploadError && (
+                  <div className="mt-4 text-sm text-rose-900 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
+                    {wallpaperUploadError}
+                  </div>
+                )}
+              </div>
+
+              {wallpaperError && (
+                <div className="text-sm text-rose-900 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
+                  {wallpaperError}
+                </div>
+              )}
+
+              {wallpaperUrl && (
+                <div className="bg-white/80 backdrop-blur-sm border border-amber-200/60 rounded-2xl p-4">
+                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">
+                    Wallpaper Preview
+                  </p>
+
+                  {wallpaperHeadline && (
+                    <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                      <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                        Headline
+                      </p>
+                      <p className="text-sm font-bold text-amber-950 mt-1">
+                        {wallpaperHeadline}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl overflow-hidden border border-gray-200 bg-white">
+                    <img
+                      src={wallpaperUrl}
+                      alt="Generated wallpaper"
+                      className="w-full h-auto"
+                    />
+                  </div>
+
+                  {wallpaperSafeCharacters.length > 0 && (
+                    <div className="mt-4 rounded-xl bg-white border border-amber-200/60 p-4">
+                      <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                        Safe Characters (non-Prophet / non-Sahaba / non-women)
+                      </p>
+                      <div className="space-y-2">
+                        {wallpaperSafeCharacters.map((c) => {
+                          const isUsed = wallpaperUsedCharacterKeys.includes(c.key);
+                          return (
+                            <div
+                              key={c.key}
+                              className={`rounded-lg border px-3 py-2 ${isUsed
+                                ? 'border-emerald-200 bg-emerald-50'
+                                : 'border-gray-200 bg-gray-50'
+                                }`}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold text-gray-900">
+                                  {c.key} — {c.name}
+                                </p>
+                                <span
+                                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${isUsed
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-gray-200 text-gray-700'
+                                    }`}
+                                >
+                                  {isUsed ? 'Used' : 'Available'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-700 mt-1 leading-relaxed">
+                                {c.description}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Upload Settings */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
