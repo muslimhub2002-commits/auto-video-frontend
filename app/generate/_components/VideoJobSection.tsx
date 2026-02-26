@@ -8,7 +8,8 @@ interface VideoJobSectionProps {
   videoJobError: string | null;
   videoUrl: string | null;
   isShortVideo: boolean;
-  script: string;
+  scriptId: string | null;
+  scriptTextForUpload: string;
   scriptCharacters: Array<{
     key: string;
     name: string;
@@ -29,7 +30,8 @@ export function VideoJobSection({
   videoJobError,
   videoUrl,
   isShortVideo,
-  script,
+  scriptId,
+  scriptTextForUpload,
   scriptCharacters,
   onSaveGeneration,
   isSavingGeneration,
@@ -61,7 +63,8 @@ export function VideoJobSection({
         videoJobError={videoJobError}
         videoUrl={videoUrl}
         isShortVideo={isShortVideo}
-        script={script}
+        scriptId={scriptId}
+        scriptTextForUpload={scriptTextForUpload}
         scriptCharacters={scriptCharacters}
         onSaveGeneration={onSaveGeneration}
         isSavingGeneration={isSavingGeneration}

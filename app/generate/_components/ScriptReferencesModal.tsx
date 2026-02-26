@@ -27,6 +27,8 @@ export interface ScriptReferenceDto {
     voice: string;
   } | null;
   sentences?: ScriptSentenceDto[];
+  sentences_count?: number;
+  images_count?: number;
 }
 
 interface ScriptTemplateDto {

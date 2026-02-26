@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, CheckCircle2, XCircle, Video, Download, Play, Sparkles, X } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Video, Download, Play, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { YouTubeUploadModal } from './YouTubeUploadModal';
 
@@ -11,7 +11,8 @@ interface VideoStatusCardProps {
     videoJobError: string | null;
     videoUrl: string | null;
     isShortVideo: boolean;
-    script: string;
+    scriptId: string | null;
+    scriptTextForUpload: string;
     scriptCharacters: Array<{
         key: string;
         name: string;
@@ -32,7 +33,8 @@ export function VideoStatusCard({
     videoJobError,
     videoUrl,
     isShortVideo,
-    script,
+    scriptId,
+    scriptTextForUpload,
     scriptCharacters,
     onSaveGeneration,
     isSavingGeneration,
@@ -226,9 +228,9 @@ export function VideoStatusCard({
                 onClose={() => setShowYouTubeModal(false)}
                 videoUrl={videoUrl}
                 isShortVideo={isShortVideo}
-                script={script}
+                scriptId={scriptId}
+                script={scriptTextForUpload}
                 scriptCharacters={scriptCharacters}
-                onSaveGeneration={onSaveGeneration}
             />
 
             {/* Failed State */}

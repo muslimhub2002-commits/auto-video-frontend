@@ -13,6 +13,10 @@ import {
 } from '@/components/ui/accordion';
 import {
   Images,
+  Scissors,
+  Film,
+  LayoutGrid,
+  Loader2,
 } from 'lucide-react';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import {
@@ -43,9 +47,24 @@ type ScriptCharacter = {
   isWoman: boolean;
 };
 
+type ShortsTabMeta = {
+  label: string;
+  count: number;
+};
+
 type SentencesImagesSectionProps = {
   sentences: SentenceItem[];
   isShortVideo: boolean;
+  isLongForm?: boolean;
+
+  shortsTabs?: ShortsTabMeta[];
+  activeShortTabIndex?: number | null;
+  onSelectShortTab?: (index: number | null) => void;
+  manualSplitEnabled?: boolean;
+  onManualSplitToggle?: (next: boolean) => void | Promise<void>;
+  onSplitWithAi?: (() => void) | (() => Promise<void>);
+  isSplittingWithAi?: boolean;
+  shortsValidationError?: string | null;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
 
@@ -139,6 +158,16 @@ export function SentencesImagesSection({
   isShortVideo,
   isGeneratingAllImages,
   onGenerateAllImages,
+
+  isLongForm = false,
+  shortsTabs = [],
+  activeShortTabIndex = null,
+  onSelectShortTab,
+  manualSplitEnabled = false,
+  onManualSplitToggle,
+  onSplitWithAi,
+  isSplittingWithAi = false,
+  shortsValidationError = null,
 
   imageAspectRatio,
   onImageAspectRatioChange,
@@ -333,7 +362,123 @@ export function SentencesImagesSection({
               </Select>
             </div>
           </div>
+          {isLongForm && sentences.length > 0 ? (
+            <div className="rounded-2xl border border-gray-200 bg-white/80 shadow-sm overflow-hidden">
+              {/* Header row */}
+              <div className="flex items-center justify-between gap-4 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="relative shrink-0">
+                    <div className="absolute inset-0 bg-purple-400/40 blur-md rounded-xl" />
+                    <div className="relative p-2.5 bg-linear-to-br from-purple-500 to-violet-600 rounded-xl shadow-lg">
+                      <Scissors className="h-4 w-4 text-white" />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-gray-900">Split into Shorts</div>
+                    <div className="text-xs text-gray-500">
+                      {shortsTabs.length > 0
+                        ? `${shortsTabs.length} short${shortsTabs.length === 1 ? '' : 's'} · edit each short in tabs`
+                        : 'Enable manual split, then split with AI'}
+                    </div>
+                  </div>
+                </div>
 
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2.5 text-sm text-gray-700 select-none cursor-pointer">
+                    <span className="font-medium text-gray-700">Manual split</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={manualSplitEnabled}
+                      onClick={async () => {
+                        if (onManualSplitToggle) {
+                          await onManualSplitToggle(!manualSplitEnabled);
+                        }
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${manualSplitEnabled
+                          ? 'bg-linear-to-r from-purple-500 to-violet-600'
+                          : 'bg-gray-200'
+                        }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${manualSplitEnabled ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                      />
+                    </button>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (isSplittingWithAi) return;
+                      if (onSplitWithAi) {
+                        await onSplitWithAi();
+                      }
+                    }}
+                    disabled={isSplittingWithAi}
+                    aria-busy={isSplittingWithAi}
+                    className={`inline-flex items-center justify-center gap-2 rounded-full bg-linear-to-r from-purple-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-purple-500/25 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isSplittingWithAi ? 'opacity-80 cursor-not-allowed' : 'hover:opacity-95'}`}
+                  >
+                    {isSplittingWithAi ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Splitting…
+                      </>
+                    ) : (
+                      'Split with AI'
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Tab pills */}
+              {shortsTabs.length > 0 ? (
+              <div className="flex flex-wrap gap-2 px-5 pb-4">
+                <button
+                  type="button"
+                  onClick={() => onSelectShortTab?.(null)}
+                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all ${activeShortTabIndex === null
+                      ? 'border-purple-500 bg-linear-to-r from-purple-500 to-violet-600 text-white shadow-md shadow-purple-500/25'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Full Video
+                </button>
+
+                {shortsTabs.map((t, idx) => {
+                  const isActive = activeShortTabIndex === idx;
+                  return (
+                    <button
+                      key={`short-tab-${idx}`}
+                      type="button"
+                      onClick={() => onSelectShortTab?.(idx)}
+                      className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all ${isActive
+                          ? 'border-purple-500 bg-linear-to-r from-purple-500 to-violet-600 text-white shadow-md shadow-purple-500/25'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                    >
+                      <Film className="h-4 w-4" />
+                      {t.label}
+                      <span
+                        className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold ${isActive
+                            ? 'bg-white/25 text-white'
+                            : 'bg-gray-100 text-gray-600'
+                          }`}
+                      >
+                        {t.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              ) : null}
+
+              {shortsValidationError ? (
+                <div className="px-5 pb-3 text-xs font-medium text-red-600">{shortsValidationError}</div>
+              ) : null}
+            </div>
+          ) : null}
           {sentences.length > 0 ? (
             <SceneEditorSection
               sentences={sentences}

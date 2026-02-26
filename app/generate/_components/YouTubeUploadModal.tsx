@@ -22,6 +22,7 @@ interface YouTubeUploadModalProps {
   onClose: () => void;
   videoUrl: string | null;
   isShortVideo: boolean;
+  scriptId: string | null;
   script: string;
   scriptCharacters: Array<{
     key: string;
@@ -31,7 +32,6 @@ interface YouTubeUploadModalProps {
     isProphet: boolean;
     isWoman: boolean;
   }>;
-  onSaveGeneration: () => Promise<void>;
 }
 
 export function YouTubeUploadModal({
@@ -39,9 +39,9 @@ export function YouTubeUploadModal({
   onClose,
   videoUrl,
   isShortVideo,
+  scriptId,
   script,
   scriptCharacters,
-  onSaveGeneration,
 }: YouTubeUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
@@ -708,10 +708,7 @@ export function YouTubeUploadModal({
       // for YouTube upload (Vercel must be able to download it).
       const publicVideoUrl = await ensureYoutubePublicVideoUrl(videoUrl);
 
-      // 2) Save generation (kept as-is), then proceed to YouTube upload.
-      await onSaveGeneration();
-
-      // 3) Upload to YouTube using the Cloudinary URL.
+      // 2) Upload to YouTube using the Cloudinary URL.
       const response = await fetch(`${YOUTUBE_API_URL}/youtube/upload`, {
         method: 'POST',
         headers: {
@@ -726,6 +723,8 @@ export function YouTubeUploadModal({
           privacyStatus: enableScheduling ? 'private' : privacyStatus,
           categoryId,
           selfDeclaredMadeForKids,
+          scriptId: scriptId || undefined,
+          scriptText: (script || '').trim() || undefined,
           ...(publishAt ? { publishAt } : {}),
         }),
       });
@@ -739,7 +738,10 @@ export function YouTubeUploadModal({
       const videoId = data?.videoId as string | undefined;
       if (!videoId) throw new Error('Upload succeeded but missing videoId');
 
-      const url = `https://www.youtube.com/watch?v=${videoId}`;
+      const url =
+        (typeof data?.youtubeUrl === 'string' && data.youtubeUrl.trim())
+          ? String(data.youtubeUrl).trim()
+          : `https://www.youtube.com/watch?v=${videoId}`;
       setUploadedYoutubeUrl(url);
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (error: unknown) {

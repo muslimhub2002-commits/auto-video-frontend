@@ -277,7 +277,7 @@ export function ScriptSection(props: ScriptSectionProps) {
               <div className="w-1 h-4 bg-primary rounded-full"></div>
               Script Configuration
             </h4>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Subject */}
               <Select value={scriptSubject} onValueChange={setScriptSubject}>
                 <SelectTrigger label="Subject">

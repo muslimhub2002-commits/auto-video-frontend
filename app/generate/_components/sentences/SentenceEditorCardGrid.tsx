@@ -206,6 +206,7 @@ export function SentenceEditorCard({
     ? 'block w-full aspect-9/16 object-cover h-96'
     : 'block w-full aspect-video object-cover';
   const hasAnyVideo = Boolean(item.video || item.videoUrl);
+  const isSubscribeClip = item.videoUrl === '/subscribe.mp4';
   const hasAnyImage = Boolean(item.image || item.imageUrl);
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
 
@@ -1038,106 +1039,108 @@ export function SentenceEditorCard({
                       ) : null}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <div className="relative" ref={videoModeMenuRef}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (isVideoModeMenuOpen) {
-                              closeVideoModeMenu();
-                              return;
-                            }
-                            openVideoModeMenu();
-                          }}
-                          className="h-10 w-10 rounded-xl bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center"
-                          title={`Video mode: ${videoModeLabel}`}
-                        >
-                          <Repeat2 className="h-4 w-4" />
-                        </button>
-
-                        {isVideoModeMenuMounted ? (
-                          <div
-                            className={
-                              isVideoModeMenuShown
-                                ? 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-100 scale-100 translate-y-0 pointer-events-auto transition duration-150 ease-out'
-                                : 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-0 scale-95 translate-y-2 pointer-events-none transition duration-150 ease-in'
-                            }
-                            onClick={(e) => e.stopPropagation()}
+                    {!isSubscribeClip ? (
+                      <div className="flex items-center gap-2">
+                        <div className="relative" ref={videoModeMenuRef}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isVideoModeMenuOpen) {
+                                closeVideoModeMenu();
+                                return;
+                              }
+                              openVideoModeMenu();
+                            }}
+                            className="h-10 w-10 rounded-xl bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center"
+                            title={`Video mode: ${videoModeLabel}`}
                           >
-                            <div className="p-2 space-y-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onVideoGenerationModeChange?.('referenceImage');
-                                  closeVideoModeMenu();
-                                }}
-                                className={
-                                  effectiveVideoGenerationMode === 'referenceImage'
-                                    ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-indigo-50 to-purple-50 border border-indigo-200'
-                                    : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
-                                }
-                              >
-                                <p className="text-sm font-bold text-gray-900">Reference image</p>
-                                <p className="text-xs text-gray-500">One image + sentence text</p>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onVideoGenerationModeChange?.('text');
-                                  closeVideoModeMenu();
-                                }}
-                                className={
-                                  effectiveVideoGenerationMode === 'text'
-                                    ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200'
-                                    : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
-                                }
-                              >
-                                <p className="text-sm font-bold text-gray-900">Text to video</p>
-                                <p className="text-xs text-gray-500">Prompt only (no images)</p>
-                              </button>
-                              {videoModel !== 'grok' ? (
+                            <Repeat2 className="h-4 w-4" />
+                          </button>
+
+                          {isVideoModeMenuMounted ? (
+                            <div
+                              className={
+                                isVideoModeMenuShown
+                                  ? 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-100 scale-100 translate-y-0 pointer-events-auto transition duration-150 ease-out'
+                                  : 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-0 scale-95 translate-y-2 pointer-events-none transition duration-150 ease-in'
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="p-2 space-y-1">
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onVideoGenerationModeChange?.('frames');
+                                    onVideoGenerationModeChange?.('referenceImage');
                                     closeVideoModeMenu();
                                   }}
                                   className={
-                                    effectiveVideoGenerationMode === 'frames'
-                                      ? 'w-full text-left rounded-xl px-3 py-2 bg-gray-50 border border-gray-200'
+                                    effectiveVideoGenerationMode === 'referenceImage'
+                                      ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-indigo-50 to-purple-50 border border-indigo-200'
                                       : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
                                   }
                                 >
-                                  <p className="text-sm font-bold text-gray-900">Frames</p>
-                                  <p className="text-xs text-gray-500">Start + end frames</p>
+                                  <p className="text-sm font-bold text-gray-900">Reference image</p>
+                                  <p className="text-xs text-gray-500">One image + sentence text</p>
                                 </button>
-                              ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onVideoGenerationModeChange?.('text');
+                                    closeVideoModeMenu();
+                                  }}
+                                  className={
+                                    effectiveVideoGenerationMode === 'text'
+                                      ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200'
+                                      : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                  }
+                                >
+                                  <p className="text-sm font-bold text-gray-900">Text to video</p>
+                                  <p className="text-xs text-gray-500">Prompt only (no images)</p>
+                                </button>
+                                {videoModel !== 'grok' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onVideoGenerationModeChange?.('frames');
+                                      closeVideoModeMenu();
+                                    }}
+                                    className={
+                                      effectiveVideoGenerationMode === 'frames'
+                                        ? 'w-full text-left rounded-xl px-3 py-2 bg-gray-50 border border-gray-200'
+                                        : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                    }
+                                  >
+                                    <p className="text-sm font-bold text-gray-900">Frames</p>
+                                    <p className="text-xs text-gray-500">Start + end frames</p>
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        ) : null}
-                      </div>
+                          ) : null}
+                        </div>
 
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
-                        disabled={!onGenerateVideo || item.videoUrl === '/subscribe.mp4' || isGeneratingVideo}
-                        className="h-10 flex-1 min-w-0 gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {isGeneratingVideo ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            <span className="text-sm font-bold">Generating Video...</span>
-                          </>
-                        ) : (
-                          <>
-                            <VideoIcon className="h-4 w-4" />
-                            <span className="text-sm font-bold">Regenerate Video</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
+                          disabled={!onGenerateVideo || isGeneratingVideo}
+                          className="h-10 flex-1 min-w-0 gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isGeneratingVideo ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span className="text-sm font-bold">Generating Video...</span>
+                            </>
+                          ) : (
+                            <>
+                              <VideoIcon className="h-4 w-4" />
+                              <span className="text-sm font-bold">Regenerate Video</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">

@@ -57,7 +57,11 @@ export interface ScriptDto {
   title: string | null;
   script: string;
   created_at: string;
+  sentences_count?: number;
+  images_count?: number;
   video_url?: string | null;
+  shorts_scripts?: string[] | null;
+  short_scripts?: ScriptDto[];
   subject?: string | null;
   subject_content?: string | null;
   length?: string | null;
@@ -86,11 +90,12 @@ export function ScriptLibraryModal({
   const { showToast, ToastContainer } = useToast();
   const [scripts, setScripts] = useState<ScriptDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingScript, setIsLoadingScript] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [limit, setLimit] = useState(20);
+  const [limit, setLimit] = useState(10);
   const [isAddScriptModalOpen, setIsAddScriptModalOpen] = useState(false);
   const [isEditScriptModalOpen, setIsEditScriptModalOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<ScriptDto | null>(null);
@@ -147,11 +152,28 @@ export function ScriptLibraryModal({
   };
 
   const handleSelect = (script: ScriptDto) => {
+    if (isLoadingScript) return;
     setSelectedId(script.id);
-    setTimeout(() => {
-      onSelectScript(script);
-      onClose();
-    }, 250);
+    setIsLoadingScript(true);
+
+    (async () => {
+      try {
+        const res = await api.get<ScriptDto>(
+          `/scripts/${encodeURIComponent(script.id)}`,
+        );
+        onSelectScript(res.data);
+        onClose();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load script details:', err);
+        showToast('Failed to load full script details. Loading basic version.', 'warning');
+        onSelectScript(script);
+        onClose();
+      } finally {
+        setIsLoadingScript(false);
+        setSelectedId(null);
+      }
+    })();
   };
 
   const handleCopyScript = async (e: React.MouseEvent, script: ScriptDto) => {
@@ -299,20 +321,53 @@ export function ScriptLibraryModal({
               </div>
               <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {scripts.map((script) => {
-                const sentences = script.sentences || [];
-                const withImages = sentences.filter((s) => s.image).length;
+                const sentencesCount =
+                  typeof script.sentences_count === 'number'
+                    ? script.sentences_count
+                    : (script.sentences?.length ?? 0);
+                const withImages =
+                  typeof script.images_count === 'number'
+                    ? script.images_count
+                    : (script.sentences || []).filter((s) => s.image).length;
+                const isThisLoading = isLoadingScript && selectedId === script.id;
 
                 return (
                   <div
                     key={script.id}
-                    className={`rounded-xl border px-4 py-3 transition-all duration-200 bg-white hover:shadow-md hover:border-primary/40 group ${
-                      selectedId === script.id ? 'border-primary ring-2 ring-primary/30' : 'border-gray-200'
+                    className={`relative rounded-xl border px-4 py-3 transition-all duration-300 bg-white group overflow-hidden ${
+                      isThisLoading
+                        ? 'border-transparent shadow-xl shadow-purple-200/60'
+                        : isLoadingScript
+                          ? 'border-gray-100 grayscale opacity-40 pointer-events-none select-none'
+                          : 'border-gray-200 hover:shadow-md hover:border-primary/40'
                     }`}
                   >
+                    {/* Gradient loading overlay for the selected card */}
+                    {isThisLoading && (
+                      <div className="absolute inset-0 bg-linear-to-br from-purple-600 via-indigo-600 to-violet-700 flex flex-col items-center justify-center gap-4 z-10">
+                        {/* Decorative blurred orbs */}
+                        <div className="absolute top-2 left-4 w-16 h-16 bg-white/10 rounded-full blur-xl" />
+                        <div className="absolute bottom-2 right-4 w-20 h-20 bg-pink-400/20 rounded-full blur-2xl" />
+
+                        {/* Spinner ring */}
+                        <div className="relative z-10">
+                          <div className="w-12 h-12 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <Sparkles className="h-5 w-5 text-white drop-shadow" />
+                          </div>
+                        </div>
+
+                        {/* Text */}
+                        <div className="text-center z-10 px-4">
+                          <p className="text-sm font-bold text-white tracking-wide">Loading script…</p>
+                        </div>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleSelect(script)}
-                      className="w-full text-left flex items-start justify-between gap-3"
+                      disabled={isLoadingScript}
+                      className="w-full text-left flex items-start justify-between gap-3 disabled:cursor-not-allowed"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -367,7 +422,7 @@ export function ScriptLibraryModal({
                       </div>
                       <div className="flex flex-col items-end gap-1 text-[11px] text-gray-500">
                         <span>
-                          {sentences.length} sentence{sentences.length === 1 ? '' : 's'}
+                          {sentencesCount} sentence{sentencesCount === 1 ? '' : 's'}
                         </span>
                         <span>
                           {withImages} with image{withImages === 1 ? '' : 's'}
@@ -681,7 +736,12 @@ function EditScriptModal({
 
       // Safety: only auto-generate sentences if the script currently has none.
       // This avoids unintentionally wiping sentence-level image assignments.
-      if ((script.sentences?.length ?? 0) === 0) {
+      const knownSentenceCount =
+        typeof script.sentences_count === 'number'
+          ? script.sentences_count
+          : (Array.isArray(script.sentences) ? script.sentences.length : null);
+
+      if (knownSentenceCount === 0) {
         payload.sentences = computeSentencesFromScript(trimmedScript);
       }
 

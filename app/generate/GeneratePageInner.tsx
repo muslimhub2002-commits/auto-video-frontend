@@ -68,6 +68,26 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ||
 const SUBSCRIBE_SENTENCE =
   'Please Subscribe & Help us reach out to more people';
 
+const SHORTS_CTA_SENTENCE =
+  'You can watch the full video from the link in the first comment';
+
+const normalizeSentenceForMatch = (value: string) => {
+  return String(value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[.!?]+$/u, '')
+    .replace(/&/g, 'and')
+    .replace(/\s+/g, ' ');
+};
+
+const SUBSCRIBE_SENTENCE_NORM = normalizeSentenceForMatch(SUBSCRIBE_SENTENCE);
+const SHORTS_CTA_SENTENCE_NORM = normalizeSentenceForMatch(SHORTS_CTA_SENTENCE);
+
+const isSubscribeLikeSentence = (value: string) => {
+  const norm = normalizeSentenceForMatch(value);
+  return norm === SUBSCRIBE_SENTENCE_NORM || norm === SHORTS_CTA_SENTENCE_NORM;
+};
+
 // Convert a data URL (e.g. AI-generated base64 image) into a File for upload
 function dataUrlToFile(dataUrl: string, filename: string): File {
   const [meta, base64] = dataUrl.split(',');
@@ -298,6 +318,7 @@ export function GeneratePageInner() {
     handleAddSuspenseScene,
   } = useSentencesEditor();
   const [isSplitting, setIsSplitting] = useState(false);
+  const [isSplittingIntoShorts, setIsSplittingIntoShorts] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSavingGeneration, setIsSavingGeneration] = useState(false);
@@ -377,13 +398,44 @@ export function GeneratePageInner() {
   const [enableGlitchTransitions, setEnableGlitchTransitions] = useState(true);
   const [enableZoomRotateTransitions, setEnableZoomRotateTransitions] = useState(true);
 
+  // Long-form only: split into multiple short scripts (tabs)
+  type TabKey = 'full' | `short-${number}`;
+  type TabSnapshot = {
+    scriptId: string | null;
+    sentences: SentenceItem[];
+    voiceOver: File | null;
+    voiceDuration: number | null;
+    savedVoiceId: string | null;
+    voiceLibraryUrl: string | null;
+    videoJobId: string | null;
+    videoJobStatus: string | null;
+    videoJobError: string | null;
+    videoUrl: string | null;
+  };
+
+  type AiSplitCache = {
+    ranges: Array<{ start: number; end: number }>;
+    shortSnapshotsByKey: Record<string, TabSnapshot>;
+  };
+
+  // ID of the full (parent) script draft; the active tab may be a short script.
+  const [fullScriptId, setFullScriptId] = useState<string | null>(null);
+  const [activeShortTabIndex, setActiveShortTabIndex] = useState<number | null>(null);
+  const [shortRanges, setShortRanges] = useState<Array<{ start: number; end: number }>>([]);
+  const [shortScriptIds, setShortScriptIds] = useState<string[]>([]);
+  const [manualSplitEnabled, setManualSplitEnabled] = useState(false);
+  const [shortsValidationError, setShortsValidationError] = useState<string | null>(null);
+  const tabSnapshotsRef = useRef<Record<string, TabSnapshot>>({});
+  const aiSplitCacheRef = useRef<AiSplitCache | null>(null);
+
   // Scripts longer than 3 minutes are treated as regular (non-shorts) videos.
   const scriptLengthMinutes = parseScriptLengthMinutes(scriptLength);
   const isLongForm =
     typeof scriptLengthMinutes === 'number' &&
     Number.isFinite(scriptLengthMinutes) &&
     scriptLengthMinutes > 3;
-  const effectiveIsShort = isLongForm ? false : isShort;
+  const isShortsTabActive = isLongForm && activeShortTabIndex !== null;
+  const effectiveIsShort = isShortsTabActive ? true : isLongForm ? false : isShort;
   const effectiveAspectRatio = effectiveIsShort ? '9:16' : '16:9';
 
   useEffect(() => {
@@ -406,6 +458,229 @@ export function GeneratePageInner() {
     setVideoJobError,
     setVideoUrl,
   } = useVideoJob(API_URL);
+
+  const tabKeyForIndex = (index: number | null): TabKey =>
+    index === null ? 'full' : (`short-${index}` as const);
+
+  const captureActiveTabSnapshot = (): TabSnapshot => {
+    return {
+      scriptId: activeScriptId,
+      sentences,
+      voiceOver,
+      voiceDuration,
+      savedVoiceId,
+      voiceLibraryUrl,
+      videoJobId,
+      videoJobStatus,
+      videoJobError,
+      videoUrl,
+    };
+  };
+
+  const cloneSnapshot = (snapshot: TabSnapshot): TabSnapshot => {
+    return {
+      ...snapshot,
+      sentences: Array.isArray(snapshot.sentences)
+        ? snapshot.sentences.map((s) => ({ ...s }))
+        : [],
+    };
+  };
+
+  const applyTabSnapshot = (snapshot: TabSnapshot) => {
+    setActiveScriptId(snapshot.scriptId);
+    setSentences(snapshot.sentences);
+    setVoiceOver(snapshot.voiceOver);
+    setVoiceDuration(snapshot.voiceDuration);
+    setSavedVoiceId(snapshot.savedVoiceId);
+    setVoiceLibraryUrl(snapshot.voiceLibraryUrl);
+
+    resetJob();
+    setVideoJobError(snapshot.videoJobError);
+    if (snapshot.videoUrl) {
+      setVideoUrl(snapshot.videoUrl);
+      if (snapshot.scriptId) {
+        setJobFromResponse(snapshot.scriptId, 'completed');
+      }
+      return;
+    }
+
+    if (snapshot.videoJobId) {
+      setJobFromResponse(snapshot.videoJobId, snapshot.videoJobStatus ?? 'processing');
+    }
+  };
+
+  const estimateSecondsForText = (text: string) => {
+    const words = String(text ?? '')
+      .trim()
+      .split(/\s+/u)
+      .filter(Boolean).length;
+    // 150 words per minute => 2.5 words per second
+    return words / 2.5;
+  };
+
+  const buildManualShortRanges = (storySentences: SentenceItem[]) => {
+    const minSecondsPerShort = 30;
+    const totalSentences = storySentences.length;
+    if (totalSentences <= 0) return [] as Array<{ start: number; end: number }>;
+    if (totalSentences === 1) return [{ start: 0, end: 0 }];
+
+    const perSentenceSeconds = storySentences.map((s) => estimateSecondsForText(s.text));
+    const totalSeconds = perSentenceSeconds.reduce((sum, v) => sum + v, 0);
+    if (totalSeconds <= minSecondsPerShort) {
+      return [{ start: 0, end: totalSentences - 1 }];
+    }
+
+    const ranges: Array<{ start: number; end: number }> = [];
+    let start = 0;
+    let cursorSeconds = 0;
+
+    const remainingSecondsFrom = (idx: number) =>
+      perSentenceSeconds.slice(idx).reduce((sum, v) => sum + v, 0);
+
+    for (let i = 0; i < totalSentences; i += 1) {
+      cursorSeconds += perSentenceSeconds[i];
+
+      const remainingSeconds = remainingSecondsFrom(i + 1);
+      const canCutHere = cursorSeconds >= minSecondsPerShort;
+      const remainderWouldBeValid =
+        remainingSeconds === 0 || remainingSeconds >= minSecondsPerShort;
+
+      if (canCutHere && remainderWouldBeValid) {
+        ranges.push({ start, end: i });
+        start = i + 1;
+        cursorSeconds = 0;
+      }
+    }
+
+    if (start <= totalSentences - 1) {
+      if (ranges.length === 0) {
+        ranges.push({ start: 0, end: totalSentences - 1 });
+      } else {
+        ranges[ranges.length - 1].end = totalSentences - 1;
+      }
+    }
+
+    return ranges;
+  };
+
+  const createShortsCtaSentenceItem = (): SentenceItem => {
+    const now = Date.now();
+    return {
+      id: `${now}-shorts-cta`,
+      text: SHORTS_CTA_SENTENCE,
+      mediaMode: 'frames',
+      sceneTab: 'video',
+      image: null,
+      imageUrl: null,
+      video: null,
+      videoUrl: '/subscribe.mp4',
+      imagePrompt: null,
+      isGeneratingImage: false,
+      isSavingImage: false,
+      savedImageId: null,
+      isFromLibrary: false,
+      isSuspense: false,
+    };
+  };
+
+  const normalizeShortTabSentences = (items: SentenceItem[]): SentenceItem[] => {
+    const story = (items ?? []).filter((s) => !isSubscribeLikeSentence(s.text));
+    if (story.length === 0) return [createShortsCtaSentenceItem()];
+    return [...story, createShortsCtaSentenceItem()];
+  };
+
+  const validateShortRanges = (
+    ranges: Array<{ start: number; end: number }>,
+    storySentences: SentenceItem[],
+  ): string | null => {
+    if (!ranges.length) return 'Please create at least one short.';
+
+    // Coverage + contiguity
+    let expectedStart = 0;
+    for (const r of ranges) {
+      if (r.start !== expectedStart) return 'Short ranges must be contiguous and cover all sentences.';
+      if (r.end < r.start) return 'Invalid short range detected.';
+      expectedStart = r.end + 1;
+
+      const seconds = storySentences
+        .slice(r.start, r.end + 1)
+        .reduce((acc, s) => acc + estimateSecondsForText(s.text), 0);
+      if (seconds < 30) {
+        return 'Each short must be at least 30 seconds.';
+      }
+    }
+    if (expectedStart !== storySentences.length) {
+      return 'Short ranges must cover all sentences.';
+    }
+    return null;
+  };
+
+  const rebuildShortTabSnapshots = (ranges: Array<{ start: number; end: number }>): string | null => {
+    const fullSnapshot = tabSnapshotsRef.current.full;
+    const fullSentences = fullSnapshot?.sentences ?? (activeShortTabIndex === null ? sentences : []);
+    const storySentences = fullSentences.filter((s) => !isSubscribeLikeSentence(s.text));
+
+    const error = validateShortRanges(ranges, storySentences);
+    setShortsValidationError(error);
+    if (error) return error;
+
+    // Drop existing short tab snapshots and rebuild.
+    setShortScriptIds([]);
+    Object.keys(tabSnapshotsRef.current)
+      .filter((k) => k.startsWith('short-'))
+      .forEach((k) => {
+        delete tabSnapshotsRef.current[k];
+      });
+
+    for (let i = 0; i < ranges.length; i += 1) {
+      const range = ranges[i];
+      const base = storySentences.slice(range.start, range.end + 1);
+      const cloned = base.map((s) => ({ ...s }));
+      const withCta = [...cloned, createShortsCtaSentenceItem()];
+
+      const existingScriptId = null;
+      tabSnapshotsRef.current[tabKeyForIndex(i)] = {
+        scriptId: existingScriptId,
+        sentences: withCta,
+        voiceOver: null,
+        voiceDuration: null,
+        savedVoiceId: null,
+        voiceLibraryUrl: null,
+        videoJobId: null,
+        videoJobStatus: null,
+        videoJobError: null,
+        videoUrl: null,
+      };
+    }
+
+    return null;
+  };
+
+  const handleSelectShortTab = (index: number | null) => {
+    if (!isLongForm) return;
+
+    const currentKey = tabKeyForIndex(activeShortTabIndex);
+    tabSnapshotsRef.current[currentKey] = captureActiveTabSnapshot();
+
+    setActiveShortTabIndex(index);
+
+    const nextKey = tabKeyForIndex(index);
+    const next = tabSnapshotsRef.current[nextKey];
+    if (next) {
+      applyTabSnapshot(next);
+      return;
+    }
+
+    if (index === null) return;
+    if (!shortRanges[index]) return;
+
+    // Build on-demand from full snapshot.
+    rebuildShortTabSnapshots(shortRanges);
+    const built = tabSnapshotsRef.current[nextKey];
+    if (built) {
+      applyTabSnapshot(built);
+    }
+  };
 
   const handleUploadFinalVideo = async (file: File) => {
     if (!file) return;
@@ -1224,10 +1499,8 @@ export function GeneratePageInner() {
           .trim();
       };
 
-      // Ensure the ElevenLabs script includes the subscribe sentence
-      // at the end, similar to how we handle it when splitting.
       const normalize = (value: string) => {
-        return value
+        return String(value ?? '')
           .toLowerCase()
           .trim()
           .replace(/[.!?]+$/u, '')
@@ -1235,29 +1508,48 @@ export function GeneratePageInner() {
           .replace(/\s+/g, ' ');
       };
 
-      const targetNorm = normalize(SUBSCRIBE_SENTENCE);
-      const sentenceTexts = (sentences || []).map((s) => s.text).filter(Boolean);
-      const baseText = sentenceTexts.length > 0 ? mergeSentences(sentenceTexts) : script;
-      const scriptNorm = normalize(baseText);
+      const shouldIncludeSubscribeInVoice = activeShortTabIndex === null;
 
-      let sentencesForVoice = sentenceTexts;
+      const sentenceTexts = (sentences || [])
+        .map((s) => s.text)
+        .filter(Boolean);
 
-      if (sentencesForVoice.length > 0) {
-        const mergedNorm = normalize(mergeSentences(sentencesForVoice));
-        if (!mergedNorm.includes(targetNorm)) {
-          sentencesForVoice = [...sentencesForVoice, SUBSCRIBE_SENTENCE];
+      const subscribeNorm = normalize(SUBSCRIBE_SENTENCE);
+      const shortsCtaNorm = normalize(SHORTS_CTA_SENTENCE);
+
+      // Shorts voice-overs should not include the old subscribe sentence,
+      // but SHOULD include the shorts CTA (“You can watch the full video…”).
+      let sentencesForVoice = shouldIncludeSubscribeInVoice
+        ? sentenceTexts
+        : sentenceTexts.filter((t) => normalize(t) !== subscribeNorm);
+
+      if (!shouldIncludeSubscribeInVoice) {
+        const hasShortsCta = sentencesForVoice.some((t) => normalize(t) === shortsCtaNorm);
+        if (!hasShortsCta) {
+          sentencesForVoice = [...sentencesForVoice, SHORTS_CTA_SENTENCE];
         }
       }
 
-      let scriptForVoice = baseText;
-      if (!scriptNorm.includes(targetNorm)) {
-        const base = baseText.trim();
-        const needsPunctuation = base && !/[.!?]$/u.test(base);
-        scriptForVoice = `${base}${needsPunctuation ? '.' : ''} ${SUBSCRIBE_SENTENCE}`;
-      }
+      let scriptForVoice =
+        sentencesForVoice.length > 0 ? mergeSentences(sentencesForVoice) : script;
 
-      if (sentencesForVoice.length > 0) {
-        scriptForVoice = mergeSentences(sentencesForVoice);
+      // Legacy behavior for full videos: ensure the subscribe sentence exists at the end.
+      if (shouldIncludeSubscribeInVoice) {
+        const targetNorm = subscribeNorm;
+        const mergedNorm = normalize(
+          sentencesForVoice.length > 0 ? mergeSentences(sentencesForVoice) : scriptForVoice,
+        );
+
+        if (!mergedNorm.includes(targetNorm)) {
+          if (sentencesForVoice.length > 0) {
+            sentencesForVoice = [...sentencesForVoice, SUBSCRIBE_SENTENCE];
+            scriptForVoice = mergeSentences(sentencesForVoice);
+          } else {
+            const base = String(scriptForVoice ?? '').trim();
+            const needsPunctuation = base && !/[.!?]$/u.test(base);
+            scriptForVoice = `${base}${needsPunctuation ? '.' : ''} ${SUBSCRIBE_SENTENCE}`.trim();
+          }
+        }
       }
 
       const response = await fetch(`${API_URL}/ai/generate-voice`, {
@@ -1424,11 +1716,9 @@ export function GeneratePageInner() {
       return;
     }
 
-    const subscribeSentence = 'Please Subscribe & Help us reach out to more people';
-
     const missingMediaForImageTab = sentences.some((s) => {
       const text = String(s.text ?? '').trim();
-      if (text === subscribeSentence) return false;
+      if (isSubscribeLikeSentence(text)) return false;
       const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
       if (tab !== 'image') return false;
       return !s.image && !s.imageUrl;
@@ -1444,7 +1734,7 @@ export function GeneratePageInner() {
     const missingVideoTab = sentences
       .map((s, index) => {
         const text = String(s.text ?? '').trim();
-        if (text === subscribeSentence) return null;
+        if (isSubscribeLikeSentence(text)) return null;
         const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
         if (tab !== 'video') return null;
 
@@ -1514,10 +1804,10 @@ export function GeneratePageInner() {
 
         const transitionToNext = s.transitionToNext ?? null;
         const visualEffect = s.visualEffect ?? null;
-        if (trimmed === subscribeSentence) {
+        if (isSubscribeLikeSentence(trimmed)) {
           return {
             text,
-            isSuspense: Boolean(s.isSuspense),
+            isSuspense: false,
             mediaType: 'video' as const,
             videoUrl: '/subscribe.mp4',
             ...(transitionToNext ? { transitionToNext } : {}),
@@ -1576,7 +1866,7 @@ export function GeneratePageInner() {
       for (let index = 0; index < sentences.length; index += 1) {
         const s = sentences[index];
         const text = String(s?.text ?? '').trim();
-        if (text === subscribeSentence) continue;
+        if (isSubscribeLikeSentence(text)) continue;
 
         const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
         if (tab !== 'image') continue;
@@ -1814,7 +2104,15 @@ export function GeneratePageInner() {
         isSuspense: false,
       }));
 
+      setFullScriptId(null);
       setActiveScriptId(null);
+      setActiveShortTabIndex(null);
+      setShortRanges([]);
+      setShortScriptIds([]);
+      setManualSplitEnabled(false);
+      setShortsValidationError(null);
+      tabSnapshotsRef.current = {};
+      aiSplitCacheRef.current = null;
       setSentences(items);
       setScriptCharacters(Array.isArray(data.characters) ? data.characters : []);
     } catch (error) {
@@ -1825,8 +2123,123 @@ export function GeneratePageInner() {
     }
   };
 
+  const handleSplitIntoShortsWithAi = async () => {
+    if (!isLongForm) return;
+    if (sentences.length === 0) return;
+
+    setIsSplittingIntoShorts(true);
+    try {
+      // Persist any edits on the current tab before splitting.
+      tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] =
+        captureActiveTabSnapshot();
+
+      // Ensure we have a stable full snapshot to split from.
+      if (activeShortTabIndex === null) {
+        tabSnapshotsRef.current.full = tabSnapshotsRef.current.full ?? captureActiveTabSnapshot();
+      }
+
+      const fullSnapshot = tabSnapshotsRef.current.full;
+      if (!fullSnapshot) {
+        showToast('Unable to locate Full Video content for splitting.', 'error');
+        return;
+      }
+
+      const fullSentences = fullSnapshot.sentences;
+      const storySentences = fullSentences.filter((s) => !isSubscribeLikeSentence(s.text));
+      const storyTexts = storySentences.map((s) => String(s.text ?? '').trim()).filter(Boolean);
+
+      if (storyTexts.length < 2) {
+        showToast('Not enough sentences to split into shorts.', 'error');
+        return;
+      }
+
+      const res = await api.post('/ai/split-into-shorts', {
+        sentences: storyTexts,
+        model: imagePromptModel,
+      });
+
+      const data = res.data as { ranges?: Array<{ start: number; end: number }> };
+      const ranges = Array.isArray(data?.ranges) ? data.ranges : [];
+
+      // This was generated by AI, so the Manual split switch should be OFF.
+      setManualSplitEnabled(false);
+      setShortRanges(ranges);
+      const error = rebuildShortTabSnapshots(ranges);
+      if (error) {
+        showToast(error, 'error');
+        return;
+      }
+
+      // Cache the AI split so toggling Manual split OFF can restore it.
+      const shortSnapshotsByKey: Record<string, TabSnapshot> = {};
+      for (let i = 0; i < ranges.length; i += 1) {
+        const key = tabKeyForIndex(i);
+        const snap = tabSnapshotsRef.current[key];
+        if (snap) shortSnapshotsByKey[key] = cloneSnapshot(snap);
+      }
+      aiSplitCacheRef.current = {
+        ranges: ranges.map((r) => ({ start: r.start, end: r.end })),
+        shortSnapshotsByKey,
+      };
+
+      // After re-splitting, return to Full Video to avoid landing on an invalid short tab index.
+      setActiveShortTabIndex(null);
+      applyTabSnapshot(fullSnapshot);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Split into shorts failed', error);
+      showToast('Failed to split into shorts. Please try again.', 'error');
+    } finally {
+      setIsSplittingIntoShorts(false);
+    }
+  };
+
+  const handleSplitIntoShortsManually = () => {
+    if (!isLongForm) return;
+    if (sentences.length === 0) return;
+
+    // Persist any edits on the current tab before splitting.
+    tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] =
+      captureActiveTabSnapshot();
+
+    // Ensure we have a stable full snapshot to split from.
+    if (activeShortTabIndex === null) {
+      tabSnapshotsRef.current.full = tabSnapshotsRef.current.full ?? captureActiveTabSnapshot();
+    }
+
+    const fullSnapshot = tabSnapshotsRef.current.full;
+    if (!fullSnapshot) {
+      showToast('Unable to locate Full Video content for splitting.', 'error');
+      return;
+    }
+
+    const fullSentences = fullSnapshot.sentences;
+    const storySentences = fullSentences.filter((s) => !isSubscribeLikeSentence(s.text));
+    const ranges = buildManualShortRanges(storySentences);
+
+    const error = rebuildShortTabSnapshots(ranges);
+    if (error) {
+      showToast(error, 'error');
+      return;
+    }
+
+    setManualSplitEnabled(true);
+    setShortRanges(ranges);
+    setActiveShortTabIndex(null);
+    applyTabSnapshot(fullSnapshot);
+  };
+
   const handleResetScriptAndSentences = () => {
+    setFullScriptId(null);
     setActiveScriptId(null);
+    setActiveShortTabIndex(null);
+    setShortRanges([]);
+    setShortScriptIds([]);
+    setManualSplitEnabled(false);
+    setShortsValidationError(null);
+    tabSnapshotsRef.current = {};
+    aiSplitCacheRef.current = null;
+    aiSplitCacheRef.current = null;
     setScript('');
     setSentences([]);
     setSplitError(null);
@@ -1843,10 +2256,111 @@ export function GeneratePageInner() {
     setIsScriptLibraryOpen(true);
   };
 
+  const mapBackendSentencesToUi = (backend: BackendSentenceDto[]): SentenceItem[] => {
+    const sorted = [...backend].sort((a, b) => a.index - b.index);
+    return sorted.map((s) => {
+      const subscribeLike = isSubscribeLikeSentence(s.text);
+      return {
+        id: s.id,
+        text: s.text,
+        mediaMode: subscribeLike || s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
+        sceneTab: subscribeLike ? 'video' : s.video ? 'video' : 'image',
+        forcedCharacterKeys: Array.isArray(s.forced_character_keys) ? s.forced_character_keys : null,
+        transitionToNext: s.transition_to_next ?? null,
+        visualEffect: s.visual_effect ?? null,
+        image: null,
+        imageUrl: subscribeLike ? null : s.image?.image ?? null,
+        startImage: null,
+        startImageUrl: s.startFrameImage?.image ?? null,
+        startImagePrompt: s.startFrameImage?.prompt ?? null,
+        startSavedImageId: s.startFrameImage?.id ?? null,
+        endImage: null,
+        endImageUrl: s.endFrameImage?.image ?? null,
+        endImagePrompt: s.endFrameImage?.prompt ?? null,
+        endSavedImageId: s.endFrameImage?.id ?? null,
+        video: null,
+        videoUrl: subscribeLike ? '/subscribe.mp4' : s.video?.video ?? null,
+        savedVideoId: s.video?.id ?? null,
+        imagePrompt: s.image?.prompt ?? null,
+        isGeneratingImage: false,
+        isGeneratingStartImage: false,
+        isGeneratingEndImage: false,
+        isSavingImage: false,
+        savedImageId: subscribeLike ? null : s.image?.id ?? null,
+        isFromLibrary: !!s.image,
+        isSuspense: !subscribeLike && Boolean(s.isSuspense),
+      };
+    });
+  };
+
+  const downloadVoiceAsFile = async (params: {
+    url: string;
+    fileName: string;
+  }): Promise<File | null> => {
+    const url = String(params.url ?? '').trim();
+    if (!url) return null;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return new File([blob], params.fileName, {
+        type: String(blob.type ?? '').trim() || 'audio/mpeg',
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const getAudioDurationSeconds = (file: File): Promise<number | null> => {
+    return new Promise((resolve) => {
+      try {
+        const objectUrl = URL.createObjectURL(file);
+        const audio = new Audio(objectUrl);
+
+        const cleanup = () => {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch {
+            // ignore
+          }
+        };
+
+        audio.addEventListener(
+          'loadedmetadata',
+          () => {
+            const dur = Number.isFinite(audio.duration) ? audio.duration : null;
+            cleanup();
+            resolve(dur && dur > 0 ? dur : null);
+          },
+          { once: true },
+        );
+
+        audio.addEventListener(
+          'error',
+          () => {
+            cleanup();
+            resolve(null);
+          },
+          { once: true },
+        );
+      } catch {
+        resolve(null);
+      }
+    });
+  };
+
   const handleSelectScriptFromLibrary = (draft: {
     id: string;
     script: string;
     video_url?: string | null;
+    shorts_scripts?: string[] | null;
+    short_scripts?: Array<{
+      id: string;
+      video_url?: string | null;
+      sentences?: BackendSentenceDto[];
+      voice?: { id: string; voice: string } | null;
+    }>;
     subject?: string | null;
     subject_content?: string | null;
     length?: string | null;
@@ -1857,7 +2371,15 @@ export function GeneratePageInner() {
     characters?: ScriptCharacter[];
     sentences?: BackendSentenceDto[];
   }) => {
+    setFullScriptId(draft.id);
     setActiveScriptId(draft.id);
+    setActiveShortTabIndex(null);
+    setShortRanges([]);
+    setShortScriptIds([]);
+    setManualSplitEnabled(false);
+    setShortsValidationError(null);
+    tabSnapshotsRef.current = {};
+
     setScript(draft.script);
 
     const loadedSubject = (draft.subject ?? '').trim() || 'religious (Islam)';
@@ -1887,45 +2409,21 @@ export function GeneratePageInner() {
     setScriptCharacters(Array.isArray(draft.characters) ? draft.characters : []);
 
     if (draft.sentences && draft.sentences.length > 0) {
-      const sorted = [...draft.sentences].sort((a, b) => a.index - b.index);
-      const mapped: SentenceItem[] = sorted.map((s) => ({
-        id: s.id,
-        text: s.text,
-        mediaMode: s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
-        sceneTab:
-          (s.text || '').trim() === SUBSCRIBE_SENTENCE
-            ? 'video'
-            : s.video
-              ? 'video'
-              : 'image',
-        forcedCharacterKeys: Array.isArray(s.forced_character_keys)
-          ? s.forced_character_keys
-          : null,
-        transitionToNext: s.transition_to_next ?? null,
-        visualEffect: s.visual_effect ?? null,
-        image: null,
-        imageUrl: s.image?.image ?? null,
-        startImage: null,
-        startImageUrl: s.startFrameImage?.image ?? null,
-        startImagePrompt: s.startFrameImage?.prompt ?? null,
-        startSavedImageId: s.startFrameImage?.id ?? null,
-        endImage: null,
-        endImageUrl: s.endFrameImage?.image ?? null,
-        endImagePrompt: s.endFrameImage?.prompt ?? null,
-        endSavedImageId: s.endFrameImage?.id ?? null,
-        video: s.text === SUBSCRIBE_SENTENCE ? null : null,
-        videoUrl: s.text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : s.video?.video ?? null,
-        savedVideoId: s.video?.id ?? null,
-        imagePrompt: s.image?.prompt ?? null,
-        isGeneratingImage: false,
-        isGeneratingStartImage: false,
-        isGeneratingEndImage: false,
-        isSavingImage: false,
-        savedImageId: s.image?.id ?? null,
-        isFromLibrary: !!s.image,
-        isSuspense: Boolean(s.isSuspense) && s.text !== SUBSCRIBE_SENTENCE,
-      }));
+      const mapped = mapBackendSentencesToUi(draft.sentences);
       setSentences(mapped);
+
+      tabSnapshotsRef.current.full = {
+        scriptId: draft.id,
+        sentences: mapped,
+        voiceOver: null,
+        voiceDuration: null,
+        savedVoiceId: null,
+        voiceLibraryUrl: null,
+        videoJobId: null,
+        videoJobStatus: null,
+        videoJobError: null,
+        videoUrl: draft.video_url ?? null,
+      };
     } else {
       setSentences([]);
     }
@@ -1976,6 +2474,115 @@ export function GeneratePageInner() {
     }
 
     setSplitError(null);
+
+    const shortIds = Array.isArray(draft.shorts_scripts)
+      ? draft.shorts_scripts.map((s) => String(s ?? '').trim()).filter(Boolean)
+      : [];
+
+    if (shortIds.length > 0) {
+      setManualSplitEnabled(true);
+      setShortScriptIds(shortIds);
+
+      (async () => {
+        try {
+          const embeddedShorts = Array.isArray(draft.short_scripts)
+            ? draft.short_scripts
+            : [];
+
+          if (embeddedShorts.length === 0) {
+            // No embedded shorts available; avoid making N API calls.
+            // The Script Library selection flow should fetch `/scripts/:id` which includes `short_scripts`.
+            // eslint-disable-next-line no-console
+            console.warn('Selected script has shorts_scripts but no short_scripts payload.');
+            return;
+          }
+
+          const fullSnapshot = tabSnapshotsRef.current.full;
+          const fullSentencesForMatch = fullSnapshot?.sentences ?? [];
+          const fullStory = fullSentencesForMatch
+            .filter((s) => !isSubscribeLikeSentence(s.text))
+            .map((s) => normalizeSentenceForMatch(s.text));
+
+          const ranges: Array<{ start: number; end: number }> = [];
+          let cursor = 0;
+
+          for (let idx = 0; idx < embeddedShorts.length; idx += 1) {
+            const shortScript = embeddedShorts[idx];
+
+            const mappedShortRaw = Array.isArray(shortScript.sentences)
+              ? mapBackendSentencesToUi(shortScript.sentences)
+              : [];
+
+            // Normalize: remove any subscribe sentences and always end with the shorts CTA.
+            const mappedShort = normalizeShortTabSentences(mappedShortRaw);
+
+            const shortVoiceFile =
+              shortScript.voice?.voice
+                ? await downloadVoiceAsFile({
+                    url: shortScript.voice.voice,
+                    fileName: `draft-short-${idx + 1}-voice-over.mp3`,
+                  })
+                : null;
+
+            const shortVoiceDuration = shortVoiceFile
+              ? await getAudioDurationSeconds(shortVoiceFile)
+              : null;
+
+            tabSnapshotsRef.current[tabKeyForIndex(idx)] = {
+              scriptId: shortScript.id,
+              sentences: mappedShort,
+              voiceOver: shortVoiceFile,
+              voiceDuration: shortVoiceDuration,
+              savedVoiceId: shortScript.voice?.id ?? null,
+              voiceLibraryUrl: shortScript.voice?.voice ?? null,
+              videoJobId: null,
+              videoJobStatus: null,
+              videoJobError: null,
+              videoUrl: shortScript.video_url ?? null,
+            };
+
+            // Derive a best-effort mapping back onto the full story sentences.
+            const shortStory = mappedShort
+              .filter((s) => !isSubscribeLikeSentence(s.text))
+              .map((s) => normalizeSentenceForMatch(s.text));
+
+            const len = shortStory.length;
+            if (!len) return;
+
+            let foundStart = -1;
+            for (let i = cursor; i <= fullStory.length - len; i += 1) {
+              let ok = true;
+              for (let j = 0; j < len; j += 1) {
+                if (fullStory[i + j] !== shortStory[j]) {
+                  ok = false;
+                  break;
+                }
+              }
+              if (ok) {
+                foundStart = i;
+                break;
+              }
+            }
+
+            if (foundStart === -1) {
+              // Fallback: assume sequential split based on lengths.
+              foundStart = cursor;
+            }
+
+            const end = Math.min(fullStory.length - 1, foundStart + len - 1);
+            ranges.push({ start: foundStart, end });
+            cursor = end + 1;
+          }
+
+          if (fullStory.length > 0 && ranges.length > 0) {
+            setShortRanges(ranges);
+          }
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to load short scripts', e);
+        }
+      })();
+    }
   };
 
   const handleEnhanceScript = async () => {
@@ -2871,7 +3478,7 @@ export function GeneratePageInner() {
     if (!sentences.length || isGeneratingAllImages) return;
 
     const eligibleIndices = sentences
-      .map((item, index) => (item.text === SUBSCRIBE_SENTENCE ? null : index))
+      .map((item, index) => (isSubscribeLikeSentence(item.text) ? null : index))
       .filter((index): index is number => index !== null);
 
     const missingIndices = eligibleIndices.filter((index) => {
@@ -3171,7 +3778,7 @@ export function GeneratePageInner() {
         sentencePayload.push({
           text: s.text,
           image_id: imageId ?? undefined,
-          isSuspense: Boolean(s.isSuspense) && (s.text || '').trim() !== SUBSCRIBE_SENTENCE,
+          isSuspense: Boolean(s.isSuspense) && !isSubscribeLikeSentence(s.text),
         });
       }
 
@@ -3216,9 +3823,32 @@ export function GeneratePageInner() {
       return;
     }
 
+    // Shorts are only supported for long-form scripts.
+    if (activeShortTabIndex !== null && (!isLongForm || !tabSnapshotsRef.current.full)) {
+      showAlert('Switch to Full Video tab before saving this draft.', { type: 'warning' });
+      return;
+    }
+
     setIsSavingDraft(true);
 
     try {
+      // Snapshot the active tab before saving.
+      tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] = captureActiveTabSnapshot();
+      if (activeShortTabIndex === null) {
+        tabSnapshotsRef.current.full = tabSnapshotsRef.current.full ?? captureActiveTabSnapshot();
+      }
+
+      const fullSnapshot =
+        tabSnapshotsRef.current.full ?? (activeShortTabIndex === null ? captureActiveTabSnapshot() : null);
+
+      if (!fullSnapshot) {
+        showAlert('Nothing to save yet.', { type: 'warning' });
+        return;
+      }
+
+      const localActiveSnapshot =
+        tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] ?? captureActiveTabSnapshot();
+
       const coerceImageFile = async (params: {
         file?: File | null;
         url?: string | null;
@@ -3275,75 +3905,226 @@ export function GeneratePageInner() {
         return response.data.id;
       };
 
-      const sentencePayload: {
-        text: string;
-        image_id?: string;
-        start_frame_image_id?: string;
-        end_frame_image_id?: string;
-        video_id?: string;
-        isSuspense?: boolean;
-        forced_character_keys?: string[];
-        transition_to_next?: SentenceItem['transitionToNext'] | null;
-        visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
-      }[] = [];
+      const buildSentencePayload = async (items: SentenceItem[], prefix: string) => {
+        const payload: {
+          text: string;
+          image_id?: string;
+          start_frame_image_id?: string;
+          end_frame_image_id?: string;
+          video_id?: string;
+          isSuspense?: boolean;
+          forced_character_keys?: string[];
+          transition_to_next?: SentenceItem['transitionToNext'] | null;
+          visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+        }[] = [];
 
-      // Ensure any uploaded or generated images are saved to the images table
-      // so their IDs can be linked to sentences in the draft.
-      // Do this sequentially to avoid overwhelming the backend.
-      // eslint-disable-next-line no-restricted-syntax
-      for (let index = 0; index < sentences.length; index += 1) {
-        const s = sentences[index];
-        const imageId = await uploadImageIfNeeded({
-          existingId: s.savedImageId ?? null,
-          file: s.image,
-          url: s.imageUrl,
-          filename: `sentence-${index + 1}.png`,
-          prompt: s.imagePrompt ?? null,
-        });
+        for (let index = 0; index < items.length; index += 1) {
+          const s = items[index];
+          const imageId = await uploadImageIfNeeded({
+            existingId: s.savedImageId ?? null,
+            file: s.image,
+            url: s.imageUrl,
+            filename: `${prefix}-sentence-${index + 1}.png`,
+            prompt: s.imagePrompt ?? null,
+          });
 
-        const startFrameImageId = await uploadImageIfNeeded({
-          existingId: s.startSavedImageId ?? null,
-          file: s.startImage,
-          url: s.startImageUrl,
-          filename: `sentence-${index + 1}-start.png`,
-          prompt: s.startImagePrompt ?? null,
-        });
+          const startFrameImageId = await uploadImageIfNeeded({
+            existingId: s.startSavedImageId ?? null,
+            file: s.startImage,
+            url: s.startImageUrl,
+            filename: `${prefix}-sentence-${index + 1}-start.png`,
+            prompt: s.startImagePrompt ?? null,
+          });
 
-        const endFrameImageId = await uploadImageIfNeeded({
-          existingId: s.endSavedImageId ?? null,
-          file: s.endImage,
-          url: s.endImageUrl,
-          filename: `sentence-${index + 1}-end.png`,
-          prompt: s.endImagePrompt ?? null,
-        });
+          const endFrameImageId = await uploadImageIfNeeded({
+            existingId: s.endSavedImageId ?? null,
+            file: s.endImage,
+            url: s.endImageUrl,
+            filename: `${prefix}-sentence-${index + 1}-end.png`,
+            prompt: s.endImagePrompt ?? null,
+          });
 
-        sentencePayload.push({
-          text: s.text,
-          image_id: imageId ?? undefined,
-          start_frame_image_id: startFrameImageId ?? undefined,
-          end_frame_image_id: endFrameImageId ?? undefined,
-          video_id: s.savedVideoId ?? undefined,
-          isSuspense: Boolean(s.isSuspense) && (s.text || '').trim() !== SUBSCRIBE_SENTENCE,
-          forced_character_keys:
-            Array.isArray(s.forcedCharacterKeys) && s.forcedCharacterKeys.length
-              ? s.forcedCharacterKeys
-              : undefined,
-          transition_to_next: s.transitionToNext ?? null,
-          visual_effect:
-            s.visualEffect === 'colorGrading' || s.visualEffect === 'animatedLighting'
-              ? s.visualEffect
-              : null,
-        });
-      }
+          payload.push({
+            text: s.text,
+            image_id: imageId ?? undefined,
+            start_frame_image_id: startFrameImageId ?? undefined,
+            end_frame_image_id: endFrameImageId ?? undefined,
+            video_id: s.savedVideoId ?? undefined,
+            isSuspense: Boolean(s.isSuspense) && !isSubscribeLikeSentence(s.text),
+            forced_character_keys:
+              Array.isArray(s.forcedCharacterKeys) && s.forcedCharacterKeys.length
+                ? s.forcedCharacterKeys
+                : undefined,
+            transition_to_next: s.transitionToNext ?? null,
+            visual_effect:
+              s.visualEffect === 'colorGrading' || s.visualEffect === 'animatedLighting'
+                ? s.visualEffect
+                : null,
+          });
+        }
+
+        return payload;
+      };
+
+      const fullSentencePayload = await buildSentencePayload(fullSnapshot.sentences, 'full');
 
       // Optionally attach a voice-over to the draft if available
-      let voiceId = savedVoiceId;
+      let voiceId = fullSnapshot.savedVoiceId;
 
-      if (!voiceId && voiceOver) {
-        const saved = await persistVoiceToLibrary(voiceOver);
+      if (!voiceId && fullSnapshot.voiceOver) {
+        const saved = await persistVoiceToLibrary(fullSnapshot.voiceOver);
         voiceId = saved.id;
-        setSavedVoiceId(voiceId);
+
+        // Only update the visible state if we're on the full tab.
+        if (activeShortTabIndex === null) {
+          setSavedVoiceId(voiceId);
+        }
       }
+
+      const shouldSendShorts =
+        isLongForm && (shortRanges.length > 0 || shortScriptIds.length > 0);
+
+      let shortsScriptIdsToLink: string[] | undefined;
+
+      if (shouldSendShorts) {
+        const shortsCount = shortRanges.length > 0 ? shortRanges.length : shortScriptIds.length;
+
+        if (shortRanges.length > 0) {
+          const storySentences = fullSnapshot.sentences.filter(
+            (s) => !isSubscribeLikeSentence(s.text),
+          );
+          const rangeError = validateShortRanges(shortRanges, storySentences);
+          if (rangeError) {
+            showAlert(rangeError, { type: 'warning' });
+            return;
+          }
+        }
+
+        // If we have explicit ranges (manual/AI split), ensure short snapshots exist.
+        if (shortRanges.length > 0) {
+          const missingAny = shortRanges.some(
+            (_, idx) => !tabSnapshotsRef.current[tabKeyForIndex(idx)],
+          );
+          if (missingAny) {
+            // Rebuild from the full tab so shorts inherit media.
+            tabSnapshotsRef.current.full = fullSnapshot;
+            const rebuildError = rebuildShortTabSnapshots(shortRanges);
+            if (rebuildError) {
+              showAlert(rebuildError, { type: 'warning' });
+              return;
+            }
+          }
+        }
+
+        if (shortsCount > 0) {
+          const upsertedShortIds: string[] = [];
+
+          for (let i = 0; i < shortsCount; i += 1) {
+            const snapKey = tabKeyForIndex(i);
+            const snap = tabSnapshotsRef.current[snapKey];
+            const rawItems = snap?.sentences ?? [];
+            const items = rawItems.length ? rawItems : [createShortsCtaSentenceItem()];
+
+            // Optionally attach a voice-over to the short if available
+            let shortVoiceId = snap?.savedVoiceId ?? null;
+            let shortVoiceLibraryUrl = snap?.voiceLibraryUrl ?? null;
+
+            if (!shortVoiceId && snap?.voiceOver) {
+              const saved = await persistVoiceToLibrary(snap.voiceOver);
+              shortVoiceId = saved.id;
+              shortVoiceLibraryUrl = saved.url;
+
+              // Only update the visible state if we're on this short tab.
+              if (activeShortTabIndex === i) {
+                setSavedVoiceId(shortVoiceId);
+                setVoiceLibraryUrl(shortVoiceLibraryUrl);
+              }
+            }
+
+            // Ensure CTA exists and is last.
+            const withoutEmpty = items.filter((s) => String(s.text ?? '').trim());
+            const endsWithCta =
+              withoutEmpty.length > 0 &&
+              (withoutEmpty[withoutEmpty.length - 1].text || '').trim() === SHORTS_CTA_SENTENCE;
+            const finalItems = endsWithCta
+              ? withoutEmpty
+              : [
+                  ...withoutEmpty.filter((s) => !isSubscribeLikeSentence(s.text)),
+                  createShortsCtaSentenceItem(),
+                ];
+
+            const shortSentencesPayload = await buildSentencePayload(
+              finalItems,
+              `short-${i + 1}`,
+            );
+
+            const shortPayload = {
+              script: finalItems
+                .map((s) => String(s.text ?? '').trim())
+                .filter(Boolean)
+                .join(' '),
+              voice_id: shortVoiceId ?? undefined,
+              title: `Short ${i + 1}`,
+              video_url: snap?.videoUrl ?? undefined,
+              characters: scriptCharacters.length ? scriptCharacters : undefined,
+              sentences: shortSentencesPayload,
+              subject: scriptSubject,
+              subject_content:
+                scriptSubject === 'religious (Islam)' ? (scriptSubjectContent || null) : null,
+              length: scriptLength,
+              style: referenceScripts.length > 0 ? null : scriptStyle,
+              technique: scriptTechnique,
+              reference_script_ids:
+                referenceScripts.length > 0
+                  ? referenceScripts.map((s) => s.id)
+                  : undefined,
+              is_short_script: true,
+            };
+
+            const existingShortId =
+              String(snap?.scriptId ?? shortScriptIds[i] ?? '').trim() || null;
+
+            const upsertedShort = existingShortId
+              ? await api.patch(`/scripts/${encodeURIComponent(existingShortId)}`, shortPayload)
+              : await api.post('/scripts', shortPayload);
+
+            const id = String((upsertedShort.data as any)?.id ?? '').trim();
+            if (!id) {
+              showAlert('Failed to save a short draft. Please try again.', { type: 'error' });
+              return;
+            }
+
+            upsertedShortIds.push(id);
+
+            // Keep local snapshot IDs in sync.
+            tabSnapshotsRef.current[snapKey] = {
+              ...(tabSnapshotsRef.current[snapKey] ?? {
+                sentences: finalItems,
+                voiceOver: null,
+                voiceDuration: null,
+                savedVoiceId: null,
+                voiceLibraryUrl: null,
+                videoJobId: null,
+                videoJobStatus: null,
+                videoJobError: null,
+                videoUrl: snap?.videoUrl ?? null,
+              }),
+              scriptId: id,
+              savedVoiceId: shortVoiceId,
+              voiceLibraryUrl: shortVoiceLibraryUrl,
+            };
+          }
+
+          shortsScriptIdsToLink = upsertedShortIds;
+          setShortScriptIds(upsertedShortIds);
+        } else {
+          // Explicitly clear shorts on save.
+          shortsScriptIdsToLink = [];
+          setShortScriptIds([]);
+        }
+      }
+
+      const existingFullId = String(fullScriptId ?? fullSnapshot.scriptId ?? '').trim() || null;
 
       const payload: {
         script: string;
@@ -3367,12 +4148,13 @@ export function GeneratePageInner() {
         style?: string | null;
         technique?: string | null;
         reference_script_ids?: string[];
+        shorts_script_ids?: string[];
       } = {
         script,
         voice_id: voiceId ?? undefined,
-        video_url: activeScriptId ? undefined : videoUrl ?? undefined,
+        video_url: existingFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
-        sentences: sentencePayload.length > 0 ? sentencePayload : undefined,
+        sentences: fullSentencePayload.length > 0 ? fullSentencePayload : undefined,
         subject: scriptSubject,
         subject_content:
           scriptSubject === 'religious (Islam)' ? (scriptSubjectContent || null) : null,
@@ -3381,20 +4163,25 @@ export function GeneratePageInner() {
         technique: scriptTechnique,
         reference_script_ids:
           referenceScripts.length > 0 ? referenceScripts.map((s) => s.id) : undefined,
+        shorts_script_ids: shouldSendShorts ? (shortsScriptIdsToLink ?? []) : undefined,
       };
 
-      const upserted = activeScriptId
-        ? await api.patch(`/scripts/${encodeURIComponent(activeScriptId)}`, payload)
+      const upserted = existingFullId
+        ? await api.patch(`/scripts/${encodeURIComponent(existingFullId)}`, payload)
         : await api.post('/scripts', payload);
 
       const upsertedScript = upserted.data as {
         id: string;
         characters?: ScriptCharacter[];
         sentences?: BackendSentenceDto[];
+        shorts_scripts?: string[] | null;
       };
 
       if (upsertedScript?.id) {
-        setActiveScriptId(upsertedScript.id);
+        setFullScriptId(upsertedScript.id);
+        if (activeShortTabIndex === null) {
+          setActiveScriptId(upsertedScript.id);
+        }
       }
 
       if (Array.isArray(upsertedScript?.characters)) {
@@ -3402,88 +4189,49 @@ export function GeneratePageInner() {
       }
 
       if (upsertedScript?.sentences && upsertedScript.sentences.length > 0) {
-        const sorted = [...upsertedScript.sentences].sort((a, b) => a.index - b.index);
-        const mapped: SentenceItem[] = sorted.map((s) => ({
-          id: s.id,
-          text: s.text,
-          mediaMode: s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
-          sceneTab:
-            (s.text || '').trim() === SUBSCRIBE_SENTENCE
-              ? 'video'
-              : s.video
-                ? 'video'
-                : 'image',
-          forcedCharacterKeys: Array.isArray(s.forced_character_keys)
-            ? s.forced_character_keys
-            : null,
-          transitionToNext: s.transition_to_next ?? null,
-          visualEffect: s.visual_effect ?? null,
-          image: null,
-          imageUrl: s.image?.image ?? null,
-          startImage: null,
-          startImageUrl: s.startFrameImage?.image ?? null,
-          startImagePrompt: s.startFrameImage?.prompt ?? null,
-          startSavedImageId: s.startFrameImage?.id ?? null,
-          endImage: null,
-          endImageUrl: s.endFrameImage?.image ?? null,
-          endImagePrompt: s.endFrameImage?.prompt ?? null,
-          endSavedImageId: s.endFrameImage?.id ?? null,
-          video: s.text === SUBSCRIBE_SENTENCE ? null : null,
-          videoUrl: s.text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : s.video?.video ?? null,
-          savedVideoId: s.video?.id ?? null,
-          imagePrompt: s.image?.prompt ?? null,
-          isGeneratingImage: false,
-          isGeneratingStartImage: false,
-          isGeneratingEndImage: false,
-          isSavingImage: false,
-          savedImageId: s.image?.id ?? null,
-          isFromLibrary: !!s.image,
-          isSuspense: Boolean(s.isSuspense) && s.text !== SUBSCRIBE_SENTENCE,
-        }));
+        const mappedFull = mapBackendSentencesToUi(upsertedScript.sentences);
 
-        setSentences(mapped);
+        tabSnapshotsRef.current.full = {
+          ...fullSnapshot,
+          scriptId: upsertedScript.id,
+          sentences: mappedFull,
+          savedVoiceId: voiceId ?? null,
+        };
 
-        // Persist any local sentence-level videos (generated via non-persistent endpoint or uploaded)
-        // once we have real sentence IDs.
-        for (let index = 0; index < mapped.length; index += 1) {
-          const local = sentences[index];
-          const persisted = mapped[index];
-          if (!local || !persisted) continue;
-          if ((persisted.text || '').trim() === SUBSCRIBE_SENTENCE) continue;
-          if (persisted.savedVideoId) continue;
-
-          const hasFile = Boolean(local.video);
-          const url = String(local.videoUrl ?? '').trim();
-          const hasHttpUrl = url.startsWith('http://') || url.startsWith('https://');
-
-          if (!hasFile && !hasHttpUrl) continue;
-
-          const formData = new FormData();
-          if (hasFile && local.video) {
-            formData.append('video', local.video);
-          } else {
-            formData.append('videoUrl', url);
-          }
-
-          const res = await api.post<{ id: string; video: string }>(
-            `/scripts/${encodeURIComponent(upsertedScript.id)}/sentences/${encodeURIComponent(
-              persisted.id,
-            )}/video`,
-            formData,
-            { headers: { 'Content-Type': 'multipart/form-data' } },
-          );
-
-          setSentences((prev) =>
-            prev.map((item) =>
-              item.id === persisted.id
-                ? { ...item, videoUrl: res.data.video, savedVideoId: res.data.id }
-                : item,
-            ),
-          );
+        if (activeShortTabIndex === null) {
+          setSentences(mappedFull);
         }
       }
 
-      showAlert(activeScriptId ? 'Draft updated successfully.' : 'Draft saved successfully.', {
+      const returnedShortIds = Array.isArray(upsertedScript?.shorts_scripts)
+        ? upsertedScript.shorts_scripts.map((s) => String(s ?? '').trim()).filter(Boolean)
+        : [];
+
+      if (shouldSendShorts) {
+        const idsToUse =
+          returnedShortIds.length > 0
+            ? returnedShortIds
+            : Array.isArray(shortsScriptIdsToLink)
+              ? shortsScriptIdsToLink
+              : [];
+
+        setShortScriptIds(idsToUse);
+
+        // Keep snapshots aligned with the final ID list without re-fetching.
+        for (let idx = 0; idx < idsToUse.length; idx += 1) {
+          const key = tabKeyForIndex(idx);
+          const snap = tabSnapshotsRef.current[key];
+          if (!snap) continue;
+          tabSnapshotsRef.current[key] = { ...snap, scriptId: idsToUse[idx] };
+        }
+
+        if (activeShortTabIndex !== null) {
+          const snap = tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)];
+          if (snap) applyTabSnapshot(snap);
+        }
+      }
+
+      showAlert(existingFullId ? 'Draft updated successfully.' : 'Draft saved successfully.', {
         type: 'success',
       });
     } catch (error) {
@@ -3761,6 +4509,72 @@ export function GeneratePageInner() {
                 <SentencesImagesSection
                   sentences={sentences}
                   isShortVideo={effectiveIsShort}
+                  isLongForm={isLongForm}
+                  shortsTabs={(shortRanges.length
+                    ? shortRanges
+                    : shortScriptIds.map((_id, idx) => {
+                        const snap = tabSnapshotsRef.current[tabKeyForIndex(idx)];
+                        const count = (snap?.sentences ?? []).filter(
+                          (s) => !isSubscribeLikeSentence(s.text),
+                        ).length;
+                        return { start: 0, end: Math.max(0, count - 1) };
+                      })
+                  ).map((r, idx) => ({
+                    label: `Short ${idx + 1}`,
+                    count: Math.max(0, r.end - r.start + 1),
+                  }))}
+                  activeShortTabIndex={activeShortTabIndex}
+                  onSelectShortTab={handleSelectShortTab}
+                  manualSplitEnabled={manualSplitEnabled}
+                  onManualSplitToggle={async (next) => {
+                    if (!next) {
+                      // Persist any edits on the current tab.
+                      tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] =
+                        captureActiveTabSnapshot();
+
+                      // Restore the full tab content (if we have it).
+                      if (tabSnapshotsRef.current.full) {
+                        applyTabSnapshot(tabSnapshotsRef.current.full);
+                      }
+
+                      setManualSplitEnabled(false);
+                      setActiveShortTabIndex(null);
+
+                      const cachedAi = aiSplitCacheRef.current;
+                      if (cachedAi && cachedAi.ranges.length > 0) {
+                        setShortRanges(cachedAi.ranges);
+                        setShortScriptIds([]);
+                        setShortsValidationError(null);
+
+                        // Replace current short snapshots with the cached AI ones.
+                        Object.keys(tabSnapshotsRef.current)
+                          .filter((k) => k.startsWith('short-'))
+                          .forEach((k) => {
+                            delete tabSnapshotsRef.current[k];
+                          });
+
+                        Object.entries(cachedAi.shortSnapshotsByKey).forEach(([k, snap]) => {
+                          tabSnapshotsRef.current[k] = cloneSnapshot(snap);
+                        });
+                      } else {
+                        setShortRanges([]);
+                        setShortScriptIds([]);
+                        setShortsValidationError(null);
+
+                        // Drop all short snapshots.
+                        Object.keys(tabSnapshotsRef.current)
+                          .filter((k) => k.startsWith('short-'))
+                          .forEach((k) => {
+                            delete tabSnapshotsRef.current[k];
+                          });
+                      }
+                      return;
+                    }
+                    handleSplitIntoShortsManually();
+                  }}
+                  onSplitWithAi={handleSplitIntoShortsWithAi}
+                  isSplittingWithAi={isSplittingIntoShorts}
+                  shortsValidationError={shortsValidationError}
                   imageAspectRatio={imageAspectRatio}
                   onImageAspectRatioChange={(next) => {
                     setHasTouchedImageAspectRatio(true);
@@ -3854,9 +4668,9 @@ export function GeneratePageInner() {
                 />
               </Accordion>
               <RenderSettingsSection
-                isShort={isShort}
-                onIsShortChange={setIsShort}
-                disableIsShort={isLongForm}
+                isShort={isShortsTabActive ? true : isShort}
+                onIsShortChange={isShortsTabActive ? ((_value: boolean) => {}) : setIsShort}
+                disableIsShort={isLongForm || isShortsTabActive}
                 useLowerFps={useLowerFps}
                 onUseLowerFpsChange={setUseLowerFps}
                 useLowerResolution={useLowerResolution}
@@ -3906,7 +4720,12 @@ export function GeneratePageInner() {
                 videoJobError={videoJobError}
                 videoUrl={videoUrl}
                 isShortVideo={effectiveIsShort}
-                script={script}
+                scriptId={activeScriptId}
+                scriptTextForUpload={sentences
+                  .map((s) => String(s?.text ?? '').trim())
+                  .filter(Boolean)
+                  .join(' ')
+                  .trim()}
                 scriptCharacters={scriptCharacters}
                 onSaveGeneration={handleSaveGeneration}
                 isSavingGeneration={isSavingGeneration}
