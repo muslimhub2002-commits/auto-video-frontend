@@ -138,11 +138,14 @@ type SentencesImagesSectionProps = {
     mode: 'frames' | 'text' | 'referenceImage',
   ) => void;
   onSentenceVideoPromptChange: (index: number, next: string) => void;
+  onGenerateSentenceVideoPrompt?: (index: number) => void | Promise<void>;
+  isGeneratingVideoPromptBySentenceId: Record<string, boolean>;
   onSentenceReferenceImageUpload: (
     index: number,
     e: ChangeEvent<HTMLInputElement>,
   ) => void;
   onRemoveSentenceReferenceImage: (index: number) => void;
+  onSelectVideoFromLibrary?: (index: number) => void;
   onSelectFromLibrary: (
     index: number,
     which: 'single' | 'start' | 'end' | 'reference',
@@ -212,8 +215,11 @@ export function SentencesImagesSection({
 
   onSentenceVideoGenerationModeChange,
   onSentenceVideoPromptChange,
+  onGenerateSentenceVideoPrompt,
+  isGeneratingVideoPromptBySentenceId,
   onSentenceReferenceImageUpload,
   onRemoveSentenceReferenceImage,
+  onSelectVideoFromLibrary,
   isGeneratingVideoBySentenceId,
   setIsGeneratingVideoBySentenceId,
   onSelectFromLibrary,
@@ -499,6 +505,7 @@ export function SentencesImagesSection({
               isShortVideo={isShortVideo}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
+              onSelectVideoFromLibrary={onSelectVideoFromLibrary}
               videoModel={videoModel}
               scriptCharacters={scriptCharacters}
               onScriptCharactersChange={onScriptCharactersChange}
@@ -544,6 +551,8 @@ export function SentencesImagesSection({
                 onSentenceVideoGenerationModeChange
               }
               onSentenceVideoPromptChange={onSentenceVideoPromptChange}
+              onGenerateSentenceVideoPrompt={onGenerateSentenceVideoPrompt}
+              isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
               onSentenceReferenceImageUpload={onSentenceReferenceImageUpload}
               onRemoveSentenceReferenceImage={onRemoveSentenceReferenceImage}
               onSelectFromLibrary={onSelectFromLibrary}

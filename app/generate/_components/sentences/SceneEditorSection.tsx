@@ -31,6 +31,8 @@ type SceneEditorSectionProps = {
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
 
+  onSelectVideoFromLibrary?: (index: number) => void;
+
   videoModel: 'gemini' | 'grok';
 
   scriptCharacters: ScriptCharacter[];
@@ -110,6 +112,8 @@ type SceneEditorSectionProps = {
     mode: 'frames' | 'text' | 'referenceImage',
   ) => void;
   onSentenceVideoPromptChange: (index: number, next: string) => void;
+  onGenerateSentenceVideoPrompt?: (index: number) => void | Promise<void>;
+  isGeneratingVideoPromptBySentenceId: Record<string, boolean>;
   onSentenceReferenceImageUpload: (
     index: number,
     e: React.ChangeEvent<HTMLInputElement>,
@@ -128,6 +132,8 @@ export function SceneEditorSection({
   isShortVideo,
   isGeneratingAllImages,
   onGenerateAllImages,
+
+  onSelectVideoFromLibrary,
 
   videoModel,
 
@@ -177,6 +183,8 @@ export function SceneEditorSection({
 
   onSentenceVideoGenerationModeChange,
   onSentenceVideoPromptChange,
+  onGenerateSentenceVideoPrompt,
+  isGeneratingVideoPromptBySentenceId,
   onSentenceReferenceImageUpload,
   onRemoveSentenceReferenceImage,
 
@@ -333,6 +341,11 @@ export function SceneEditorSection({
                   isShortVideo={isShortVideo}
                   isFirst={index === 0}
                   isLast={index === sentences.length - 1}
+                  onSelectVideoFromLibrary={
+                    onSelectVideoFromLibrary
+                      ? () => onSelectVideoFromLibrary(index)
+                      : undefined
+                  }
                   videoModel={videoModel}
                   scriptCharacters={scriptCharacters}
                   onForcedCharacterKeysChange={(next) =>
@@ -416,6 +429,15 @@ export function SceneEditorSection({
                   }
                   onVideoPromptChange={(next) =>
                     onSentenceVideoPromptChange(index, next)
+                  }
+                  isGeneratingVideoPrompt={Boolean(isGeneratingVideoPromptBySentenceId[item.id])}
+                  onGenerateVideoPrompt={
+                    onGenerateSentenceVideoPrompt
+                      ? async () => {
+                        if (item.videoUrl === '/subscribe.mp4') return;
+                        await Promise.resolve(onGenerateSentenceVideoPrompt(index));
+                      }
+                      : undefined
                   }
                   onSentenceReferenceImageUpload={(e) =>
                     onSentenceReferenceImageUpload(index, e)

@@ -62,6 +62,7 @@ type BackendSentenceDto = {
   startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   video?: { id: string; video: string } | null;
+  video_prompt?: string | null;
   isSuspense?: boolean;
   forced_character_keys?: string[] | null;
   character_keys?: string[] | null;
@@ -373,7 +374,10 @@ export function GeneratePageInner() {
     }
     | null
   >(null);
+  const [isVideoLibraryOpen, setIsVideoLibraryOpen] = useState(false);
+  const [videoLibraryTargetIndex, setVideoLibraryTargetIndex] = useState<number | null>(null);
   const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
+  const [isGeneratingVideoPromptBySentenceId, setIsGeneratingVideoPromptBySentenceId] = useState<Record<string, boolean>>({});
   const [selectedChatId, setSelectedChatId] = useState<string | null>(
     routeChatId,
   );
@@ -2347,6 +2351,7 @@ export function GeneratePageInner() {
         video: null,
         videoUrl: subscribeLike ? '/subscribe.mp4' : s.video?.video ?? null,
         savedVideoId: s.video?.id ?? null,
+        videoPrompt: String(s.video_prompt ?? '').trim() || null,
         imagePrompt: s.image?.prompt ?? null,
         isGeneratingImage: false,
         isGeneratingStartImage: false,
@@ -3486,6 +3491,48 @@ export function GeneratePageInner() {
     );
   };
 
+  const handleGenerateSentenceVideoPromptWithAi = async (index: number) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+    if (sentence.videoUrl === '/subscribe.mp4') return;
+
+    setIsGeneratingVideoPromptBySentenceId((prev) => ({
+      ...prev,
+      [sentence.id]: true,
+    }));
+
+    try {
+      const mode =
+        (sentence.videoGenerationMode ?? 'referenceImage') === 'referenceImage'
+          ? 'referenceImage'
+          : 'text';
+
+      const res = await api.post<{ prompt: string }>('/ai/generate-video-prompt', {
+        script,
+        sentence: sentence.text,
+        mode,
+      });
+
+      const prompt = String(res.data?.prompt ?? '').trim();
+      if (!prompt) {
+        showAlert('AI did not return a prompt. Please try again.', { type: 'warning' });
+        return;
+      }
+
+      setSentences((prev) =>
+        prev.map((s, i) => (i === index ? { ...s, videoPrompt: prompt } : s)),
+      );
+    } catch (error) {
+      console.error('Generate video prompt failed', error);
+      showAlert('Failed to generate a video prompt. Please try again.', { type: 'error' });
+    } finally {
+      setIsGeneratingVideoPromptBySentenceId((prev) => ({
+        ...prev,
+        [sentence.id]: false,
+      }));
+    }
+  };
+
   const handleSentenceReferenceImageUpload = (
     index: number,
     e: ChangeEvent<HTMLInputElement>,
@@ -3702,6 +3749,33 @@ export function GeneratePageInner() {
   ) => {
     setLibraryTarget({ index, which });
     setIsLibraryModalOpen(true);
+  };
+
+  const handleSelectVideoFromLibrary = (index: number) => {
+    setVideoLibraryTargetIndex(index);
+    setIsVideoLibraryOpen(true);
+  };
+
+  const handleLibraryVideoSelect = (videoUrl: string, id: string) => {
+    if (videoLibraryTargetIndex === null) return;
+
+    const index = videoLibraryTargetIndex;
+
+    setSentences((prev) =>
+      prev.map((item, i) =>
+        i === index
+          ? {
+            ...item,
+            sceneTab: 'video',
+            video: null,
+            videoUrl,
+            savedVideoId: id,
+          }
+          : item,
+      ),
+    );
+
+    setVideoLibraryTargetIndex(null);
   };
 
   const handleLibraryImageSelect = (
@@ -3989,6 +4063,7 @@ export function GeneratePageInner() {
           start_frame_image_id?: string;
           end_frame_image_id?: string;
           video_id?: string;
+          video_prompt?: string;
           isSuspense?: boolean;
           forced_character_keys?: string[];
           transition_to_next?: SentenceItem['transitionToNext'] | null;
@@ -4036,6 +4111,7 @@ export function GeneratePageInner() {
             start_frame_image_id: startFrameImageId ?? undefined,
             end_frame_image_id: endFrameImageId ?? undefined,
             video_id: s.savedVideoId ?? undefined,
+            video_prompt: String(s.videoPrompt ?? '').trim() || undefined,
             isSuspense: Boolean(s.isSuspense) && !isSubscribeLikeSentence(s.text),
             forced_character_keys: Array.isArray(s.forcedCharacterKeys)
               ? s.forcedCharacterKeys
@@ -4049,6 +4125,50 @@ export function GeneratePageInner() {
         }
 
         return payload;
+      };
+
+      const persistMissingSentenceVideos = async (params: {
+        scriptId: string;
+        backendSentences: BackendSentenceDto[];
+        localSentences: SentenceItem[];
+      }): Promise<Map<number, { id: string; video: string }>> => {
+        const updates = new Map<number, { id: string; video: string }>();
+
+        const sorted = [...(params.backendSentences ?? [])].sort(
+          (a, b) => a.index - b.index,
+        );
+
+        for (const bs of sorted) {
+          const local = params.localSentences?.[bs.index];
+          if (!local) continue;
+
+          const url = String(local.videoUrl ?? '').trim();
+          if (!url || url === '/subscribe.mp4') continue;
+
+          // If we already have a persisted video ID, skip.
+          if (local.savedVideoId || bs.video?.id) continue;
+
+          try {
+            const response = await api.post<{ id: string; video: string }>(
+              `/scripts/${encodeURIComponent(params.scriptId)}/sentences/${encodeURIComponent(bs.id)}/video`,
+              {
+                videoUrl: url,
+                video_type: videoModel,
+                video_size: 'portrait',
+              },
+            );
+
+            const saved = response.data;
+            if (saved?.id) {
+              updates.set(bs.index, { id: saved.id, video: saved.video });
+            }
+          } catch (error) {
+            // Best-effort: draft save should still succeed even if some video persistence fails.
+            console.error('Persist sentence video failed', error);
+          }
+        }
+
+        return updates;
       };
 
       const fullSentencePayload = await buildSentencePayload(fullSnapshot.sentences, 'full');
@@ -4182,6 +4302,18 @@ export function GeneratePageInner() {
 
             upsertedShortIds.push(id);
 
+            // Persist any generated sentence videos (best-effort) so video_id is stored in the draft.
+            const shortBackendSentences = Array.isArray((upsertedShort.data as any)?.sentences)
+              ? ((upsertedShort.data as any).sentences as BackendSentenceDto[])
+              : [];
+            if (shortBackendSentences.length > 0) {
+              await persistMissingSentenceVideos({
+                scriptId: id,
+                backendSentences: shortBackendSentences,
+                localSentences: finalItems,
+              });
+            }
+
             // Keep local snapshot IDs in sync.
             tabSnapshotsRef.current[snapKey] = {
               ...(tabSnapshotsRef.current[snapKey] ?? {
@@ -4227,6 +4359,7 @@ export function GeneratePageInner() {
           start_frame_image_id?: string;
           end_frame_image_id?: string;
           video_id?: string;
+          video_prompt?: string;
           isSuspense?: boolean;
           forced_character_keys?: string[];
           transition_to_next?: SentenceItem['transitionToNext'] | null;
@@ -4285,7 +4418,31 @@ export function GeneratePageInner() {
       }
 
       if (upsertedScript?.sentences && upsertedScript.sentences.length > 0) {
-        const mappedFull = mapBackendSentencesToUi(upsertedScript.sentences);
+        const videoUpdates = await persistMissingSentenceVideos({
+          scriptId: upsertedScript.id,
+          backendSentences: upsertedScript.sentences,
+          localSentences: fullSnapshot.sentences,
+        });
+
+        const mappedFull = mapBackendSentencesToUi(upsertedScript.sentences).map((s, idx) => {
+          const local = fullSnapshot.sentences?.[idx];
+          const update = videoUpdates.get(idx);
+
+          // Preserve local generated videoUrl immediately after save, even before it's persisted.
+          const mergedVideoUrl =
+            s.videoUrl ?? (local?.videoUrl && local.videoUrl !== '/subscribe.mp4' ? local.videoUrl : null);
+
+          return update
+            ? {
+              ...s,
+              videoUrl: update.video ?? mergedVideoUrl,
+              savedVideoId: update.id,
+            }
+            : {
+              ...s,
+              videoUrl: mergedVideoUrl,
+            };
+        });
 
         tabSnapshotsRef.current.full = {
           ...fullSnapshot,
@@ -4705,6 +4862,8 @@ export function GeneratePageInner() {
                     handleSentenceVideoGenerationModeChange
                   }
                   onSentenceVideoPromptChange={handleSentenceVideoPromptChange}
+                  onGenerateSentenceVideoPrompt={handleGenerateSentenceVideoPromptWithAi}
+                  isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
                   onSentenceReferenceImageUpload={
                     handleSentenceReferenceImageUpload
                   }
@@ -4723,6 +4882,7 @@ export function GeneratePageInner() {
                   onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
                   onSaveSentenceImage={handleSaveSentenceImage}
                   onSelectFromLibrary={handleSelectFromLibrary}
+                  onSelectVideoFromLibrary={handleSelectVideoFromLibrary}
                   onAddSuspenseScene={handleAddSuspenseScene}
                   scriptStyle={scriptStyle}
                   scriptTechnique={scriptTechnique}
@@ -4872,6 +5032,18 @@ export function GeneratePageInner() {
           setIsVoiceLibraryOpen(false);
         }}
         onSelectVoice={handleVoiceLibrarySelect}
+
+        isVideoLibraryOpen={isVideoLibraryOpen}
+        selectedVideoUrl={
+          videoLibraryTargetIndex === null
+            ? null
+            : sentences[videoLibraryTargetIndex]?.videoUrl ?? null
+        }
+        onCloseVideoLibrary={() => {
+          setIsVideoLibraryOpen(false);
+          setVideoLibraryTargetIndex(null);
+        }}
+        onSelectVideo={handleLibraryVideoSelect}
         isScriptLibraryOpen={isScriptLibraryOpen}
         onCloseScriptLibrary={() => setIsScriptLibraryOpen(false)}
         onSelectScript={handleSelectScriptFromLibrary}

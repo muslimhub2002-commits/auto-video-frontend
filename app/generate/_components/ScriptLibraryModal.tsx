@@ -87,6 +87,7 @@ export function ScriptLibraryModal({
   onClose,
   onSelectScript,
 }: ScriptLibraryModalProps) {
+  const PAGE_SIZE = 10;
   const { showToast, ToastContainer } = useToast();
   const [scripts, setScripts] = useState<ScriptDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -95,7 +96,8 @@ export function ScriptLibraryModal({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [limit, setLimit] = useState(10);
+  const [searchTitle, setSearchTitle] = useState('');
+  const [debouncedSearchTitle, setDebouncedSearchTitle] = useState('');
   const [isAddScriptModalOpen, setIsAddScriptModalOpen] = useState(false);
   const [isEditScriptModalOpen, setIsEditScriptModalOpen] = useState(false);
   const [editingScript, setEditingScript] = useState<ScriptDto | null>(null);
@@ -105,9 +107,25 @@ export function ScriptLibraryModal({
   useEffect(() => {
     if (isOpen) {
       setPage(1);
+      setSearchTitle('');
+      setDebouncedSearchTitle('');
       fetchScripts(1);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearchTitle(searchTitle.trim());
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchTitle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setPage(1);
+    fetchScripts(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchTitle]);
 
   const fetchScripts = async (pageToLoad = 1) => {
     setIsLoading(true);
@@ -119,14 +137,21 @@ export function ScriptLibraryModal({
         page: number;
         limit: number;
       }>('/scripts', {
-        params: { page: pageToLoad, limit },
+        params: {
+          page: pageToLoad,
+          limit: PAGE_SIZE,
+          ...(debouncedSearchTitle ? { title: debouncedSearchTitle } : {}),
+        },
       });
       const data = response.data;
       const items = data.items || [];
-      setScripts(items);
-      setTotal(data.total ?? 0);
-      setPage(data.page ?? pageToLoad);
-      setLimit(data.limit ?? limit);
+      const start = (pageToLoad - 1) * PAGE_SIZE;
+      const end = start + PAGE_SIZE;
+      const itemsForPage = items.length > PAGE_SIZE ? items.slice(start, end) : items;
+
+      setScripts(itemsForPage);
+      setTotal(data.total ?? items.length ?? 0);
+      setPage(pageToLoad);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Failed to fetch scripts:', err);
@@ -146,7 +171,7 @@ export function ScriptLibraryModal({
 
   const refreshAfterMutation = async (preferredPage = page) => {
     const nextTotal = Math.max(0, total - 1);
-    const nextTotalPages = nextTotal > 0 ? Math.max(1, Math.ceil(nextTotal / limit)) : 1;
+    const nextTotalPages = nextTotal > 0 ? Math.max(1, Math.ceil(nextTotal / PAGE_SIZE)) : 1;
     const safePage = Math.min(preferredPage, nextTotalPages);
     await fetchScripts(safePage);
   };
@@ -212,7 +237,7 @@ export function ScriptLibraryModal({
 
   if (!isOpen) return null;
 
-  const totalPages = total > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
+  const totalPages = total > 0 ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
 
   return (
     <div
@@ -240,6 +265,13 @@ export function ScriptLibraryModal({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={searchTitle}
+                onChange={(e) => setSearchTitle(e.target.value)}
+                placeholder="Search title…"
+                className="hidden sm:block w-64 px-3 py-2 rounded-xl border border-gray-200 bg-white/70 text-sm outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400"
+              />
               <Button
                 type="button"
                 size="sm"
@@ -257,6 +289,16 @@ export function ScriptLibraryModal({
                 <X className="h-4 w-4 text-gray-500 group-hover:text-gray-700 transition-colors" />
               </button>
             </div>
+          </div>
+
+          <div className="mt-3 sm:hidden">
+            <input
+              type="text"
+              value={searchTitle}
+              onChange={(e) => setSearchTitle(e.target.value)}
+              placeholder="Search title…"
+              className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white/70 text-sm outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400"
+            />
           </div>
         </div>
 
@@ -301,9 +343,13 @@ export function ScriptLibraryModal({
           ) : scripts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12">
               <FileText className="h-10 w-10 text-gray-400 mb-3" />
-              <p className="text-sm font-medium text-gray-700 mb-1">No drafts yet</p>
+              <p className="text-sm font-medium text-gray-700 mb-1">
+                {debouncedSearchTitle ? 'No matching drafts' : 'No drafts yet'}
+              </p>
               <p className="text-xs text-gray-500 text-center max-w-sm">
-                Save scripts as drafts from the Script section to see them here.
+                {debouncedSearchTitle
+                  ? 'Try a different title search.'
+                  : 'Save scripts as drafts from the Script section to see them here.'}
               </p>
             </div>
           ) : (

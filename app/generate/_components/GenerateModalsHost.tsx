@@ -3,6 +3,7 @@
 import { AlertModal } from '@/components/ui/alert-modal';
 import type { SentenceItem } from '../_types/sentences';
 import { ImageLibraryModal } from './ImageLibraryModal';
+import { VideoLibraryModal } from './VideoLibraryModal';
 import { ScriptLibraryModal, type ScriptDto } from './ScriptLibraryModal';
 import { ScriptReferencesModal, type ScriptReferenceDto } from './ScriptReferencesModal';
 import { VoiceLibraryModal } from './VoiceLibraryModal';
@@ -32,6 +33,11 @@ type GenerateModalsHostProps = {
   selectedVoiceUrl: string | null;
   onCloseVoiceLibrary: () => void;
   onSelectVoice: (voiceUrl: string, id: string) => void | Promise<void>;
+
+  isVideoLibraryOpen: boolean;
+  selectedVideoUrl: string | null;
+  onCloseVideoLibrary: () => void;
+  onSelectVideo: (videoUrl: string, id: string) => void;
 
   isScriptLibraryOpen: boolean;
   onCloseScriptLibrary: () => void;
@@ -67,6 +73,11 @@ export function GenerateModalsHost({
   selectedVoiceUrl,
   onCloseVoiceLibrary,
   onSelectVoice,
+
+  isVideoLibraryOpen,
+  selectedVideoUrl,
+  onCloseVideoLibrary,
+  onSelectVideo,
   isScriptLibraryOpen,
   onCloseScriptLibrary,
   onSelectScript,
@@ -93,6 +104,13 @@ export function GenerateModalsHost({
         selectedVoiceUrl={selectedVoiceUrl}
         onClose={onCloseVoiceLibrary}
         onSelectVoice={onSelectVoice}
+      />
+
+      <VideoLibraryModal
+        isOpen={isVideoLibraryOpen}
+        selectedVideoUrl={selectedVideoUrl}
+        onClose={onCloseVideoLibrary}
+        onSelectVideo={onSelectVideo}
       />
 
       <ScriptLibraryModal
