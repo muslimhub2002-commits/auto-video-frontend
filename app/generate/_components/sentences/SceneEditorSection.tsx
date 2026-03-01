@@ -9,11 +9,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users } from 'lucide-react';
+import { Clock, Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
 import { CharactersModal } from './CharactersModal';
+import { ErasModal, type ScriptEra } from './ErasModal';
 
 type ScriptCharacter = {
   key: string;
@@ -35,6 +36,10 @@ type SceneEditorSectionProps = {
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
+
+  scriptEras: ScriptEra[];
+  onScriptErasChange: (next: ScriptEra[]) => void;
+  onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
 
   onSentenceVisualEffectChange: (
     index: number,
@@ -129,6 +134,10 @@ export function SceneEditorSection({
   scriptCharacters,
   onScriptCharactersChange,
   onSentenceForcedCharacterKeysChange,
+
+  scriptEras,
+  onScriptErasChange,
+  onSentenceForcedEraKeyChange,
   onSentenceVisualEffectChange,
   onTransitionToNextChange,
   onInsertEmptySentenceAfter,
@@ -181,17 +190,18 @@ export function SceneEditorSection({
   const clearInsertedTimeoutRef = useRef<number | null>(null);
 
   const [isCharactersModalOpen, setIsCharactersModalOpen] = useState(false);
+  const [isErasModalOpen, setIsErasModalOpen] = useState(false);
 
   const completeCount = sentences.filter((s) =>
     Boolean(
       s.image ||
-        s.imageUrl ||
-        s.video ||
-        s.videoUrl ||
-        s.startImage ||
-        s.startImageUrl ||
-        s.endImage ||
-        s.endImageUrl,
+      s.imageUrl ||
+      s.video ||
+      s.videoUrl ||
+      s.startImage ||
+      s.startImageUrl ||
+      s.endImage ||
+      s.endImageUrl,
     ),
   ).length;
 
@@ -238,6 +248,21 @@ export function SceneEditorSection({
               type="button"
               size="sm"
               variant="outline"
+              onClick={() => {
+                setIsErasModalOpen(true);
+              }}
+              className="gap-2 h-10 px-4 border-violet-200 bg-white text-violet-700 hover:bg-violet-50 hover:border-violet-300 shadow-sm hover:shadow transition-all"
+              title="View and edit all eras"
+            >
+              <Clock className="h-4 w-4" />
+
+              <span className="text-sm font-semibold">Eras</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
               onClick={onOpenAddSuspense}
               disabled={sentences.length === 0}
               className="gap-2 h-10 px-4 border-purple-200 bg-white text-purple-700 hover:bg-purple-50 hover:border-purple-300 shadow-sm hover:shadow transition-all"
@@ -277,6 +302,13 @@ export function SceneEditorSection({
         onSave={onScriptCharactersChange}
       />
 
+      <ErasModal
+        isOpen={isErasModalOpen}
+        eras={scriptEras}
+        onClose={() => setIsErasModalOpen(false)}
+        onSave={onScriptErasChange}
+      />
+
       {/* Sentences List */}
       <div className="space-y-4">
         {sentences.map((item, index) => {
@@ -306,6 +338,9 @@ export function SceneEditorSection({
                   onForcedCharacterKeysChange={(next) =>
                     onSentenceForcedCharacterKeysChange(index, next)
                   }
+
+                  scriptEras={scriptEras}
+                  onForcedEraKeyChange={(next) => onSentenceForcedEraKeyChange(index, next)}
 
                   onVisualEffectChange={(value) =>
                     onSentenceVisualEffectChange(index, value)
@@ -356,24 +391,24 @@ export function SceneEditorSection({
                   onGenerateVideo={
                     onGenerateSentenceVideo
                       ? async (_canGenerateVideo) => {
-                          if (item.videoUrl === '/subscribe.mp4') return;
-                          await Promise.resolve(onGenerateSentenceVideo(index));
-                        }
+                        if (item.videoUrl === '/subscribe.mp4') return;
+                        await Promise.resolve(onGenerateSentenceVideo(index));
+                      }
                       : undefined
                   }
                   onRemoveGeneratedVideo={
                     onRemoveSentenceGeneratedVideoForMode
                       ? () => {
-                          const mode =
-                            (item.videoGenerationMode ??
-                              'referenceImage') as 'frames' | 'text' | 'referenceImage';
-                          onRemoveSentenceGeneratedVideoForMode(
-                            index,
-                            videoModel === 'grok' && mode === 'frames'
-                              ? 'referenceImage'
-                              : mode,
-                          );
-                        }
+                        const mode =
+                          (item.videoGenerationMode ??
+                            'referenceImage') as 'frames' | 'text' | 'referenceImage';
+                        onRemoveSentenceGeneratedVideoForMode(
+                          index,
+                          videoModel === 'grok' && mode === 'frames'
+                            ? 'referenceImage'
+                            : mode,
+                        );
+                      }
                       : undefined
                   }
                   onVideoGenerationModeChange={(mode) =>
@@ -421,12 +456,12 @@ export function SceneEditorSection({
                             onTransitionToNextChange(
                               index,
                               v as
-                                | 'none'
-                                | 'glitch'
-                                | 'whip'
-                                | 'flash'
-                                | 'fade'
-                                | 'chromaLeak',
+                              | 'none'
+                              | 'glitch'
+                              | 'whip'
+                              | 'flash'
+                              | 'fade'
+                              | 'chromaLeak',
                             );
                           }}
                         >

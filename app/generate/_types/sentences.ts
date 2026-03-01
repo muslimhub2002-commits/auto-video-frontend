@@ -4,6 +4,13 @@ export type SentenceItem = {
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
 
+  // Non-forced mappings inferred during split (used for draft round-tripping).
+  characterKeys?: string[] | null;
+  eraKey?: string | null;
+
+  // Forced override set explicitly by the user.
+  forcedEraKey?: string | null;
+
   videoGenerationMode?: 'frames' | 'text' | 'referenceImage';
   videoPrompt?: string | null;
   referenceImage?: File | null;

@@ -180,7 +180,7 @@ export function ForcedCharactersModal({
               type="button"
               onClick={() => {
                 const cleaned = draft.filter(Boolean);
-                onSave(cleaned.length ? cleaned : null);
+                onSave(Array.from(new Set(cleaned)));
                 onClose();
               }}
               className="h-10 px-6 bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md hover:shadow-lg transition-all"

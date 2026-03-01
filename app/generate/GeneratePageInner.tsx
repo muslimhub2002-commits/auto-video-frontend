@@ -48,6 +48,12 @@ type ScriptCharacter = {
   isWoman: boolean;
 };
 
+type ScriptEra = {
+  key: string;
+  name: string;
+  description?: string;
+};
+
 type BackendSentenceDto = {
   id: string;
   text: string;
@@ -58,6 +64,9 @@ type BackendSentenceDto = {
   video?: { id: string; video: string } | null;
   isSuspense?: boolean;
   forced_character_keys?: string[] | null;
+  character_keys?: string[] | null;
+  era_key?: string | null;
+  forced_era_key?: string | null;
   transition_to_next?: SentenceItem['transitionToNext'] | null;
   visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
 };
@@ -253,6 +262,9 @@ export function GeneratePageInner() {
   // Canonical characters extracted during split.
   const [scriptCharacters, setScriptCharacters] = useState<ScriptCharacter[]>([]);
 
+  // Canonical eras extracted during split or edited by the user.
+  const [scriptEras, setScriptEras] = useState<ScriptEra[]>([]);
+
   // Sentence image generation configuration
   const [imagePromptModel, setImagePromptModel] = useState('gpt-4.1-mini');
   const [imageModel, setImageModel] = useState('leonardo');
@@ -308,6 +320,7 @@ export function GeneratePageInner() {
     sentences,
     setSentences,
     handleSentenceForcedCharacterKeysChange,
+    handleSentenceForcedEraKeyChange,
     handleSentenceVisualEffectChange,
     handleTransitionToNextChange,
     handleSentenceTextChange,
@@ -1946,6 +1959,7 @@ export function GeneratePageInner() {
     setSentences([]);
     setSplitError(null);
     setScriptCharacters([]);
+    setScriptEras([]);
     setVoiceOver(null);
     setVoiceDuration(null);
     setSavedVoiceId(null);
@@ -2045,8 +2059,13 @@ export function GeneratePageInner() {
       }
 
       const data = (await response.json()) as {
-        sentences: string[];
+        sentences: Array<{
+          text: string;
+          characterKeys: string[];
+          eraKey: string | null;
+        }>;
         characters?: ScriptCharacter[];
+        eras?: ScriptEra[];
       };
 
       // Normalize and ensure the subscribe sentence appears only once at the end
@@ -2061,34 +2080,55 @@ export function GeneratePageInner() {
 
       const targetNorm = normalize(SUBSCRIBE_SENTENCE);
 
-      const processedSentences: string[] = [];
+      const processed: Array<{
+        text: string;
+        characterKeys: string[];
+        eraKey: string | null;
+      }> = [];
       let hasSubscribe = false;
 
       for (const raw of data.sentences ?? []) {
-        const trimmed = raw.trim();
+        const trimmed = String(raw?.text ?? '').trim();
         if (!trimmed) continue;
         const norm = normalize(trimmed);
         if (norm === targetNorm) {
           if (!hasSubscribe) {
             hasSubscribe = true;
-            processedSentences.push(SUBSCRIBE_SENTENCE);
+            processed.push({
+              text: SUBSCRIBE_SENTENCE,
+              characterKeys: [],
+              eraKey: null,
+            });
           }
         } else {
-          processedSentences.push(trimmed);
+          processed.push({
+            text: trimmed,
+            characterKeys: Array.isArray(raw?.characterKeys)
+              ? raw.characterKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
+              : [],
+            eraKey: String(raw?.eraKey ?? '').trim() || null,
+          });
         }
       }
 
       if (!hasSubscribe) {
-        processedSentences.push(SUBSCRIBE_SENTENCE);
+        processed.push({
+          text: SUBSCRIBE_SENTENCE,
+          characterKeys: [],
+          eraKey: null,
+        });
       }
 
       const now = Date.now();
-      const items: SentenceItem[] = processedSentences.map((text, idx) => ({
+      const items: SentenceItem[] = processed.map(({ text, characterKeys, eraKey }, idx) => ({
         id: `${now}-${idx}`,
         text,
+        characterKeys: characterKeys.length ? Array.from(new Set(characterKeys)) : null,
+        eraKey,
+        forcedEraKey: eraKey,
         mediaMode: 'single',
         sceneTab: text === SUBSCRIBE_SENTENCE ? 'video' : 'image',
-        forcedCharacterKeys: null,
+        forcedCharacterKeys: Array.from(new Set(characterKeys)),
         image: null,
         imageUrl: null,
         video: text === SUBSCRIBE_SENTENCE ? null : null,
@@ -2115,6 +2155,7 @@ export function GeneratePageInner() {
       aiSplitCacheRef.current = null;
       setSentences(items);
       setScriptCharacters(Array.isArray(data.characters) ? data.characters : []);
+      setScriptEras(Array.isArray(data.eras) ? data.eras : []);
     } catch (error) {
       console.error('Split script failed', error);
       setSplitError('Failed to split script. Please try again.');
@@ -2244,12 +2285,17 @@ export function GeneratePageInner() {
     setSentences([]);
     setSplitError(null);
     setScriptCharacters([]);
+    setScriptEras([]);
     setOriginalScriptSubject(undefined);
     setOriginalScriptSubjectContent(undefined);
   };
 
   const handleScriptCharactersChange = (next: ScriptCharacter[]) => {
     setScriptCharacters(Array.isArray(next) ? next : []);
+  };
+
+  const handleScriptErasChange = (next: ScriptEra[]) => {
+    setScriptEras(Array.isArray(next) ? next : []);
   };
 
   const handleOpenScriptLibrary = () => {
@@ -2260,12 +2306,32 @@ export function GeneratePageInner() {
     const sorted = [...backend].sort((a, b) => a.index - b.index);
     return sorted.map((s) => {
       const subscribeLike = isSubscribeLikeSentence(s.text);
+
+      const inferredCharacterKeys = Array.isArray(s.character_keys)
+        ? s.character_keys
+        : null;
+      const forcedCharacterKeys = Array.isArray(s.forced_character_keys)
+        ? s.forced_character_keys
+        : null;
+      const resolvedForcedCharacterKeys =
+        forcedCharacterKeys ?? inferredCharacterKeys;
+
+      const inferredEraKey = String(s.era_key ?? '').trim() || null;
+      const forcedEraKey =
+        s.forced_era_key === null || s.forced_era_key === undefined
+          ? null
+          : String(s.forced_era_key).trim();
+      const resolvedForcedEraKey = forcedEraKey !== null ? forcedEraKey : inferredEraKey;
+
       return {
         id: s.id,
         text: s.text,
+        characterKeys: inferredCharacterKeys,
+        eraKey: inferredEraKey,
+        forcedEraKey: resolvedForcedEraKey,
         mediaMode: subscribeLike || s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
         sceneTab: subscribeLike ? 'video' : s.video ? 'video' : 'image',
-        forcedCharacterKeys: Array.isArray(s.forced_character_keys) ? s.forced_character_keys : null,
+        forcedCharacterKeys: resolvedForcedCharacterKeys,
         transitionToNext: s.transition_to_next ?? null,
         visualEffect: s.visual_effect ?? null,
         image: null,
@@ -2369,6 +2435,7 @@ export function GeneratePageInner() {
     reference_scripts?: { id: string; title: string | null; script: string }[];
     voice?: { id: string; voice: string } | null;
     characters?: ScriptCharacter[];
+    eras?: ScriptEra[];
     sentences?: BackendSentenceDto[];
   }) => {
     setFullScriptId(draft.id);
@@ -2407,6 +2474,7 @@ export function GeneratePageInner() {
     );
 
     setScriptCharacters(Array.isArray(draft.characters) ? draft.characters : []);
+    setScriptEras(Array.isArray(draft.eras) ? draft.eras : []);
 
     if (draft.sentences && draft.sentences.length > 0) {
       const mapped = mapBackendSentencesToUi(draft.sentences);
@@ -2795,6 +2863,9 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
+        eras: scriptEras.length ? scriptEras : undefined,
+        forcedEraKey:
+          typeof target.forcedEraKey === 'string' ? target.forcedEraKey.trim() : '',
         style,
         scriptLength,
         isShort: effectiveIsShort,
@@ -2802,10 +2873,9 @@ export function GeneratePageInner() {
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
-        forcedCharacterKeys:
-          Array.isArray(target.forcedCharacterKeys) && target.forcedCharacterKeys.length
-            ? target.forcedCharacterKeys
-            : undefined,
+        forcedCharacterKeys: Array.isArray(target.forcedCharacterKeys)
+          ? target.forcedCharacterKeys
+          : undefined,
         prompt: promptOverride?.trim() ? promptOverride.trim() : undefined,
       });
 
@@ -2868,6 +2938,9 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
+        eras: scriptEras.length ? scriptEras : undefined,
+        forcedEraKey:
+          typeof target.forcedEraKey === 'string' ? target.forcedEraKey.trim() : '',
         style,
         scriptLength,
         isShort: effectiveIsShort,
@@ -2875,10 +2948,9 @@ export function GeneratePageInner() {
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
-        forcedCharacterKeys:
-          Array.isArray(target.forcedCharacterKeys) && target.forcedCharacterKeys.length
-            ? target.forcedCharacterKeys
-            : undefined,
+        forcedCharacterKeys: Array.isArray(target.forcedCharacterKeys)
+          ? target.forcedCharacterKeys
+          : undefined,
       });
 
       const data = res.data as {
@@ -2965,6 +3037,9 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
+        eras: scriptEras.length ? scriptEras : undefined,
+        forcedEraKey:
+          typeof target.forcedEraKey === 'string' ? target.forcedEraKey.trim() : '',
         style,
         scriptLength,
         isShort: effectiveIsShort,
@@ -2972,10 +3047,9 @@ export function GeneratePageInner() {
         promptModel: imagePromptModel,
         imageModel,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
-        forcedCharacterKeys:
-          Array.isArray(target.forcedCharacterKeys) && target.forcedCharacterKeys.length
-            ? target.forcedCharacterKeys
-            : undefined,
+        forcedCharacterKeys: Array.isArray(target.forcedCharacterKeys)
+          ? target.forcedCharacterKeys
+          : undefined,
         frameType: which,
         continuityPrompt,
       });
@@ -3908,6 +3982,9 @@ export function GeneratePageInner() {
       const buildSentencePayload = async (items: SentenceItem[], prefix: string) => {
         const payload: {
           text: string;
+          character_keys?: string[] | null;
+          era_key?: string | null;
+          forced_era_key?: string | null;
           image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
@@ -3946,15 +4023,23 @@ export function GeneratePageInner() {
 
           payload.push({
             text: s.text,
+            character_keys:
+              Array.isArray(s.characterKeys) && s.characterKeys.length
+                ? s.characterKeys
+                : null,
+            era_key: String(s.eraKey ?? '').trim() || null,
+            forced_era_key:
+              s.forcedEraKey === null || s.forcedEraKey === undefined
+                ? null
+                : String(s.forcedEraKey).trim(),
             image_id: imageId ?? undefined,
             start_frame_image_id: startFrameImageId ?? undefined,
             end_frame_image_id: endFrameImageId ?? undefined,
             video_id: s.savedVideoId ?? undefined,
             isSuspense: Boolean(s.isSuspense) && !isSubscribeLikeSentence(s.text),
-            forced_character_keys:
-              Array.isArray(s.forcedCharacterKeys) && s.forcedCharacterKeys.length
-                ? s.forcedCharacterKeys
-                : undefined,
+            forced_character_keys: Array.isArray(s.forcedCharacterKeys)
+              ? s.forcedCharacterKeys
+              : undefined,
             transition_to_next: s.transitionToNext ?? null,
             visual_effect:
               s.visualEffect === 'colorGrading' || s.visualEffect === 'animatedLighting'
@@ -4067,6 +4152,7 @@ export function GeneratePageInner() {
               title: `Short ${i + 1}`,
               video_url: snap?.videoUrl ?? undefined,
               characters: scriptCharacters.length ? scriptCharacters : undefined,
+              eras: scriptEras.length ? scriptEras : undefined,
               sentences: shortSentencesPayload,
               subject: scriptSubject,
               subject_content:
@@ -4131,8 +4217,12 @@ export function GeneratePageInner() {
         voice_id?: string;
         video_url?: string;
         characters?: ScriptCharacter[];
+        eras?: ScriptEra[];
         sentences?: {
           text: string;
+          character_keys?: string[] | null;
+          era_key?: string | null;
+          forced_era_key?: string | null;
           image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
@@ -4154,6 +4244,7 @@ export function GeneratePageInner() {
         voice_id: voiceId ?? undefined,
         video_url: existingFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
+        eras: scriptEras.length ? scriptEras : undefined,
         sentences: fullSentencePayload.length > 0 ? fullSentencePayload : undefined,
         subject: scriptSubject,
         subject_content:
@@ -4173,6 +4264,7 @@ export function GeneratePageInner() {
       const upsertedScript = upserted.data as {
         id: string;
         characters?: ScriptCharacter[];
+        eras?: ScriptEra[];
         sentences?: BackendSentenceDto[];
         shorts_scripts?: string[] | null;
       };
@@ -4186,6 +4278,10 @@ export function GeneratePageInner() {
 
       if (Array.isArray(upsertedScript?.characters)) {
         setScriptCharacters(upsertedScript.characters);
+      }
+
+      if (Array.isArray(upsertedScript?.eras)) {
+        setScriptEras(upsertedScript.eras);
       }
 
       if (upsertedScript?.sentences && upsertedScript.sentences.length > 0) {
@@ -4591,6 +4687,9 @@ export function GeneratePageInner() {
                   scriptCharacters={scriptCharacters}
                   onScriptCharactersChange={handleScriptCharactersChange}
                   onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
+                  scriptEras={scriptEras}
+                  onScriptErasChange={handleScriptErasChange}
+                  onSentenceForcedEraKeyChange={handleSentenceForcedEraKeyChange}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
                   onTransitionToNextChange={handleTransitionToNextChange}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}

@@ -47,9 +47,25 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
             ? {
                 ...s,
                 forcedCharacterKeys:
-                  Array.isArray(next) && next.length
+                  Array.isArray(next)
                     ? Array.from(new Set(next.filter(Boolean)))
                     : null,
+              }
+            : s,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleSentenceForcedEraKeyChange = useCallback(
+    (index: number, next: string | null) => {
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? {
+                ...s,
+                forcedEraKey: next === null ? null : String(next).trim(),
               }
             : s,
         ),
@@ -134,6 +150,9 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         text: '',
         sceneTab: 'image',
         mediaMode: 'single',
+        characterKeys: null,
+        eraKey: null,
+        forcedEraKey: null,
         videoGenerationMode: 'referenceImage',
         videoPrompt: null,
         referenceImage: null,
@@ -204,6 +223,7 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
     sentences,
     setSentences,
     handleSentenceForcedCharacterKeysChange,
+    handleSentenceForcedEraKeyChange,
     handleSentenceVisualEffectChange,
     handleTransitionToNextChange,
     handleSentenceTextChange,

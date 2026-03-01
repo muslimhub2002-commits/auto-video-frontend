@@ -47,6 +47,12 @@ type ScriptCharacter = {
   isWoman: boolean;
 };
 
+type ScriptEra = {
+  key: string;
+  name: string;
+  description?: string;
+};
+
 type ShortsTabMeta = {
   label: string;
   count: number;
@@ -74,6 +80,10 @@ type SentencesImagesSectionProps = {
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
+
+  scriptEras: ScriptEra[];
+  onScriptErasChange: (next: ScriptEra[]) => void;
+  onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
   onSentenceVisualEffectChange: (
     index: number,
     value:
@@ -175,6 +185,10 @@ export function SentencesImagesSection({
   scriptCharacters,
   onScriptCharactersChange,
   onSentenceForcedCharacterKeysChange,
+
+  scriptEras,
+  onScriptErasChange,
+  onSentenceForcedEraKeyChange,
   onSentenceVisualEffectChange,
   onTransitionToNextChange,
   imagePromptModel,
@@ -489,6 +503,9 @@ export function SentencesImagesSection({
               scriptCharacters={scriptCharacters}
               onScriptCharactersChange={onScriptCharactersChange}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
+              scriptEras={scriptEras}
+              onScriptErasChange={onScriptErasChange}
+              onSentenceForcedEraKeyChange={onSentenceForcedEraKeyChange}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}
               onTransitionToNextChange={onTransitionToNextChange}
               onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
