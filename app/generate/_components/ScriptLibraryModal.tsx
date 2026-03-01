@@ -390,7 +390,7 @@ export function ScriptLibraryModal({
                   >
                     {/* Gradient loading overlay for the selected card */}
                     {isThisLoading && (
-                      <div className="absolute inset-0 bg-linear-to-br from-purple-600 via-indigo-600 to-violet-700 flex flex-col items-center justify-center gap-4 z-10">
+                      <div className="absolute inset-0 bg-linear-to-br from-purple-600 via-indigo-600 to-violet-700 flex flex-col items-center justify-center gap-4 z-10 fade-in animate-in duration-300">
                         {/* Decorative blurred orbs */}
                         <div className="absolute top-2 left-4 w-16 h-16 bg-white/10 rounded-full blur-xl" />
                         <div className="absolute bottom-2 right-4 w-20 h-20 bg-pink-400/20 rounded-full blur-2xl" />
@@ -405,7 +405,7 @@ export function ScriptLibraryModal({
 
                         {/* Text */}
                         <div className="text-center z-10 px-4">
-                          <p className="text-sm font-bold text-white tracking-wide">Loading script…</p>
+                          <p className="text-sm font-bold text-white tracking-wide">Loading Script…</p>
                         </div>
                       </div>
                     )}

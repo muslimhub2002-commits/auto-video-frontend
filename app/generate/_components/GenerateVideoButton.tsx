@@ -280,13 +280,18 @@ export function GenerateVideoButton({
   const handleAddSoundtrackToLibrary = async () => {
     if (!selectedSoundtrack) return;
     const title = soundtrackTitle.trim();
-    if (!title) {
-      setSoundtrackError('Please enter a title to add this to your library.');
-      return;
-    }
+    const filename = String(selectedSoundtrack.name ?? '').trim();
+    const baseName = filename ? filename.replace(/\.[^/.]+$/, '') : '';
+    const fallbackTitle = baseName.trim() || 'Untitled soundtrack';
+    const finalTitle = (title || fallbackTitle).slice(0, 255);
+
+    // If the user left it blank, reflect the auto-picked title in the UI.
+    if (!title) setSoundtrackTitle(finalTitle);
+    setSoundtrackError(null);
+
     await onUploadBackgroundSoundtrackAddToLibrary({
       file: selectedSoundtrack,
-      title,
+      title: finalTitle,
     });
     setSelectedSoundtrack(null);
     setSoundtrackTitle('');
