@@ -454,17 +454,6 @@ export function SceneEditorSection({
                   <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-200" />
                   <div className="relative flex items-center justify-center gap-2">
                     {(() => {
-                      const next = sentences[index + 1];
-                      const currentTab = item.sceneTab ?? (item.mediaMode === 'frames' ? 'video' : 'image');
-                      const nextTab = next?.sceneTab ?? (next?.mediaMode === 'frames' ? 'video' : 'image');
-                      const isImageToImage =
-                        currentTab === 'image' &&
-                        nextTab === 'image' &&
-                        !item.video &&
-                        !item.videoUrl &&
-                        !next?.video &&
-                        !next?.videoUrl;
-
                       const value = item.transitionToNext ?? '__auto__';
 
                       return (
@@ -489,12 +478,7 @@ export function SceneEditorSection({
                         >
                           <SelectTrigger
                             className="h-9 w-44 bg-white border-gray-200 text-gray-700 shadow-sm"
-                            disabled={!isImageToImage}
-                            title={
-                              isImageToImage
-                                ? 'Optional: override the transition into the next scene'
-                                : 'Transitions are only applied on image-to-image cuts'
-                            }
+                            title="Optional: override the transition into the next scene"
                           >
                             <SelectValue placeholder="Transition (Auto)" />
                           </SelectTrigger>

@@ -21,10 +21,27 @@ export function ImagePreviewOverlay({
 
   const isColorGrading = normalized === 'colorGrading';
   const isAnimatedLighting = normalized === 'animatedLighting';
+  const isGlassSubtle = normalized === 'glassSubtle';
+  const isGlassReflections = normalized === 'glassReflections';
+  const isGlassStrong = normalized === 'glassStrong';
 
-  const mediaFilter = isColorGrading
-    ? 'contrast(1.12) saturate(1.16) brightness(0.98)'
-    : undefined;
+  const glassFilter = isGlassSubtle
+    ? 'contrast(1.06) saturate(1.08) brightness(1.02)'
+    : isGlassReflections
+      ? 'contrast(1.07) saturate(1.10) brightness(1.02)'
+      : isGlassStrong
+        ? 'contrast(1.10) saturate(1.12) brightness(1.03)'
+        : undefined;
+
+  const shouldShowGlassOverlay = isGlassReflections || isGlassStrong;
+  const glassOverlayOpacity = isGlassStrong ? 0.22 : 0.16;
+
+  const mediaFilter = [
+    isColorGrading ? 'contrast(1.12) saturate(1.16) brightness(0.98)' : null,
+    glassFilter ?? null,
+  ]
+    .filter(Boolean)
+    .join(' ') || undefined;
 
   return (
     <div
@@ -41,14 +58,6 @@ export function ImagePreviewOverlay({
           }`}
         onClick={(e) => e.stopPropagation()}
       >
-        <style>{`
-          @keyframes av-light-sweep {
-            0% { transform: translate(-10%, -6%) scale(1.05); }
-            50% { transform: translate(10%, 4%) scale(1.12); }
-            100% { transform: translate(-6%, 8%) scale(1.08); }
-          }
-        `}</style>
-
         <button
           type="button"
           onClick={onRequestClose}
@@ -70,11 +79,23 @@ export function ImagePreviewOverlay({
               <div
                 className="pointer-events-none absolute -inset-[20%]"
                 style={{
-                  animation: 'av-light-sweep 5200ms ease-in-out infinite',
+                  transform: 'translate(-10%, -6%) scale(1.05)',
                   opacity: 0.34,
                   mixBlendMode: 'screen',
                   background:
                     'radial-gradient(circle at 40% 35%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)',
+                }}
+              />
+            ) : null}
+
+            {shouldShowGlassOverlay ? (
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  opacity: glassOverlayOpacity,
+                  mixBlendMode: 'screen',
+                  background:
+                    'linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 18%, rgba(255,255,255,0.00) 45%, rgba(255,255,255,0.10) 62%, rgba(255,255,255,0.00) 100%)',
                 }}
               />
             ) : null}

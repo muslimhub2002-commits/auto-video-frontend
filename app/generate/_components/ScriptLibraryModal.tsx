@@ -21,7 +21,13 @@ interface ScriptSentenceDto {
     | 'fade'
     | 'chromaLeak'
     | null;
-  visual_effect?: 'colorGrading' | 'animatedLighting' | null;
+  visual_effect?:
+    | 'colorGrading'
+    | 'animatedLighting'
+    | 'glassSubtle'
+    | 'glassReflections'
+    | 'glassStrong'
+    | null;
   image?: {
     id: string;
     image: string;

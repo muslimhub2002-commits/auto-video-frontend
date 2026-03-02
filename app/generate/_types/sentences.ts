@@ -23,6 +23,9 @@ export type SentenceItem = {
     | 'none'
     | 'colorGrading'
     | 'animatedLighting'
+    | 'glassSubtle'
+    | 'glassReflections'
+    | 'glassStrong'
     | null;
 
   // Optional override for the cut between this sentence and the next.

@@ -1820,7 +1820,6 @@ export function GeneratePageInner() {
         const trimmed = text.trim();
 
         const transitionToNext = s.transitionToNext ?? null;
-        const visualEffect = s.visualEffect ?? null;
         if (isSubscribeLikeSentence(trimmed)) {
           return {
             text,
@@ -1828,7 +1827,6 @@ export function GeneratePageInner() {
             mediaType: 'video' as const,
             videoUrl: '/subscribe.mp4',
             ...(transitionToNext ? { transitionToNext } : {}),
-            ...(visualEffect ? { visualEffect } : {}),
           };
         }
 
@@ -1840,9 +1838,10 @@ export function GeneratePageInner() {
             mediaType: 'video' as const,
             videoUrl: String(s.videoUrl ?? '').trim(),
             ...(transitionToNext ? { transitionToNext } : {}),
-            ...(visualEffect ? { visualEffect } : {}),
           };
         }
+
+        const visualEffect = s.visualEffect ?? null;
 
         return {
           text,
@@ -2726,7 +2725,7 @@ export function GeneratePageInner() {
           ? {
             ...item,
             mediaMode: 'single',
-            sceneTab: 'image',
+            sceneTab: isVideo ? 'video' : 'image',
             image: isVideo ? null : file,
             imageUrl: isVideo ? null : null,
             video: isVideo ? file : null,
@@ -2749,12 +2748,37 @@ export function GeneratePageInner() {
       prev.map((item, i) => {
         if (i !== index) return item;
 
+        // When switching from Image -> Video, seed the video reference/start frame
+        // from the existing single image (if present) so users don't need to re-select it.
+        // Only fill empty targets; never overwrite explicit video inputs.
+        const hasSingleImage = Boolean(item.image || item.imageUrl);
+        const hasReference = Boolean(item.referenceImage || item.referenceImageUrl);
+        const hasStartFrame = Boolean(item.startImage || item.startImageUrl);
+
+        const seededReferenceFields =
+          mode === 'frames' && hasSingleImage && !hasReference
+            ? {
+                referenceImage: item.image ?? null,
+                referenceImageUrl: item.image ? null : item.imageUrl ?? null,
+              }
+            : {};
+
+        const seededStartFrameFields =
+          mode === 'frames' && hasSingleImage && !hasStartFrame
+            ? {
+                startImage: item.image ?? null,
+                startImageUrl: item.image ? null : item.imageUrl ?? null,
+              }
+            : {};
+
         // Important: do not clear previously generated/uploaded media when toggling.
         // Users may want to switch modes temporarily and come back without losing frames.
         return {
           ...item,
           mediaMode: mode,
           sceneTab: mode === 'frames' ? 'video' : 'image',
+          ...seededReferenceFields,
+          ...seededStartFrameFields,
         };
       }),
     );
@@ -4118,7 +4142,11 @@ export function GeneratePageInner() {
               : undefined,
             transition_to_next: s.transitionToNext ?? null,
             visual_effect:
-              s.visualEffect === 'colorGrading' || s.visualEffect === 'animatedLighting'
+              s.visualEffect === 'colorGrading' ||
+              s.visualEffect === 'animatedLighting' ||
+              s.visualEffect === 'glassSubtle' ||
+              s.visualEffect === 'glassReflections' ||
+              s.visualEffect === 'glassStrong'
                 ? s.visualEffect
                 : null,
           });

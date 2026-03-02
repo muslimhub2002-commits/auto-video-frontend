@@ -90,6 +90,9 @@ type SentencesImagesSectionProps = {
       | 'none'
       | 'colorGrading'
       | 'animatedLighting'
+      | 'glassSubtle'
+      | 'glassReflections'
+      | 'glassStrong'
       | null,
   ) => void;
   onTransitionToNextChange: (
