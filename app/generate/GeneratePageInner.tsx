@@ -309,6 +309,7 @@ export function GeneratePageInner() {
   const [isUploadingBackgroundSoundtrack, setIsUploadingBackgroundSoundtrack] = useState(false);
   const [isSettingFavoriteBackgroundSoundtrack, setIsSettingFavoriteBackgroundSoundtrack] = useState(false);
   const [isSavingBackgroundSoundtrackVolume, setIsSavingBackgroundSoundtrackVolume] = useState(false);
+  const [isDeletingBackgroundSoundtrack, setIsDeletingBackgroundSoundtrack] = useState(false);
   const [isRandomScriptLoading, setIsRandomScriptLoading] = useState(false);
   const [randomScriptError, setRandomScriptError] = useState<string | null>(
     null,
@@ -1095,6 +1096,37 @@ export function GeneratePageInner() {
       showToast('Failed to save default volume.', 'error');
     } finally {
       setIsSavingBackgroundSoundtrackVolume(false);
+    }
+  };
+
+  const handleDeleteBackgroundSoundtrack = async (soundtrackId: string) => {
+    if (!user) {
+      showAlert('You must be logged in to delete a soundtrack.', { type: 'warning' });
+      return;
+    }
+
+    const id = String(soundtrackId ?? '').trim();
+    if (!id) return;
+
+    try {
+      setIsDeletingBackgroundSoundtrack(true);
+      await api.delete('/background-soundtracks/' + encodeURIComponent(id));
+
+      setBackgroundSoundtracks((prev) => prev.filter((t) => t.id !== id));
+
+      setSelectedBackgroundSoundtrackValue((prev) => {
+        const current = String(prev ?? '').trim() || '__default__';
+        if (current === `lib:${id}`) return '__default__';
+        return current;
+      });
+
+      showToast('Soundtrack deleted.', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to delete soundtrack', error);
+      showToast('Failed to delete soundtrack.', 'error');
+    } finally {
+      setIsDeletingBackgroundSoundtrack(false);
     }
   };
 
@@ -4993,6 +5025,8 @@ export function GeneratePageInner() {
                 isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
                 onSaveBackgroundSoundtrackVolume={handleSaveBackgroundSoundtrackVolume}
                 isSavingBackgroundSoundtrackVolume={isSavingBackgroundSoundtrackVolume}
+                onDeleteBackgroundSoundtrack={handleDeleteBackgroundSoundtrack}
+                isDeletingBackgroundSoundtrack={isDeletingBackgroundSoundtrack}
                 onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
                 onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
                 isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}

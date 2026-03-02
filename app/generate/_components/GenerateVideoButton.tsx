@@ -1,5 +1,12 @@
 'use client';
 
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -9,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Pause, Play, Save, Sparkles, Star, Upload, Video } from 'lucide-react';
+import { Loader2, Pause, Play, Save, Sparkles, Star, Trash2, Upload, Video } from 'lucide-react';
 
 type BackgroundSoundtrackItem = {
   id: string;
@@ -45,6 +52,8 @@ interface GenerateVideoButtonProps {
     volumePercent: number;
   }) => Promise<void> | void;
   isSavingBackgroundSoundtrackVolume?: boolean;
+  onDeleteBackgroundSoundtrack?: (soundtrackId: string) => Promise<void> | void;
+  isDeletingBackgroundSoundtrack?: boolean;
   onUploadBackgroundSoundtrackUseOnce: (file: File) => Promise<void> | void;
   onUploadBackgroundSoundtrackAddToLibrary: (params: {
     file: File;
@@ -74,6 +83,8 @@ export function GenerateVideoButton({
   isSettingFavoriteBackgroundSoundtrack,
   onSaveBackgroundSoundtrackVolume,
   isSavingBackgroundSoundtrackVolume,
+  onDeleteBackgroundSoundtrack,
+  isDeletingBackgroundSoundtrack,
   onUploadBackgroundSoundtrackUseOnce,
   onUploadBackgroundSoundtrackAddToLibrary,
   isUploadingBackgroundSoundtrack,
@@ -107,6 +118,24 @@ export function GenerateVideoButton({
   const mixBackgroundSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const mixVoiceSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const [isMixPreviewPlaying, setIsMixPreviewPlaying] = useState(false);
+
+  const [deleteSoundtrackDialogOpen, setDeleteSoundtrackDialogOpen] = useState(false);
+  const [pendingDeleteSoundtrack, setPendingDeleteSoundtrack] = useState<BackgroundSoundtrackItem | null>(null);
+
+  const closeDeleteSoundtrackDialog = () => {
+    if (isDeletingBackgroundSoundtrack) return;
+    setDeleteSoundtrackDialogOpen(false);
+    setPendingDeleteSoundtrack(null);
+  };
+
+  const confirmDeleteSoundtrack = async () => {
+    const id = pendingDeleteSoundtrack?.id;
+    if (!id || !onDeleteBackgroundSoundtrack) return;
+
+    await onDeleteBackgroundSoundtrack(id);
+    setDeleteSoundtrackDialogOpen(false);
+    setPendingDeleteSoundtrack(null);
+  };
 
   const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
   const normalizedBackgroundVolume = clamp01(
@@ -441,6 +470,20 @@ export function GenerateVideoButton({
     await onSetFavoriteBackgroundSoundtrack(id);
   };
 
+  const handleDeleteSelectedSoundtrack = () => {
+    const target = selectedLibrarySoundtrack;
+    if (!target?.id) {
+      onToast?.('Select a library soundtrack to delete.', 'warning');
+      return;
+    }
+    if (!onDeleteBackgroundSoundtrack) return;
+
+    stopSoundtrackPreview();
+    void stopMixPreview();
+    setPendingDeleteSoundtrack(target);
+    setDeleteSoundtrackDialogOpen(true);
+  };
+
   const onSelectSoundTrack = (selectedBackgroundSoundtrackValue:string) => {
     stopSoundtrackPreview();
     void stopMixPreview();
@@ -450,19 +493,25 @@ export function GenerateVideoButton({
     <div className="px-6 pb-6 pt-4">
       {/* Background soundtrack */}
       <div className="mb-4 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
-        <div className="p-5">
-          <div className="flex items-start gap-3">
-            <div className="relative">
-              <div className="absolute inset-0 bg-linear-to-br from-emerald-400 to-teal-500 blur-md opacity-30 rounded-xl"></div>
-              <div className="relative p-2.5 bg-linear-to-br from-emerald-600 to-teal-600 rounded-xl shadow-lg">
-                <Video className="h-5 w-5 text-white" />
+        <Accordion type="single" collapsible defaultValue="background-soundtrack" className="w-full">
+          <AccordionItem value="background-soundtrack" className="border-0">
+            <AccordionTrigger className="px-5 py-5 hover:no-underline">
+              <div className="flex items-start gap-3 text-left">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-linear-to-br from-emerald-400 to-teal-500 blur-md opacity-30 rounded-xl"></div>
+                  <div className="relative p-2.5 bg-linear-to-br from-emerald-600 to-teal-600 rounded-xl shadow-lg">
+                    <Video className="h-5 w-5 text-white" />
+                  </div>
+                </div>
+
+                <div className="flex-1">
+                  <h4 className="text-sm font-semibold text-gray-900">Background Soundtrack</h4>
+                  <p className="text-xs text-gray-600 mt-0.5">Select a track, mute, or upload an MP3.</p>
+                </div>
               </div>
-            </div>
+            </AccordionTrigger>
 
-            <div className="flex-1">
-              <h4 className="text-sm font-semibold text-gray-900">Background Soundtrack</h4>
-              <p className="text-xs text-gray-600 mt-0.5">Select a track, mute, or upload an MP3.</p>
-
+            <AccordionContent className="px-5 pb-5">
               <div className="mt-3 flex flex-col gap-2">
                 <label className="block text-sm font-medium text-gray-700">Background Soundtrack</label>
                 <div className="flex gap-2 items-center">
@@ -482,13 +531,13 @@ export function GenerateVideoButton({
                         ) : null}
                         {backgroundSoundtracks.map((t) => (
                           <SelectItem key={t.id} value={`lib:${t.id}`}>
-                            <span className="inline-flex items-center gap-2">
+                            <span className="inline-flex items-center gap-2 min-w-0">
                               {t.is_favorite ? (
                                 <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
                               ) : (
                                 <Star className="h-4 w-4 fill-gray-500 text-gray-500" />
                               )}
-                              <span>{t.title}</span>
+                              <span className="truncate">{t.title}</span>
                             </span>
                           </SelectItem>
                         ))}
@@ -512,6 +561,18 @@ export function GenerateVideoButton({
                           : 'h-4 w-4 text-gray-700'
                       }
                     />
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-gray-300 hover:bg-gray-50 h-10 shrink-0"
+                    onClick={handleDeleteSelectedSoundtrack}
+                    disabled={!selectedLibrarySoundtrack?.id || !onDeleteBackgroundSoundtrack || Boolean(isDeletingBackgroundSoundtrack)}
+                    aria-label="Delete soundtrack"
+                    title="Delete soundtrack"
+                  >
+                    <Trash2 className="h-4 w-4 text-red-600" />
                   </Button>
 
                   <Button
@@ -734,10 +795,25 @@ export function GenerateVideoButton({
                   </p>
                 ) : null}
               </div>
-            </div>
-          </div>
-        </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </div>
+
+      {onDeleteBackgroundSoundtrack ? (
+        <AlertDialog
+          isOpen={deleteSoundtrackDialogOpen}
+          onClose={closeDeleteSoundtrackDialog}
+          onCancel={closeDeleteSoundtrackDialog}
+          onConfirm={() => void confirmDeleteSoundtrack()}
+          title="Delete soundtrack?"
+          description={`This will permanently delete “${pendingDeleteSoundtrack?.title ?? ''}” from your library.`}
+          confirmText="Delete"
+          cancelText="Cancel"
+          variant="danger"
+          isLoading={Boolean(isDeletingBackgroundSoundtrack)}
+        />
+      ) : null}
 
       {/* Upload video */}
       <div className="mb-4 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
