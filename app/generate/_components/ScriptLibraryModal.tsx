@@ -62,6 +62,7 @@ export interface ScriptDto {
   id: string;
   title: string | null;
   script: string;
+  language?: string;
   created_at: string;
   sentences_count?: number;
   images_count?: number;
@@ -426,6 +427,11 @@ export function ScriptLibraryModal({
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-100 text-purple-700">
                             {script.title || 'Untitled Script'}
                           </span>
+                          {script.language ? (
+                            <span className="text-[11px] text-gray-500">
+                              {script.language}
+                            </span>
+                          ) : null}
                           <span className="text-[11px] text-gray-400">
                             {new Date(script.created_at).toLocaleString()}
                           </span>

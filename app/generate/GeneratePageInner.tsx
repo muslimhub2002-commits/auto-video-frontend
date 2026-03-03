@@ -29,6 +29,11 @@ import type { ScriptReferenceDto } from './_components/ScriptReferencesModal';
 import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { RenderSettingsSection } from './_components/RenderSettingsSection';
 import { GenerateModalsHost } from './_components/GenerateModalsHost';
+import {
+  TranslateScriptModal,
+  type TranslateMethod,
+  type TranslateLoadingAction,
+} from './_components/TranslateScriptModal';
 import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useSentencesEditor } from './_hooks/useSentencesEditor';
 import { useVideoJob } from './_hooks/useVideoJob';
@@ -72,14 +77,104 @@ type BackendSentenceDto = {
   visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
 };
 
+type ScriptDraftDto = {
+  id: string;
+  script: string;
+  language?: string | null;
+  video_url?: string | null;
+  shorts_scripts?: string[] | null;
+  short_scripts?: Array<{
+    id: string;
+    video_url?: string | null;
+    sentences?: BackendSentenceDto[];
+    voice?: { id: string; voice: string } | null;
+  }>;
+  subject?: string | null;
+  subject_content?: string | null;
+  length?: string | null;
+  style?: string | null;
+  technique?: string | null;
+  reference_scripts?: { id: string; title: string | null; script: string }[];
+  voice?: { id: string; voice: string } | null;
+  characters?: ScriptCharacter[];
+  eras?: ScriptEra[];
+  sentences?: BackendSentenceDto[];
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
  'http://localhost:3000';
 
-const SUBSCRIBE_SENTENCE =
-  'Please Subscribe & Help us reach out to more people';
+const CTA_SENTENCES_BY_LANGUAGE: Record<
+  string,
+  { subscribe: string; shorts: string }
+> = {
+  en: {
+    subscribe: 'Please Subscribe & Help us reach out to more people',
+    shorts: 'You can watch the full video from the link in the first comment',
+  },
+  ar: {
+    subscribe: 'يرجى الاشتراك ومساعدتنا في الوصول إلى المزيد من الناس',
+    shorts: 'يمكنك مشاهدة الفيديو الكامل من الرابط في أول تعليق',
+  },
+  es: {
+    subscribe: 'Suscríbete y ayúdanos a llegar a más personas.',
+    shorts: 'Puedes ver el video completo en el enlace del primer comentario.',
+  },
+  fr: {
+    subscribe: 'Abonnez-vous et aidez-nous à toucher plus de personnes.',
+    shorts: 'Vous pouvez regarder la vidéo complète via le lien dans le premier commentaire.',
+  },
+  de: {
+    subscribe: 'Bitte abonnieren Sie und helfen Sie uns, mehr Menschen zu erreichen.',
+    shorts: 'Du kannst das vollständige Video über den Link im ersten Kommentar ansehen.',
+  },
+  it: {
+    subscribe: 'Iscriviti e aiutaci a raggiungere più persone.',
+    shorts: 'Puoi guardare il video completo dal link nel primo commento.',
+  },
+  pt: {
+    subscribe: 'Inscreva-se e ajude-nos a alcançar mais pessoas.',
+    shorts: 'Você pode assistir ao vídeo completo pelo link no primeiro comentário.',
+  },
+  ru: {
+    subscribe: 'Подпишитесь и помогите нам охватить больше людей.',
+    shorts: 'Полное видео можно посмотреть по ссылке в первом комментарии.',
+  },
+  tr: {
+    subscribe: 'Lütfen abone olun ve daha fazla insana ulaşmamıza yardımcı olun.',
+    shorts: 'Videonun tamamını ilk yorumdaki bağlantıdan izleyebilirsiniz.',
+  },
+  hi: {
+    subscribe: 'कृपया सब्सक्राइब करें और हमें अधिक लोगों तक पहुँचने में मदद करें।',
+    shorts: 'पूरा वीडियो पहले कमेंट में दिए गए लिंक से देख सकते हैं।',
+  },
+  ur: {
+    subscribe: 'براہِ کرم سبسکرائب کریں اور ہمیں مزید لوگوں تک پہنچنے میں مدد کریں۔',
+    shorts: 'آپ مکمل ویڈیو پہلے کمنٹ میں دیے گئے لنک سے دیکھ سکتے ہیں۔',
+  },
+  id: {
+    subscribe: 'Silakan berlangganan dan bantu kami menjangkau lebih banyak orang.',
+    shorts: 'Kamu bisa menonton video lengkapnya dari tautan di komentar pertama.',
+  },
+  ja: {
+    subscribe: 'チャンネル登録して、より多くの人に届けるお手伝いをお願いします。',
+    shorts: 'フル動画は最初のコメントのリンクから視聴できます。',
+  },
+  ko: {
+    subscribe: '구독해 주시고 더 많은 사람들에게 닿을 수 있도록 도와주세요.',
+    shorts: '전체 영상은 첫 번째 댓글의 링크에서 시청할 수 있어요.',
+  },
+  'zh-CN': {
+    subscribe: '请订阅并帮助我们触达更多人。',
+    shorts: '你可以通过第一条评论中的链接观看完整视频。',
+  },
+};
 
-const SHORTS_CTA_SENTENCE =
-  'You can watch the full video from the link in the first comment';
+const getSubscribeSentence = (language: string) =>
+  CTA_SENTENCES_BY_LANGUAGE[language]?.subscribe ?? CTA_SENTENCES_BY_LANGUAGE.en.subscribe;
+
+const getShortsCtaSentence = (language: string) =>
+  CTA_SENTENCES_BY_LANGUAGE[language]?.shorts ?? CTA_SENTENCES_BY_LANGUAGE.en.shorts;
 
 const normalizeSentenceForMatch = (value: string) => {
   return String(value ?? '')
@@ -90,13 +185,27 @@ const normalizeSentenceForMatch = (value: string) => {
     .replace(/\s+/g, ' ');
 };
 
-const SUBSCRIBE_SENTENCE_NORM = normalizeSentenceForMatch(SUBSCRIBE_SENTENCE);
-const SHORTS_CTA_SENTENCE_NORM = normalizeSentenceForMatch(SHORTS_CTA_SENTENCE);
+const allSubscribeSentences = Array.from(
+  new Set(Object.values(CTA_SENTENCES_BY_LANGUAGE).map((v) => v.subscribe)),
+);
+const allShortsCtaSentences = Array.from(
+  new Set(Object.values(CTA_SENTENCES_BY_LANGUAGE).map((v) => v.shorts)),
+);
 
-const isSubscribeLikeSentence = (value: string) => {
-  const norm = normalizeSentenceForMatch(value);
-  return norm === SUBSCRIBE_SENTENCE_NORM || norm === SHORTS_CTA_SENTENCE_NORM;
-};
+const subscribeNormSet = new Set(allSubscribeSentences.map(normalizeSentenceForMatch));
+const shortsCtaNormSet = new Set(allShortsCtaSentences.map(normalizeSentenceForMatch));
+const ctaNormSet = new Set(
+  [...subscribeNormSet.values(), ...shortsCtaNormSet.values()].filter(Boolean),
+);
+
+const isSubscribeLikeSentence = (value: string) =>
+  ctaNormSet.has(normalizeSentenceForMatch(value));
+
+const isSubscribeCtaSentence = (value: string) =>
+  subscribeNormSet.has(normalizeSentenceForMatch(value));
+
+const isShortsCtaSentence = (value: string) =>
+  shortsCtaNormSet.has(normalizeSentenceForMatch(value));
 
 // Convert a data URL (e.g. AI-generated base64 image) into a File for upload
 function dataUrlToFile(dataUrl: string, filename: string): File {
@@ -257,8 +366,16 @@ export function GeneratePageInner() {
   const [scriptLength, setScriptLength] = useState('1 minute');
   const [scriptStyle, setScriptStyle] = useState('Conversational');
   const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
+  const [scriptLanguage, setScriptLanguage] = useState('en');
   // Default to Anthropic (Claude) as requested.
   const [scriptModel, setScriptModel] = useState('claude-sonnet-4-5');
+
+  const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
+  const [translateTargetLanguage, setTranslateTargetLanguage] = useState('en');
+  const [translateMethod, setTranslateMethod] = useState<TranslateMethod>('google');
+  const [isTranslatingScript, setIsTranslatingScript] = useState(false);
+  const [translateLoadingAction, setTranslateLoadingAction] =
+    useState<TranslateLoadingAction | null>(null);
 
   // Canonical characters extracted during split.
   const [scriptCharacters, setScriptCharacters] = useState<ScriptCharacter[]>([]);
@@ -585,7 +702,7 @@ export function GeneratePageInner() {
     const now = Date.now();
     return {
       id: `${now}-shorts-cta`,
-      text: SHORTS_CTA_SENTENCE,
+      text: getShortsCtaSentence(scriptLanguage),
       mediaMode: 'frames',
       sceneTab: 'video',
       image: null,
@@ -835,7 +952,7 @@ export function GeneratePageInner() {
 
     const restored: SentenceItem[] = sentencesForRestore
       .map((s, idx) => {
-        const isSubscribe = (s.text || '').trim() === SUBSCRIBE_SENTENCE;
+        const isSubscribe = isSubscribeCtaSentence(s.text || '');
         const hasVideo = !isSubscribe && Boolean(s.video?.video);
         return {
           id: s.id || `${now}-${idx}`,
@@ -856,13 +973,11 @@ export function GeneratePageInner() {
       });
 
     // Ensure subscribe sentence exists at the end (same rule as splitting)
-    const hasSubscribe = restored.some(
-      (s) => (s.text || '').trim() === SUBSCRIBE_SENTENCE,
-    );
+    const hasSubscribe = restored.some((s) => isSubscribeCtaSentence(s.text || ''));
     if (!hasSubscribe) {
       restored.push({
         id: `${now}-subscribe`,
-        text: SUBSCRIBE_SENTENCE,
+        text: getSubscribeSentence(scriptLanguage),
         mediaMode: 'frames',
         sceneTab: 'video',
         image: null,
@@ -1563,19 +1678,22 @@ export function GeneratePageInner() {
         .map((s) => s.text)
         .filter(Boolean);
 
-      const subscribeNorm = normalize(SUBSCRIBE_SENTENCE);
-      const shortsCtaNorm = normalize(SHORTS_CTA_SENTENCE);
+      const subscribeSentence = getSubscribeSentence(scriptLanguage);
+      const shortsCtaSentence = getShortsCtaSentence(scriptLanguage);
+
+      const subscribeNorm = normalize(subscribeSentence);
+      const shortsCtaNorm = normalize(shortsCtaSentence);
 
       // Shorts voice-overs should not include the old subscribe sentence,
       // but SHOULD include the shorts CTA (“You can watch the full video…”).
       let sentencesForVoice = shouldIncludeSubscribeInVoice
         ? sentenceTexts
-        : sentenceTexts.filter((t) => normalize(t) !== subscribeNorm);
+        : sentenceTexts.filter((t) => !isSubscribeCtaSentence(t));
 
       if (!shouldIncludeSubscribeInVoice) {
         const hasShortsCta = sentencesForVoice.some((t) => normalize(t) === shortsCtaNorm);
         if (!hasShortsCta) {
-          sentencesForVoice = [...sentencesForVoice, SHORTS_CTA_SENTENCE];
+          sentencesForVoice = [...sentencesForVoice, shortsCtaSentence];
         }
       }
 
@@ -1591,12 +1709,12 @@ export function GeneratePageInner() {
 
         if (!mergedNorm.includes(targetNorm)) {
           if (sentencesForVoice.length > 0) {
-            sentencesForVoice = [...sentencesForVoice, SUBSCRIBE_SENTENCE];
+            sentencesForVoice = [...sentencesForVoice, subscribeSentence];
             scriptForVoice = mergeSentences(sentencesForVoice);
           } else {
             const base = String(scriptForVoice ?? '').trim();
             const needsPunctuation = base && !/[.!?]$/u.test(base);
-            scriptForVoice = `${base}${needsPunctuation ? '.' : ''} ${SUBSCRIBE_SENTENCE}`.trim();
+            scriptForVoice = `${base}${needsPunctuation ? '.' : ''} ${subscribeSentence}`.trim();
           }
         }
       }
@@ -1885,6 +2003,7 @@ export function GeneratePageInner() {
       });
       form.append('sentences', JSON.stringify(sentencePayload));
       form.append('scriptLength', scriptLength);
+      form.append('language', scriptLanguage);
       if (voiceDuration && voiceDuration > 0) {
         form.append('audioDurationSeconds', String(voiceDuration));
       }
@@ -2012,6 +2131,7 @@ export function GeneratePageInner() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          language: scriptLanguage,
           subject: scriptSubject,
           subjectContent:
             scriptSubject === 'religious (Islam)'
@@ -2113,7 +2233,8 @@ export function GeneratePageInner() {
           .replace(/\s+/g, ' ');
       };
 
-      const targetNorm = normalize(SUBSCRIBE_SENTENCE);
+      const subscribeSentence = getSubscribeSentence(scriptLanguage);
+      const targetNorm = normalize(subscribeSentence);
 
       const processed: Array<{
         text: string;
@@ -2126,11 +2247,11 @@ export function GeneratePageInner() {
         const trimmed = String(raw?.text ?? '').trim();
         if (!trimmed) continue;
         const norm = normalize(trimmed);
-        if (norm === targetNorm) {
+        if (norm === targetNorm || isSubscribeCtaSentence(trimmed)) {
           if (!hasSubscribe) {
             hasSubscribe = true;
             processed.push({
-              text: SUBSCRIBE_SENTENCE,
+              text: subscribeSentence,
               characterKeys: [],
               eraKey: null,
             });
@@ -2148,36 +2269,39 @@ export function GeneratePageInner() {
 
       if (!hasSubscribe) {
         processed.push({
-          text: SUBSCRIBE_SENTENCE,
+          text: subscribeSentence,
           characterKeys: [],
           eraKey: null,
         });
       }
 
       const now = Date.now();
-      const items: SentenceItem[] = processed.map(({ text, characterKeys, eraKey }, idx) => ({
-        id: `${now}-${idx}`,
-        text,
-        characterKeys: characterKeys.length ? Array.from(new Set(characterKeys)) : null,
-        eraKey,
-        forcedEraKey: eraKey,
-        mediaMode: 'single',
-        sceneTab: text === SUBSCRIBE_SENTENCE ? 'video' : 'image',
-        forcedCharacterKeys: Array.from(new Set(characterKeys)),
-        image: null,
-        imageUrl: null,
-        video: text === SUBSCRIBE_SENTENCE ? null : null,
-        videoUrl: text === SUBSCRIBE_SENTENCE ? '/subscribe.mp4' : null,
-        startImage: null,
-        startImageUrl: null,
-        startImagePrompt: null,
-        startSavedImageId: null,
-        endImage: null,
-        endImageUrl: null,
-        endImagePrompt: null,
-        endSavedImageId: null,
-        isSuspense: false,
-      }));
+      const items: SentenceItem[] = processed.map(({ text, characterKeys, eraKey }, idx) => {
+        const subscribeLike = isSubscribeCtaSentence(text);
+        return {
+          id: `${now}-${idx}`,
+          text,
+          characterKeys: characterKeys.length ? Array.from(new Set(characterKeys)) : null,
+          eraKey,
+          forcedEraKey: eraKey,
+          mediaMode: 'single',
+          sceneTab: subscribeLike ? 'video' : 'image',
+          forcedCharacterKeys: Array.from(new Set(characterKeys)),
+          image: null,
+          imageUrl: null,
+          video: subscribeLike ? null : null,
+          videoUrl: subscribeLike ? '/subscribe.mp4' : null,
+          startImage: null,
+          startImageUrl: null,
+          startImagePrompt: null,
+          startSavedImageId: null,
+          endImage: null,
+          endImageUrl: null,
+          endImagePrompt: null,
+          endSavedImageId: null,
+          isSuspense: false,
+        };
+      });
 
       setFullScriptId(null);
       setActiveScriptId(null);
@@ -2452,28 +2576,7 @@ export function GeneratePageInner() {
     });
   };
 
-  const handleSelectScriptFromLibrary = (draft: {
-    id: string;
-    script: string;
-    video_url?: string | null;
-    shorts_scripts?: string[] | null;
-    short_scripts?: Array<{
-      id: string;
-      video_url?: string | null;
-      sentences?: BackendSentenceDto[];
-      voice?: { id: string; voice: string } | null;
-    }>;
-    subject?: string | null;
-    subject_content?: string | null;
-    length?: string | null;
-    style?: string | null;
-    technique?: string | null;
-    reference_scripts?: { id: string; title: string | null; script: string }[];
-    voice?: { id: string; voice: string } | null;
-    characters?: ScriptCharacter[];
-    eras?: ScriptEra[];
-    sentences?: BackendSentenceDto[];
-  }) => {
+  const handleSelectScriptFromLibrary = (draft: ScriptDraftDto) => {
     setFullScriptId(draft.id);
     setActiveScriptId(draft.id);
     setActiveShortTabIndex(null);
@@ -2484,6 +2587,9 @@ export function GeneratePageInner() {
     tabSnapshotsRef.current = {};
 
     setScript(draft.script);
+
+    const loadedLanguage = String(draft.language ?? '').trim() || 'en';
+    setScriptLanguage(loadedLanguage);
 
     const loadedSubject = (draft.subject ?? '').trim() || 'religious (Islam)';
     const loadedSubjectContent = (draft.subject_content ?? '').trim();
@@ -2709,6 +2815,7 @@ export function GeneratePageInner() {
         },
         body: JSON.stringify({
           script,
+          language: scriptLanguage,
           length: scriptLength,
           style: scriptStyle,
           technique: scriptTechnique,
@@ -4308,9 +4415,12 @@ export function GeneratePageInner() {
 
             // Ensure CTA exists and is last.
             const withoutEmpty = items.filter((s) => String(s.text ?? '').trim());
+            const desiredShortsCta = getShortsCtaSentence(scriptLanguage);
             const endsWithCta =
               withoutEmpty.length > 0 &&
-              (withoutEmpty[withoutEmpty.length - 1].text || '').trim() === SHORTS_CTA_SENTENCE;
+              normalizeSentenceForMatch(
+                (withoutEmpty[withoutEmpty.length - 1].text || '').trim(),
+              ) === normalizeSentenceForMatch(desiredShortsCta);
             const finalItems = endsWithCta
               ? withoutEmpty
               : [
@@ -4331,6 +4441,7 @@ export function GeneratePageInner() {
               voice_id: shortVoiceId ?? undefined,
               title: `Short ${i + 1}`,
               video_url: snap?.videoUrl ?? undefined,
+              language: scriptLanguage,
               characters: scriptCharacters.length ? scriptCharacters : undefined,
               eras: scriptEras.length ? scriptEras : undefined,
               sentences: shortSentencesPayload,
@@ -4351,10 +4462,16 @@ export function GeneratePageInner() {
               String(snap?.scriptId ?? shortScriptIds[i] ?? '').trim() || null;
 
             const upsertedShort = existingShortId
-              ? await api.patch(`/scripts/${encodeURIComponent(existingShortId)}`, shortPayload)
-              : await api.post('/scripts', shortPayload);
+              ? await api.patch<{ id: string; sentences?: BackendSentenceDto[] }>(
+                  `/scripts/${encodeURIComponent(existingShortId)}`,
+                  shortPayload,
+                )
+              : await api.post<{ id: string; sentences?: BackendSentenceDto[] }>(
+                  '/scripts',
+                  shortPayload,
+                );
 
-            const id = String((upsertedShort.data as any)?.id ?? '').trim();
+            const id = String(upsertedShort.data?.id ?? '').trim();
             if (!id) {
               showAlert('Failed to save a short draft. Please try again.', { type: 'error' });
               return;
@@ -4363,8 +4480,8 @@ export function GeneratePageInner() {
             upsertedShortIds.push(id);
 
             // Persist any generated sentence videos (best-effort) so video_id is stored in the draft.
-            const shortBackendSentences = Array.isArray((upsertedShort.data as any)?.sentences)
-              ? ((upsertedShort.data as any).sentences as BackendSentenceDto[])
+            const shortBackendSentences = Array.isArray(upsertedShort.data?.sentences)
+              ? upsertedShort.data.sentences
               : [];
             if (shortBackendSentences.length > 0) {
               await persistMissingSentenceVideos({
@@ -4430,6 +4547,7 @@ export function GeneratePageInner() {
         length?: string;
         style?: string | null;
         technique?: string | null;
+        language?: string;
         reference_script_ids?: string[];
         shorts_script_ids?: string[];
       } = {
@@ -4445,6 +4563,7 @@ export function GeneratePageInner() {
         length: scriptLength,
         style: referenceScripts.length > 0 ? null : scriptStyle,
         technique: scriptTechnique,
+        language: scriptLanguage,
         reference_script_ids:
           referenceScripts.length > 0 ? referenceScripts.map((s) => s.id) : undefined,
         shorts_script_ids: shouldSendShorts ? (shortsScriptIdsToLink ?? []) : undefined,
@@ -4553,6 +4672,256 @@ export function GeneratePageInner() {
       showAlert('Failed to save draft. Please try again.', { type: 'error' });
     } finally {
       setIsSavingDraft(false);
+    }
+  };
+
+  const clearVoiceState = () => {
+    try {
+      previewAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+
+    setVoiceOver(null);
+    setVoiceDuration(null);
+    setVoiceError(null);
+    setSavedVoiceId(null);
+    setVoiceLibraryUrl(null);
+    setIsPreviewingVoice(false);
+    setIsGeneratingVoice(false);
+
+    setSelectedVoiceIdByProvider({ google: null, elevenlabs: null });
+  };
+
+  const resetDraftIdentity = () => {
+    setFullScriptId(null);
+    setActiveScriptId(null);
+    setActiveShortTabIndex(null);
+    setShortRanges([]);
+    setShortScriptIds([]);
+    setManualSplitEnabled(false);
+    setShortsValidationError(null);
+    tabSnapshotsRef.current = {};
+    aiSplitCacheRef.current = null;
+    setOriginalScriptSubject(undefined);
+    setOriginalScriptSubjectContent(undefined);
+  };
+
+  const handleOpenTranslateModal = () => {
+    // Shorts translation is intentionally not supported (parent-only).
+    if (activeShortTabIndex !== null) {
+      showAlert('Switch to Full Video tab before translating.', { type: 'warning' });
+      return;
+    }
+
+    setTranslateTargetLanguage(scriptLanguage);
+    setTranslateMethod('google');
+    setTranslateLoadingAction(null);
+    setIsTranslateModalOpen(true);
+  };
+
+  const translateEditorContent = async (): Promise<
+    | { kind: 'sentences'; sentences: string[]; script?: string }
+    | { kind: 'script'; script: string }
+  > => {
+    const targetLanguage = String(translateTargetLanguage ?? '').trim();
+    if (!targetLanguage) {
+      throw new Error('Target language is required');
+    }
+
+    const method = translateMethod;
+    const model = method === 'llm' ? scriptModel : undefined;
+
+    const sourceScript = String(script ?? '').trim();
+
+    const coerceTranslateResponse = (data: unknown): { script?: unknown; sentences?: unknown[] } => {
+      if (data && typeof data === 'object') return data as any;
+      if (typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && typeof parsed === 'object') return parsed as any;
+        } catch {
+          // ignore
+        }
+      }
+      return {};
+    };
+
+    if (sentences.length > 0) {
+      const sentenceTexts = sentences.map((s) => String(s.text ?? ''));
+      // When sentences exist we also ask the API to translate the full script text.
+      // This keeps formatting/newlines closer to the original instead of re-joining sentences.
+      const res = await api.post<{ sentences?: unknown[]; script?: unknown }>('/ai/translate', {
+        targetLanguage,
+        method,
+        model,
+        ...(sourceScript ? { script: sourceScript } : {}),
+        sentences: sentenceTexts,
+      });
+
+      const data = coerceTranslateResponse(res.data);
+
+      const translatedRaw = data?.sentences;
+      const translated = Array.isArray(translatedRaw)
+        ? translatedRaw.map((t) => String(t ?? ''))
+        : null;
+
+      // Be strict about length to preserve sentence-media mapping, but provide a safer error message.
+      if (!translated || translated.length !== sentenceTexts.length) {
+        throw new Error(
+          `Translation failed (sentence count mismatch). Expected ${sentenceTexts.length}, got ${Array.isArray(translatedRaw) ? translatedRaw.length : 0}`,
+        );
+      }
+
+      // Force CTA lines to be exactly the localized CTA for the target language.
+      const subscribeTarget = getSubscribeSentence(targetLanguage);
+      const shortsTarget = getShortsCtaSentence(targetLanguage);
+      const fixed = translated.map((t, idx) => {
+        const original = String(sentences[idx]?.text ?? '');
+        if (isShortsCtaSentence(original)) return shortsTarget;
+        if (isSubscribeCtaSentence(original)) return subscribeTarget;
+        return String(t ?? '');
+      });
+
+      const translatedScript = String(data?.script ?? '').trim();
+      return {
+        kind: 'sentences',
+        sentences: fixed,
+        script: translatedScript || undefined,
+      };
+    }
+
+    if (!sourceScript) {
+      throw new Error('Script is empty');
+    }
+
+    const res = await api.post<{ script?: unknown }>('/ai/translate', {
+      targetLanguage,
+      method,
+      model,
+      script: sourceScript,
+    });
+
+    const data = coerceTranslateResponse(res.data);
+
+    const translated = String(data?.script ?? '').trim();
+    if (!translated) {
+      throw new Error('Translation failed');
+    }
+
+    return { kind: 'script', script: translated };
+  };
+
+  const applyTranslationToEditor = (params: {
+    targetLanguage: string;
+    result:
+      | { kind: 'sentences'; sentences: string[]; script?: string }
+      | { kind: 'script'; script: string };
+  }) => {
+    clearVoiceState();
+    resetDraftIdentity();
+
+    if (params.result.kind === 'sentences') {
+      const translatedSentences = params.result.sentences;
+      setSentences((prev) =>
+        prev.map((s, idx) => ({
+          ...s,
+          text: String(translatedSentences[idx] ?? s.text ?? ''),
+        })),
+      );
+
+      const translatedScript = String(params.result.script ?? '').trim();
+      setScript(
+        translatedScript ||
+          translatedSentences
+            .map((t) => String(t ?? '').trim())
+            .filter(Boolean)
+            .join(' '),
+      );
+    } else {
+      setScript(params.result.script);
+    }
+
+    setScriptLanguage(params.targetLanguage);
+  };
+
+  const handleTranslateOnly = async () => {
+    if (activeShortTabIndex !== null) {
+      showAlert('Switch to Full Video tab before translating.', { type: 'warning' });
+      return;
+    }
+
+    setTranslateLoadingAction('only');
+    setIsTranslatingScript(true);
+    try {
+      const targetLanguage = String(translateTargetLanguage ?? '').trim() || 'en';
+      const result = await translateEditorContent();
+
+      applyTranslationToEditor({ targetLanguage, result });
+      setIsTranslateModalOpen(false);
+      showToast('Translation applied in editor (not saved).', 'success');
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Translate failed', error);
+      showAlert('Failed to translate. Please try again.', { type: 'error' });
+    } finally {
+      setIsTranslatingScript(false);
+      setTranslateLoadingAction(null);
+    }
+  };
+
+  const handleTranslateAndSave = async () => {
+    if (activeShortTabIndex !== null) {
+      showAlert('Switch to Full Video tab before translating.', { type: 'warning' });
+      return;
+    }
+
+    const targetLanguage = String(translateTargetLanguage ?? '').trim();
+    if (!targetLanguage) {
+      showAlert('Please choose a target language.', { type: 'warning' });
+      return;
+    }
+
+    const method = translateMethod;
+    const model = method === 'llm' ? scriptModel : undefined;
+
+    const existingId = String(fullScriptId ?? activeScriptId ?? '').trim() || null;
+
+    setTranslateLoadingAction('save');
+    setIsTranslatingScript(true);
+    try {
+      if (existingId) {
+        const res = await api.post<ScriptDraftDto>(
+          `/scripts/${encodeURIComponent(existingId)}/translate`,
+          {
+            targetLanguage,
+            method,
+            model,
+          },
+        );
+
+        const translatedDraft = res.data;
+        if (!translatedDraft?.id) {
+          showAlert('Failed to save translated draft. Please try again.', { type: 'error' });
+          return;
+        }
+
+        setIsTranslateModalOpen(false);
+        handleSelectScriptFromLibrary(translatedDraft);
+        showToast('Translated draft saved.', 'success');
+        return;
+      }
+
+      // Unsaved source: translate in editor, then save as a new draft (no grouping).
+      const result = await translateEditorContent();
+      applyTranslationToEditor({ targetLanguage, result });
+      setIsTranslateModalOpen(false);
+
+      await new Promise((r) => setTimeout(r, 0));
+      await handleSaveScriptDraft();
+    } finally {
+      setIsTranslatingScript(false);
+      setTranslateLoadingAction(null);
     }
   };
 
@@ -4784,6 +5153,8 @@ export function GeneratePageInner() {
                 <ScriptSection
                   script={script}
                   onScriptChange={setScript}
+                  scriptLanguage={scriptLanguage}
+                  setScriptLanguage={setScriptLanguage}
                   systemPrompt={systemPrompt}
                   onSystemPromptChange={setSystemPrompt}
                   referenceScripts={referenceScripts}
@@ -4817,6 +5188,7 @@ export function GeneratePageInner() {
                   originalScriptSubjectContent={originalScriptSubjectContent}
                   isEnhancingScript={isEnhancingScript}
                   onEnhanceScript={handleEnhanceScript}
+                  onOpenTranslate={handleOpenTranslateModal}
                 />
 
                 <SentencesImagesSection
@@ -5119,6 +5491,23 @@ export function GeneratePageInner() {
         onApplyReferenceScripts={handleApplyReferenceScripts}
         alertState={alertState}
         onCloseAlert={closeAlert}
+      />
+
+      <TranslateScriptModal
+        isOpen={isTranslateModalOpen}
+        onClose={() => {
+          if (isTranslatingScript) return;
+          setIsTranslateModalOpen(false);
+        }}
+        targetLanguage={translateTargetLanguage}
+        onTargetLanguageChange={setTranslateTargetLanguage}
+        method={translateMethod}
+        onMethodChange={setTranslateMethod}
+        llmModel={scriptModel}
+        onTranslateOnly={handleTranslateOnly}
+        onTranslateAndSave={handleTranslateAndSave}
+        isLoading={isTranslatingScript}
+        loadingAction={translateLoadingAction}
       />
 
       {/* Generate All Images Confirmation */}

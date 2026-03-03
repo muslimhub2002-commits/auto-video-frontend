@@ -22,6 +22,8 @@ import { LlmModelSelect } from './LlmModelSelect';
 interface ScriptSectionProps {
   script: string;
   onScriptChange: (value: string) => void;
+  scriptLanguage: string;
+  setScriptLanguage: (value: string) => void;
   systemPrompt: string;
   onSystemPromptChange: (value: string) => void;
   referenceScripts: { id: string; title: string | null; script: string }[];
@@ -55,12 +57,15 @@ interface ScriptSectionProps {
   originalScriptSubjectContent?: string;
   isEnhancingScript: boolean;
   onEnhanceScript: () => void;
+  onOpenTranslate: () => void;
 }
 
 export function ScriptSection(props: ScriptSectionProps) {
   const {
     script,
     onScriptChange,
+    scriptLanguage,
+    setScriptLanguage,
     systemPrompt,
     onSystemPromptChange,
     referenceScripts,
@@ -94,7 +99,29 @@ export function ScriptSection(props: ScriptSectionProps) {
     originalScriptSubjectContent,
     isEnhancingScript,
     onEnhanceScript,
+    onOpenTranslate,
   } = props;
+
+  const languageOptions = useMemo(
+    () => [
+      { code: 'en', label: 'English' },
+      { code: 'ar', label: 'Arabic' },
+      { code: 'es', label: 'Spanish' },
+      { code: 'fr', label: 'French' },
+      { code: 'de', label: 'German' },
+      { code: 'it', label: 'Italian' },
+      { code: 'pt', label: 'Portuguese' },
+      { code: 'ru', label: 'Russian' },
+      { code: 'tr', label: 'Turkish' },
+      { code: 'hi', label: 'Hindi' },
+      { code: 'ur', label: 'Urdu' },
+      { code: 'id', label: 'Indonesian' },
+      { code: 'ja', label: 'Japanese' },
+      { code: 'ko', label: 'Korean' },
+      { code: 'zh-CN', label: 'Chinese (Simplified)' },
+    ],
+    [],
+  );
 
   const SUBJECT_CONTENT_CUSTOM_VALUE = '__custom__';
   const subjectContentPresets = useMemo(
@@ -278,6 +305,20 @@ export function ScriptSection(props: ScriptSectionProps) {
               Script Configuration
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Language */}
+              <Select value={scriptLanguage} onValueChange={setScriptLanguage}>
+                <SelectTrigger label="Language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {languageOptions.map((l) => (
+                    <SelectItem key={l.code} value={l.code}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               {/* Subject */}
               <Select value={scriptSubject} onValueChange={setScriptSubject}>
                 <SelectTrigger label="Subject">
@@ -474,6 +515,17 @@ export function ScriptSection(props: ScriptSectionProps) {
                   Split into Sentences
                 </>
               )}
+            </Button>
+
+            <Button
+              type="button"
+              size="default"
+              onClick={onOpenTranslate}
+              disabled={isRandomScriptLoading || (!script.trim() && !hasSentences)}
+              className="gap-2 bg-linear-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-50"
+            >
+              <Sparkles className="h-4 w-4" />
+              Translate
             </Button>
             <Button
               type="button"
