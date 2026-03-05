@@ -52,6 +52,9 @@ export function ScriptReferencesModal({
   initialSelected,
   onApply,
 }: ScriptReferencesModalProps) {
+  const SCRIPTS_PAGE_SIZE = 10;
+  const TEMPLATE_SCRIPTS_PAGE_SIZE = 10;
+
   const [activeTab, setActiveTab] = useState<'scripts' | 'templates'>('scripts');
 
   const [scripts, setScripts] = useState<ScriptReferenceDto[]>([]);
@@ -59,7 +62,10 @@ export function ScriptReferencesModal({
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [limit, setLimit] = useState(20);
+  const [limit] = useState(SCRIPTS_PAGE_SIZE);
+
+  const [searchTitle, setSearchTitle] = useState('');
+  const [debouncedSearchTitle, setDebouncedSearchTitle] = useState('');
 
   const [templates, setTemplates] = useState<ScriptTemplateDto[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
@@ -79,7 +85,7 @@ export function ScriptReferencesModal({
   const [templateScriptsError, setTemplateScriptsError] = useState<string | null>(null);
   const [templateScriptsPage, setTemplateScriptsPage] = useState(1);
   const [templateScriptsTotal, setTemplateScriptsTotal] = useState(0);
-  const [templateScriptsLimit, setTemplateScriptsLimit] = useState(20);
+  const [templateScriptsLimit] = useState(TEMPLATE_SCRIPTS_PAGE_SIZE);
 
   const [templateSelectedById, setTemplateSelectedById] = useState<Record<string, ScriptReferenceDto>>({});
 
@@ -89,6 +95,8 @@ export function ScriptReferencesModal({
 
   // Keep selection across pages.
   const [selectedById, setSelectedById] = useState<Record<string, ScriptReferenceDto>>({});
+  // Keep a stable display order for pinned (already selected) scripts.
+  const [selectedOrder, setSelectedOrder] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -98,15 +106,36 @@ export function ScriptReferencesModal({
       if (s?.id) initialMap[s.id] = s;
     }
     setSelectedById(initialMap);
+    setSelectedOrder((initialSelected ?? []).map((s) => s.id).filter(Boolean));
 
     setActiveTab('scripts');
     setPage(1);
+    setSearchTitle('');
+    setDebouncedSearchTitle('');
+    setScripts([]);
+    setTotal(0);
+    setError(null);
     fetchScripts(1);
 
     setTemplatesPage(1);
     fetchTemplates(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearchTitle(searchTitle.trim());
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchTitle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (activeTab !== 'scripts') return;
+    setPage(1);
+    fetchScripts(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchTitle]);
 
   const fetchScripts = async (pageToLoad = 1) => {
     setIsLoading(true);
@@ -118,14 +147,28 @@ export function ScriptReferencesModal({
         page: number;
         limit: number;
       }>('/scripts', {
-        params: { page: pageToLoad, limit },
+        params: {
+          page: pageToLoad,
+          limit,
+          ...(debouncedSearchTitle ? { title: debouncedSearchTitle } : {}),
+        },
       });
       const data = response.data;
       const items = data.items || [];
-      setScripts(items);
-      setTotal(data.total ?? 0);
+
+      const query = debouncedSearchTitle.trim().toLowerCase();
+      const filtered = query
+        ? items.filter((s) => String(s.title ?? '').toLowerCase().includes(query))
+        : items;
+
+      const start = (pageToLoad - 1) * limit;
+      const end = start + limit;
+
+      const itemsForPage = filtered.length > limit ? filtered.slice(start, end) : filtered;
+
+      setScripts(itemsForPage);
+      setTotal((data.total ?? filtered.length) || 0);
       setPage(data.page ?? pageToLoad);
-      setLimit(data.limit ?? limit);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Failed to fetch scripts:', err);
@@ -151,10 +194,13 @@ export function ScriptReferencesModal({
       const data = response.data;
       const items = data.items || [];
 
-      setTemplateScripts(items);
-      setTemplateScriptsTotal(data.total ?? 0);
+      const start = (pageToLoad - 1) * templateScriptsLimit;
+      const end = start + templateScriptsLimit;
+      const itemsForPage = items.length > templateScriptsLimit ? items.slice(start, end) : items;
+
+      setTemplateScripts(itemsForPage);
+      setTemplateScriptsTotal((data.total ?? items.length) || 0);
       setTemplateScriptsPage(data.page ?? pageToLoad);
-      setTemplateScriptsLimit(data.limit ?? templateScriptsLimit);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Failed to fetch scripts for template modal:', err);
@@ -194,9 +240,40 @@ export function ScriptReferencesModal({
   };
 
   const selectedCount = Object.keys(selectedById).length;
-  const selectedList = useMemo(() => Object.values(selectedById), [selectedById]);
+  const selectedList = useMemo(() => {
+    const ordered: ScriptReferenceDto[] = [];
+    const seen = new Set<string>();
+
+    for (const id of selectedOrder) {
+      const s = selectedById[id];
+      if (!s) continue;
+      ordered.push(s);
+      seen.add(id);
+    }
+
+    // Include any selections not yet in the order list.
+    for (const s of Object.values(selectedById)) {
+      if (!s?.id) continue;
+      if (seen.has(s.id)) continue;
+      ordered.push(s);
+      seen.add(s.id);
+    }
+
+    return ordered;
+  }, [selectedById, selectedOrder]);
+
+  const scriptsToRender = useMemo(() => {
+    if (activeTab !== 'scripts') return scripts;
+
+    const pinned = page === 1 ? selectedList : [];
+    const pinnedIds = new Set(pinned.map((s) => s.id));
+    const rest = scripts.filter((s) => !pinnedIds.has(s.id));
+
+    return [...pinned, ...rest];
+  }, [activeTab, scripts, selectedList]);
 
   const toggleSelected = (script: ScriptReferenceDto) => {
+    const wasSelected = Boolean(selectedById[script.id]);
     setSelectedById((prev) => {
       const next = { ...prev };
       if (next[script.id]) {
@@ -205,6 +282,15 @@ export function ScriptReferencesModal({
         next[script.id] = script;
       }
       return next;
+    });
+
+    setSelectedOrder((prev) => {
+      const already = prev.includes(script.id);
+      if (wasSelected) return prev.filter((id) => id !== script.id);
+
+      // If it's being newly selected, append to the end of pinned items.
+      if (already) return prev;
+      return [...prev, script.id];
     });
   };
 
@@ -353,7 +439,11 @@ export function ScriptReferencesModal({
             <div className="inline-flex rounded-xl bg-white/80 border border-gray-200 p-1 shadow-sm">
               <button
                 type="button"
-                onClick={() => setActiveTab('scripts')}
+                onClick={() => {
+                  setActiveTab('scripts');
+                  setPage(1);
+                  fetchScripts(1);
+                }}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === 'scripts'
                   ? 'bg-linear-to-r from-purple-600 to-indigo-600 text-white shadow'
                   : 'text-gray-700 hover:bg-gray-50'
@@ -363,7 +453,11 @@ export function ScriptReferencesModal({
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('templates')}
+                onClick={() => {
+                  setActiveTab('templates');
+                  setTemplatesPage(1);
+                  fetchTemplates(1);
+                }}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === 'templates'
                   ? 'bg-linear-to-r from-purple-600 to-indigo-600 text-white shadow'
                   : 'text-gray-700 hover:bg-gray-50'
@@ -382,7 +476,15 @@ export function ScriptReferencesModal({
               >
                 Add Template
               </Button>
-            ) : null}
+            ) : (
+              <input
+                type="text"
+                value={searchTitle}
+                onChange={(e) => setSearchTitle(e.target.value)}
+                placeholder="Search title…"
+                className="w-64 max-w-[55vw] px-3 py-2 rounded-xl border border-gray-200 bg-white/80 text-sm outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 shadow-sm"
+              />
+            )}
           </div>
 
           {activeTab === 'scripts' ? (
@@ -415,7 +517,21 @@ export function ScriptReferencesModal({
                 </div>
               </div>
 
-              {isLoading ? (
+              {error ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <p className="text-sm text-red-600 font-semibold mb-2">{error}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchScripts(page)}
+                    className="gap-2 border-red-200 text-red-700 hover:bg-red-50"
+                  >
+                    <Loader2 className="h-3.5 w-3.5" />
+                    Try Again
+                  </Button>
+                </div>
+              ) : isLoading ? (
                 <div className="animate-in fade-in duration-300">
                   <div className="space-y-3">
                     {Array.from({ length: 5 }).map((_, i) => (
@@ -432,21 +548,7 @@ export function ScriptReferencesModal({
                     ))}
                   </div>
                 </div>
-              ) : error ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <p className="text-sm text-red-600 font-semibold mb-2">{error}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => fetchScripts(page)}
-                    className="gap-2 border-red-200 text-red-700 hover:bg-red-50"
-                  >
-                    <Loader2 className="h-3.5 w-3.5" />
-                    Try Again
-                  </Button>
-                </div>
-              ) : scripts.length === 0 ? (
+              ) : scriptsToRender.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12">
                   <FileText className="h-10 w-10 text-gray-400 mb-3" />
                   <p className="text-sm font-medium text-gray-700 mb-1">
@@ -459,7 +561,7 @@ export function ScriptReferencesModal({
               ) : (
                 <>
                   <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    {scripts.map((script) => {
+                    {scriptsToRender.map((script) => {
                       const isSelected = Boolean(selectedById[script.id]);
                       const sentences = script.sentences || [];
                       const withImages = sentences.filter((s) => s.image).length;
@@ -650,7 +752,7 @@ export function ScriptReferencesModal({
                             <div className="p-3 rounded-xl bg-linear-to-br from-purple-100 to-indigo-100 text-purple-600 shadow-sm group-hover:shadow-md transition-shadow shrink-0">
                               <Sparkles className="h-6 w-6" />
                             </div>
-                            
+
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-3 mb-2">
                                 <h4 className="text-base font-bold text-gray-900">
@@ -661,11 +763,11 @@ export function ScriptReferencesModal({
                                   {count}
                                 </span>
                               </div>
-                              
+
                               <p className="text-xs text-gray-500 mb-3">
                                 Created {t.created_at ? new Date(t.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'recently'}
                               </p>
-                              
+
                               <div className="space-y-2">
                                 <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
                                   Included Scripts:
@@ -727,7 +829,7 @@ export function ScriptReferencesModal({
                               </button>
                             </div>
                           </div>
-                          
+
                           <div className="absolute top-0 right-0 w-32 h-32 bg-linear-to-br from-purple-100/20 to-indigo-100/20 rounded-full blur-3xl -z-10 group-hover:scale-150 transition-transform duration-500" />
                         </div>
                       );
@@ -838,7 +940,7 @@ export function ScriptReferencesModal({
                   <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 text-xs font-bold">2</span>
                   Select Scripts
                 </label>
-                
+
                 <div className="rounded-2xl border-2 border-gray-200 bg-white shadow-lg overflow-hidden">
                   <div className="px-5 py-3 border-b border-gray-200 bg-linear-to-r from-purple-50/50 to-indigo-50/50 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -920,16 +1022,14 @@ export function ScriptReferencesModal({
                                   return next;
                                 });
                               }}
-                              className={`w-full text-left px-5 py-4 hover:bg-purple-50/30 flex items-start gap-4 transition-all duration-200 group ${
-                                isSelected ? 'bg-purple-50/50' : 'bg-white hover:shadow-sm'
-                              }`}
+                              className={`w-full text-left px-5 py-4 hover:bg-purple-50/30 flex items-start gap-4 transition-all duration-200 group ${isSelected ? 'bg-purple-50/50' : 'bg-white hover:shadow-sm'
+                                }`}
                             >
                               <div className="relative mt-0.5 shrink-0">
-                                <div className={`h-6 w-6 rounded-lg border-2 flex items-center justify-center transition-all duration-200 ${
-                                  isSelected
+                                <div className={`h-6 w-6 rounded-lg border-2 flex items-center justify-center transition-all duration-200 ${isSelected
                                     ? 'bg-linear-to-br from-purple-500 to-indigo-600 border-purple-500 shadow-md shadow-purple-200 scale-105'
                                     : 'bg-white border-gray-300 group-hover:border-purple-400 group-hover:shadow-sm'
-                                }`}>
+                                  }`}>
                                   {isSelected ? (
                                     <svg
                                       className="h-4 w-4 text-white animate-in zoom-in-50 duration-200"

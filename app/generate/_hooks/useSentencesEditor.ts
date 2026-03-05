@@ -91,9 +91,15 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
   );
 
   const handleSentenceTextChange = useCallback((index: number, text: string) => {
-    setSentences((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, text } : item)),
-    );
+    setSentences((prev) => {
+      const current = prev[index];
+      if (!current) return prev;
+      if (current.text === text) return prev;
+
+      const next = [...prev];
+      next[index] = { ...current, text };
+      return next;
+    });
   }, []);
 
   const handleMergeSentenceIntoPrevious = useCallback((index: number) => {

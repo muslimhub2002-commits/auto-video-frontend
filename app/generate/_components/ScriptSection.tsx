@@ -428,7 +428,7 @@ export function ScriptSection(props: ScriptSectionProps) {
 
               {/* Custom Subject Content */}
               {scriptSubject === 'religious (Islam)' && subjectContentMode === 'custom' ? (
-                <div className="md:col-span-5">
+                <div className="md:col-span-3">
                   <Label
                     htmlFor="customSubjectContent"
                     className="text-xs font-semibold text-gray-600"

@@ -33,6 +33,20 @@ import type { SentenceItem } from '../../_types/sentences';
 
 type VisualEffectValue = SentenceItem['visualEffect'];
 
+const VISUAL_EFFECT_SELECT_VALUES = [
+  'colorGrading',
+  'animatedLighting',
+  'glassSubtle',
+  'glassReflections',
+  'glassStrong',
+] as const;
+
+type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
+
+function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
+  return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
+}
+
 function VisualEffectPreview({
   effect,
   children,
@@ -44,10 +58,27 @@ function VisualEffectPreview({
 
   const isColorGrading = normalized === 'colorGrading';
   const isAnimatedLighting = normalized === 'animatedLighting';
+  const isGlassSubtle = normalized === 'glassSubtle';
+  const isGlassReflections = normalized === 'glassReflections';
+  const isGlassStrong = normalized === 'glassStrong';
 
-  const mediaFilter = isColorGrading
-    ? 'contrast(1.12) saturate(1.16) brightness(0.98)'
-    : undefined;
+  const glassFilter = isGlassSubtle
+    ? 'contrast(1.06) saturate(1.08) brightness(1.02)'
+    : isGlassReflections
+      ? 'contrast(1.07) saturate(1.10) brightness(1.02)'
+      : isGlassStrong
+        ? 'contrast(1.10) saturate(1.12) brightness(1.03)'
+        : undefined;
+
+  const shouldShowGlassOverlay = isGlassReflections || isGlassStrong;
+  const glassOverlayOpacity = isGlassStrong ? 0.22 : 0.16;
+
+  const mediaFilter = [
+    isColorGrading ? 'contrast(1.12) saturate(1.16) brightness(0.98)' : null,
+    glassFilter ?? null,
+  ]
+    .filter(Boolean)
+    .join(' ') || undefined;
 
   return (
     <div className="relative">
@@ -72,6 +103,18 @@ function VisualEffectPreview({
             mixBlendMode: 'screen',
             background:
               'radial-gradient(circle at 40% 35%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)',
+          }}
+        />
+      ) : null}
+
+      {shouldShowGlassOverlay ? (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            opacity: glassOverlayOpacity,
+            mixBlendMode: 'screen',
+            background:
+              'linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 18%, rgba(255,255,255,0.00) 45%, rgba(255,255,255,0.10) 62%, rgba(255,255,255,0.00) 100%)',
           }}
         />
       ) : null}
@@ -106,11 +149,7 @@ type SentenceEditorCardProps = {
   onForcedEraKeyChange: (next: string | null) => void;
 
   onVisualEffectChange: (
-    value:
-      | 'none'
-      | 'colorGrading'
-      | 'animatedLighting'
-      | null,
+    value: NonNullable<SentenceItem['visualEffect']> | null,
   ) => void;
 
   enhanceError: string | null;
@@ -228,6 +267,53 @@ export function SentenceEditorCard({
   const hasAnyImage = Boolean(item.image || item.imageUrl);
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
 
+  const sentenceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const sentenceDraftTextRef = useRef<string>(String(item.text ?? ''));
+  const sentenceCommitTimeoutRef = useRef<number | null>(null);
+  const sentenceIsComposingRef = useRef(false);
+
+  const commitSentenceText = (next: string) => {
+    onSentenceTextChange(next);
+  };
+
+  const scheduleCommitSentenceText = (next: string) => {
+    sentenceDraftTextRef.current = next;
+
+    if (sentenceCommitTimeoutRef.current !== null) {
+      window.clearTimeout(sentenceCommitTimeoutRef.current);
+    }
+
+    // Debounce to avoid re-rendering the whole scene editor on every keystroke.
+    sentenceCommitTimeoutRef.current = window.setTimeout(() => {
+      sentenceCommitTimeoutRef.current = null;
+      commitSentenceText(sentenceDraftTextRef.current);
+    }, 200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (sentenceCommitTimeoutRef.current !== null) {
+        window.clearTimeout(sentenceCommitTimeoutRef.current);
+        sentenceCommitTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    // Keep the uncontrolled textarea in sync with external changes (AI edits, merges, etc.),
+    // but never clobber the user's active typing.
+    const next = String(item.text ?? '');
+    sentenceDraftTextRef.current = next;
+
+    const el = sentenceTextareaRef.current;
+    if (!el) return;
+
+    const isFocused = typeof document !== 'undefined' && document.activeElement === el;
+    if (isFocused) return;
+    if (el.value === next) return;
+    el.value = next;
+  }, [item.id, item.text]);
+
   const videoGenerationMode =
     (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
       SentenceItem['videoGenerationMode']
@@ -249,7 +335,10 @@ export function SentenceEditorCard({
   const canPickForcedEra = Array.isArray(scriptEras) && scriptEras.length > 0;
   const forcedEraKey = String(item.forcedEraKey ?? '').trim() || null;
 
-  const visualEffectValue = item.visualEffect ?? '__none__';
+  const visualEffectValue =
+    item.visualEffect && item.visualEffect !== 'none'
+      ? item.visualEffect
+      : '__none__';
 
   const visualEffectLabel =
     visualEffectValue === '__none__'
@@ -258,6 +347,12 @@ export function SentenceEditorCard({
         ? 'Color grading'
         : visualEffectValue === 'animatedLighting'
           ? 'Animated lighting'
+          : visualEffectValue === 'glassSubtle'
+            ? 'Glass (subtle)'
+            : visualEffectValue === 'glassReflections'
+              ? 'Glass (reflections)'
+              : visualEffectValue === 'glassStrong'
+                ? 'Glass (strong)'
           : 'None';
 
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
@@ -369,9 +464,12 @@ export function SentenceEditorCard({
                   onVisualEffectChange(null);
                   return;
                 }
-                onVisualEffectChange(
-                  v as 'colorGrading' | 'animatedLighting',
-                );
+                if (isVisualEffectSelectValue(v)) {
+                  onVisualEffectChange(v);
+                  return;
+                }
+
+                onVisualEffectChange(null);
               }}
             >
               <SelectTrigger
@@ -391,6 +489,9 @@ export function SentenceEditorCard({
                 <SelectItem value="__none__">None</SelectItem>
                 <SelectItem value="colorGrading">Color grading</SelectItem>
                 <SelectItem value="animatedLighting">Animated lighting</SelectItem>
+                <SelectItem value="glassSubtle">Glass (subtle)</SelectItem>
+                <SelectItem value="glassReflections">Glass (reflections)</SelectItem>
+                <SelectItem value="glassStrong">Glass (strong)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -417,8 +518,28 @@ export function SentenceEditorCard({
                   <FileText className="h-4 w-4 text-indigo-600" />
                 </div>
                 <textarea
-                  value={item.text}
-                  onChange={(e) => onSentenceTextChange(e.target.value)}
+                  ref={sentenceTextareaRef}
+                  defaultValue={item.text}
+                  onCompositionStart={() => {
+                    sentenceIsComposingRef.current = true;
+                  }}
+                  onCompositionEnd={(e) => {
+                    sentenceIsComposingRef.current = false;
+                    scheduleCommitSentenceText(e.currentTarget.value);
+                  }}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    sentenceDraftTextRef.current = next;
+                    if (sentenceIsComposingRef.current) return;
+                    scheduleCommitSentenceText(next);
+                  }}
+                  onBlur={(e) => {
+                    if (sentenceCommitTimeoutRef.current !== null) {
+                      window.clearTimeout(sentenceCommitTimeoutRef.current);
+                      sentenceCommitTimeoutRef.current = null;
+                    }
+                    commitSentenceText(e.currentTarget.value);
+                  }}
                   className="w-full pl-12 pr-4 py-3 text-sm text-gray-800 leading-relaxed bg-gray-50/50 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none transition-all duration-200 hover:border-gray-300 hover:bg-gray-50"
                   rows={3}
                   placeholder="Enter your sentence text here..."

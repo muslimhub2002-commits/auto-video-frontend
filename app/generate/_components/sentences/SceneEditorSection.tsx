@@ -45,11 +45,7 @@ type SceneEditorSectionProps = {
 
   onSentenceVisualEffectChange: (
     index: number,
-    value:
-      | 'none'
-      | 'colorGrading'
-      | 'animatedLighting'
-      | null,
+    value: NonNullable<SentenceItem['visualEffect']> | null,
   ) => void;
 
   onTransitionToNextChange: (

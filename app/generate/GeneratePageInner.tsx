@@ -2430,6 +2430,17 @@ export function GeneratePageInner() {
   };
 
   const handleResetScriptAndSentences = () => {
+    // Also reset any voice-over + video generation artifacts.
+    stopVoicePreview();
+    removeVoice();
+    setVoiceError(null);
+    setIsPreviewingVoice(false);
+    setIsGeneratingVoice(false);
+    setIsSavingVoice(false);
+    setIsVoiceLibraryOpen(false);
+
+    resetJob();
+
     setFullScriptId(null);
     setActiveScriptId(null);
     setActiveShortTabIndex(null);

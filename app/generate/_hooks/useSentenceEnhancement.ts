@@ -72,6 +72,28 @@ export function useSentenceEnhancement({
     try {
       let nextText = '';
       let started = false;
+      let rafId: number | null = null;
+      let latestTextForUi = '';
+
+      const scheduleUiUpdate = (text: string) => {
+        latestTextForUi = text;
+        if (rafId !== null) return;
+
+        const raf =
+          typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+            ? window.requestAnimationFrame
+            : null;
+
+        if (!raf) {
+          onSentenceTextChange(index, latestTextForUi);
+          return;
+        }
+
+        rafId = raf(() => {
+          rafId = null;
+          onSentenceTextChange(index, latestTextForUi);
+        });
+      };
 
       await streamEnhanceSentence({
         sentence: base,
@@ -82,9 +104,19 @@ export function useSentenceEnhancement({
             onSentenceTextChange(index, '');
           }
           nextText += chunk;
-          onSentenceTextChange(index, nextText);
+          scheduleUiUpdate(nextText);
         },
       });
+
+      // Ensure the final text is committed.
+      if (nextText) {
+        onSentenceTextChange(index, nextText);
+      }
+
+      if (rafId !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
     } catch (error) {
       console.error('Enhance sentence failed', error);
       setEnhanceError('Failed to enhance sentence. Please try again.');
