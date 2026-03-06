@@ -112,12 +112,14 @@ export function GenerateVideoButton({
   const previewObjectUrlRef = useRef<string | null>(null);
   const [previewKind, setPreviewKind] = useState<'selected' | 'file' | null>(null);
   const [isSoundtrackPreviewPlaying, setIsSoundtrackPreviewPlaying] = useState(false);
+  const [isSoundtrackPreviewLoading, setIsSoundtrackPreviewLoading] = useState(false);
 
   const mixAudioContextRef = useRef<AudioContext | null>(null);
   const mixBackgroundGainRef = useRef<GainNode | null>(null);
   const mixBackgroundSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const mixVoiceSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const [isMixPreviewPlaying, setIsMixPreviewPlaying] = useState(false);
+  const [isMixPreviewLoading, setIsMixPreviewLoading] = useState(false);
 
   const [deleteSoundtrackDialogOpen, setDeleteSoundtrackDialogOpen] = useState(false);
   const [pendingDeleteSoundtrack, setPendingDeleteSoundtrack] = useState<BackgroundSoundtrackItem | null>(null);
@@ -171,6 +173,7 @@ export function GenerateVideoButton({
     }
 
     setIsSoundtrackPreviewPlaying(false);
+    setIsSoundtrackPreviewLoading(false);
     setPreviewKind(null);
   };
 
@@ -201,15 +204,19 @@ export function GenerateVideoButton({
     }
 
     setIsMixPreviewPlaying(false);
+    setIsMixPreviewLoading(false);
   };
 
   const playSoundtrackPreview = async (src: string, kind: 'selected' | 'file') => {
+    setIsSoundtrackPreviewLoading(true);
+    setPreviewKind(kind);
     try {
       await stopMixPreview();
       if (!previewAudioRef.current) {
         previewAudioRef.current = new Audio();
         previewAudioRef.current.addEventListener('ended', () => {
           setIsSoundtrackPreviewPlaying(false);
+          setIsSoundtrackPreviewLoading(false);
           setPreviewKind(null);
         });
       }
@@ -219,11 +226,12 @@ export function GenerateVideoButton({
       previewAudioRef.current.src = src;
       await previewAudioRef.current.play();
       setIsSoundtrackPreviewPlaying(true);
-      setPreviewKind(kind);
     } catch {
       onToast?.('Failed to play preview.', 'error');
       setIsSoundtrackPreviewPlaying(false);
       setPreviewKind(null);
+    } finally {
+      setIsSoundtrackPreviewLoading(false);
     }
   };
 
@@ -333,6 +341,8 @@ export function GenerateVideoButton({
       return;
     }
 
+    if (isSoundtrackPreviewLoading) return;
+
     if (!selectedSoundtrackPreviewSrc) {
       onToast?.('Select a soundtrack to preview.', 'warning');
       return;
@@ -347,6 +357,8 @@ export function GenerateVideoButton({
       stopSoundtrackPreview();
       return;
     }
+
+    if (isSoundtrackPreviewLoading) return;
 
     if (!selectedSoundtrack) {
       onToast?.('Choose an MP3 file first.', 'warning');
@@ -376,6 +388,8 @@ export function GenerateVideoButton({
       return;
     }
 
+    if (isMixPreviewLoading) return;
+
     if (!voiceOver) {
       onToast?.('Add a voice-over first to preview the mix.', 'warning');
       return;
@@ -391,6 +405,7 @@ export function GenerateVideoButton({
     await stopMixPreview();
 
     try {
+      setIsMixPreviewLoading(true);
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       mixAudioContextRef.current = ctx;
 
@@ -457,6 +472,8 @@ export function GenerateVideoButton({
       console.error('Mix preview failed', err);
       await stopMixPreview();
       onToast?.('Failed to preview mix. Try again.', 'error');
+    } finally {
+      setIsMixPreviewLoading(false);
     }
   };
 
@@ -580,9 +597,17 @@ export function GenerateVideoButton({
                     variant="outline"
                     className="border-gray-300 hover:bg-gray-50 h-10 shrink-0 w-32"
                     onClick={() => void handlePreviewSelectedSoundtrack()}
-                    disabled={!selectedSoundtrackPreviewSrc && !isSoundtrackPreviewPlaying}
+                    disabled={
+                      isSoundtrackPreviewLoading ||
+                      (!selectedSoundtrackPreviewSrc && !isSoundtrackPreviewPlaying)
+                    }
                   >
-                    {isSoundtrackPreviewPlaying && previewKind === 'selected' ? (
+                    {isSoundtrackPreviewLoading && previewKind !== 'file' ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Loading...
+                      </>
+                    ) : isSoundtrackPreviewPlaying && previewKind === 'selected' ? (
                       <>
                         <Pause className="mr-2 h-4 w-4" />
                         Stop Preview
@@ -677,11 +702,16 @@ export function GenerateVideoButton({
                           : 'border-gray-300 hover:bg-gray-50 h-9 shrink-0'
                       }
                       onClick={() => void handlePreviewMix()}
-                      disabled={soundtrackUploadDisabled}
+                      disabled={soundtrackUploadDisabled || isMixPreviewLoading}
                       aria-disabled={Boolean(mixPreviewBlockedReason)}
                       title={mixPreviewBlockedReason ?? 'Preview voice-over + background together'}
                     >
-                      {isMixPreviewPlaying ? (
+                      {isMixPreviewLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Loading...
+                        </>
+                      ) : isMixPreviewPlaying ? (
                         <>
                           <Pause className="mr-2 h-4 w-4" />
                           Stop
@@ -736,7 +766,7 @@ export function GenerateVideoButton({
                       type="text"
                       value={soundtrackTitle}
                       onChange={(e) => setSoundtrackTitle(e.target.value)}
-                      placeholder="Title (required to add to library)"
+                      placeholder="Title (optional)"
                       className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       disabled={soundtrackUploadDisabled}
                     />
@@ -756,9 +786,14 @@ export function GenerateVideoButton({
                       variant="outline"
                       className="border-gray-300 hover:bg-gray-50"
                       onClick={() => void handlePreviewChosenFile()}
-                      disabled={soundtrackUploadDisabled || !selectedSoundtrack}
+                      disabled={soundtrackUploadDisabled || !selectedSoundtrack || isSoundtrackPreviewLoading}
                     >
-                      {isSoundtrackPreviewPlaying && previewKind === 'file' ? (
+                      {isSoundtrackPreviewLoading && previewKind === 'file' ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Loading...
+                        </>
+                      ) : isSoundtrackPreviewPlaying && previewKind === 'file' ? (
                         <>
                           <Pause className="mr-2 h-4 w-4" />
                           Stop File

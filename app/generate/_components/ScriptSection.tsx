@@ -273,7 +273,7 @@ export function ScriptSection(props: ScriptSectionProps) {
           </div>
 
           {/* System Prompt Override */}
-          <div className="bg-linear-to-br from-white to-gray-50 rounded-lg p-5 border border-gray-200">
+          {/* <div className="bg-linear-to-br from-white to-gray-50 rounded-lg p-5 border border-gray-200">
             <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
               <div className="w-1 h-4 bg-primary rounded-full"></div>
               System Prompt (optional)
@@ -296,7 +296,7 @@ export function ScriptSection(props: ScriptSectionProps) {
                 Reference scripts are selected, so this field is ignored for generation.
               </p>
             ) : null}
-          </div>
+          </div> */}
 
           {/* Script Configuration */}
           <div className="bg-linear-to-br from-gray-50 to-gray-100/50 rounded-lg p-5 border border-gray-200">
