@@ -1,9 +1,25 @@
 'use client';
 
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
+import { computeSentenceSoundEffectTiming } from '../../_utils/soundEffectsTiming';
 import {
   Select,
   SelectContent,
@@ -19,6 +35,7 @@ import {
   Image as ImageIcon,
   Library,
   Music2,
+  GripVertical,
   Upload,
   Play,
   Pause,
@@ -129,6 +146,242 @@ function VisualEffectPreview({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+const getSentenceSoundEffectSortableId = (
+  sfx: NonNullable<SentenceItem['soundEffects']>[number],
+  index: number,
+) => `${String(sfx.id ?? 'sfx')}-${index}`;
+
+type SortableSentenceSoundEffectCardProps = {
+  sfx: NonNullable<SentenceItem['soundEffects']>[number];
+  sfxIndex: number;
+  isLast: boolean;
+  nextTimingMode: 'withPrevious' | 'afterPreviousEnds';
+  singleStatus: 'idle' | 'loading' | 'playing';
+  truncateTitle: (value: string) => string;
+  onTogglePlay: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+  onDelayChange: (value: number) => void;
+  onVolumeChange: (value: number) => void;
+  onNextTimingModeChange: (value: 'withPrevious' | 'afterPreviousEnds') => void;
+};
+
+function SortableSentenceSoundEffectCard({
+  sfx,
+  sfxIndex,
+  isLast,
+  nextTimingMode,
+  singleStatus,
+  truncateTitle,
+  onTogglePlay,
+  onEdit,
+  onRemove,
+  onDelayChange,
+  onVolumeChange,
+  onNextTimingModeChange,
+}: SortableSentenceSoundEffectCardProps) {
+  const sortableId = getSentenceSoundEffectSortableId(sfx, sfxIndex);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: sortableId,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={isDragging ? 'relative z-20' : undefined}
+    >
+      <div
+        className={
+          isDragging
+            ? 'rounded-xl border border-indigo-300 bg-white p-3 shadow-xl'
+            : 'rounded-xl border border-gray-200 bg-gray-50/50 p-3'
+        }
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <button
+              type="button"
+              className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:bg-gray-50"
+              aria-label="Drag sound effect"
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical className="h-4 w-4" />
+            </button>
+
+            <div className="min-w-0">
+              <p
+                className="truncate text-sm font-bold text-gray-900"
+                title={String(sfx.title ?? '').trim()}
+              >
+                {truncateTitle(String(sfx.title ?? ''))}
+              </p>
+              <p className="truncate text-xs text-gray-500" title={sfx.url}>
+                {sfx.url}
+              </p>
+              {typeof sfx.durationSeconds === 'number' && Number.isFinite(sfx.durationSeconds) ? (
+                <p className="mt-1 text-[11px] font-medium text-indigo-600">
+                  Duration {sfx.durationSeconds.toFixed(2)}s
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onTogglePlay}
+              className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
+              title="Preview this sound effect"
+            >
+              {singleStatus === 'loading' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : singleStatus === 'playing' ? (
+                <Pause className="h-4 w-4" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              <span className="text-xs font-semibold">
+                {singleStatus === 'loading'
+                  ? 'Loading...'
+                  : singleStatus === 'playing'
+                    ? 'Stop'
+                    : 'Play'}
+              </span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onEdit}
+              className="border-gray-200 text-gray-700 hover:bg-white"
+              title="Edit name & volume"
+            >
+              <Pencil className="h-4 w-4" />
+              <span className="text-xs font-semibold">Edit</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onRemove}
+              className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
+              title="Remove"
+            >
+              <X className="h-4 w-4" />
+              <span className="text-xs font-semibold">Remove</span>
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+            <div className="flex h-9 items-start gap-2">
+              <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
+                <Timer className="h-4 w-4 text-indigo-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-gray-900">Start offset</p>
+                <p className="text-[11px] leading-tight text-gray-500">
+                  Seconds after this group starts
+                </p>
+              </div>
+            </div>
+
+            <div className="relative mt-2">
+              <Input
+                type="number"
+                min={0}
+                step={0.1}
+                value={String(Number(sfx.delaySeconds ?? 0))}
+                onChange={(e) => onDelayChange(Math.max(0, Number(e.target.value) || 0))}
+                className="h-9 pr-10"
+                placeholder="0.0"
+                title="Start offset in seconds"
+              />
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                s
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+            <div className="flex h-9 items-start gap-2">
+              <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
+                <Volume2 className="h-4 w-4 text-indigo-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-gray-900">Volume</p>
+                <p className="text-[11px] leading-tight text-gray-500">
+                  Relative loudness
+                </p>
+              </div>
+            </div>
+
+            <div className="relative mt-2">
+              <Input
+                type="number"
+                min={0}
+                max={300}
+                step={1}
+                value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
+                onChange={(e) => onVolumeChange(Math.max(0, Math.min(300, Number(e.target.value) || 0)))}
+                className="h-9 pr-10"
+                placeholder="100"
+                title="Volume percent (100 = original volume)"
+              />
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                %
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isLast ? null : (
+        <div className="flex items-center justify-center py-2">
+          <div className="inline-flex items-center gap-1 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-1 shadow-sm">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onNextTimingModeChange('withPrevious')}
+              className={
+                nextTimingMode === 'withPrevious'
+                  ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
+                  : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
+              }
+            >
+              Play together
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onNextTimingModeChange('afterPreviousEnds')}
+              className={
+                nextTimingMode === 'afterPreviousEnds'
+                  ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
+                  : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
+              }
+            >
+              Play Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -293,6 +546,31 @@ export function SentenceEditorCard({
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
 
   const soundEffects = Array.isArray(item.soundEffects) ? item.soundEffects : [];
+  const soundEffectSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+  );
+
+  const normalizeSoundEffects = (
+    next: NonNullable<SentenceItem['soundEffects']>,
+  ): NonNullable<SentenceItem['soundEffects']> => {
+    return (Array.isArray(next) ? next : []).map((effect, index) => ({
+      ...effect,
+      timingMode:
+        index === 0
+          ? 'withPrevious'
+          : effect?.timingMode === 'afterPreviousEnds'
+            ? 'afterPreviousEnds'
+            : 'withPrevious',
+    }));
+  };
+
+  const commitSoundEffects = (
+    next: NonNullable<SentenceItem['soundEffects']>,
+  ) => {
+    onSoundEffectsChange(normalizeSoundEffects(next));
+  };
 
   const [mixStatus, setMixStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [singleStatusByIndex, setSingleStatusByIndex] = useState<
@@ -384,24 +662,23 @@ export function SentenceEditorCard({
     // Stop any single first.
     stopAllScheduledAudio();
 
-    const shouldShowLoading = soundEffects.some((sfx) => {
+    const timedSoundEffects = computeSentenceSoundEffectTiming(soundEffects);
+    const shouldShowLoading = timedSoundEffects.some((sfx) => {
       const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
       return !soundEffectsEverStartedRef.current.has(key);
     });
     setMixStatus(shouldShowLoading ? 'loading' : 'playing');
 
-    let started = 0;
     let ended = 0;
-    const total = soundEffects.length;
+    const total = timedSoundEffects.length;
 
-    for (const sfx of soundEffects) {
+    for (const sfx of timedSoundEffects) {
       const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
       scheduleAudio({
         url: sfx.url,
-        delaySeconds: sfx.delaySeconds,
+        delaySeconds: sfx.absoluteDelaySeconds,
         volumePercent: sfx.volumePercent,
         onPlaying: () => {
-          started += 1;
           soundEffectsEverStartedRef.current.add(key);
           setMixStatus('playing');
         },
@@ -507,6 +784,21 @@ export function SentenceEditorCard({
 
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
   const [isForcedEraOpen, setIsForcedEraOpen] = useState(false);
+
+  const handleSoundEffectsDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = soundEffects.findIndex(
+      (sfx, index) => getSentenceSoundEffectSortableId(sfx, index) === active.id,
+    );
+    const newIndex = soundEffects.findIndex(
+      (sfx, index) => getSentenceSoundEffectSortableId(sfx, index) === over.id,
+    );
+
+    if (oldIndex < 0 || newIndex < 0) return;
+    commitSoundEffects(arrayMove(soundEffects, oldIndex, newIndex));
+  };
 
   const forcedCount = Array.isArray(item.forcedCharacterKeys)
     ? item.forcedCharacterKeys.length
@@ -1050,7 +1342,7 @@ export function SentenceEditorCard({
                       );
 
                       // Optimistically update the sentence first.
-                      onSoundEffectsChange(
+                      commitSoundEffects(
                         soundEffects.map((it, i) =>
                           i === idx
                             ? {
@@ -1138,7 +1430,7 @@ export function SentenceEditorCard({
                       variant="outline"
                       onClick={() => {
                         stopAllScheduledAudio();
-                        onSoundEffectsChange([]);
+                        commitSoundEffects([]);
                       }}
                       disabled={soundEffects.length === 0}
                       className="gap-2 h-9 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-semibold"
@@ -1155,165 +1447,63 @@ export function SentenceEditorCard({
                     </p>
                   ) : (
                     <div className="mt-4 space-y-2">
-                      {soundEffects.map((sfx, sfxIndex) => (
-                        <div
-                          key={`${sfx.id}-${sfxIndex}`}
-                          className="rounded-xl border border-gray-200 bg-gray-50/50 p-3"
+                      <DndContext
+                        sensors={soundEffectSensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleSoundEffectsDragEnd}
+                      >
+                        <SortableContext
+                          items={soundEffects.map((sfx, sfxIndex) => getSentenceSoundEffectSortableId(sfx, sfxIndex))}
+                          strategy={verticalListSortingStrategy}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p
-                                className="text-sm font-bold text-gray-900 truncate"
-                                title={String(sfx.title ?? '').trim()}
-                              >
-                                {truncateSoundEffectTitle(String(sfx.title ?? ''))}
-                              </p>
-                              <p className="text-xs text-gray-500 truncate" title={sfx.url}>
-                                {sfx.url}
-                              </p>
-                            </div>
-
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  const status = singleStatusByIndex[sfxIndex] ?? 'idle';
-                                  if (status === 'loading' || status === 'playing') {
-                                    stopAllScheduledAudio();
-                                    return;
-                                  }
-                                  playSingle(sfxIndex);
-                                }}
-                                className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
-                                title="Preview this sound effect"
-                              >
-                                {singleStatusByIndex[sfxIndex] === 'loading' ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : singleStatusByIndex[sfxIndex] === 'playing' ? (
-                                  <Pause className="h-4 w-4" />
-                                ) : (
-                                  <Play className="h-4 w-4" />
-                                )}
-                                <span className="text-xs font-semibold">
-                                  {singleStatusByIndex[sfxIndex] === 'loading'
-                                    ? 'Loading...'
-                                    : singleStatusByIndex[sfxIndex] === 'playing'
-                                      ? 'Stop'
-                                      : 'Play'}
-                                </span>
-                              </Button>
-
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setEditingSoundEffectIndex(sfxIndex)}
-                                className=" border-gray-200 text-gray-700 hover:bg-white"
-                                title="Edit name & volume"
-                              >
-                                <Pencil className="h-4 w-4" />
-                                <span className="text-xs font-semibold">Edit</span>
-                              </Button>
-
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  const next = soundEffects.filter((_, i) => i !== sfxIndex);
-                                  onSoundEffectsChange(next);
-                                }}
-                                className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
-                                title="Remove"
-                              >
-                                <X className="h-4 w-4" />
-                                <span className="text-xs font-semibold">Remove</span>
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
-                              <div className="flex items-start gap-2 h-9">
-                                <div className="mt-0.5 p-2 bg-indigo-50 rounded-xl">
-                                  <Timer className="h-4 w-4 text-indigo-600" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-xs font-bold text-gray-900">Start offset</p>
-                                  <p className="text-[11px] text-gray-500 leading-tight">
-                                    Seconds after sentence starts
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="mt-2 relative">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={0.1}
-                                  value={String(Number(sfx.delaySeconds ?? 0))}
-                                  onChange={(e) => {
-                                    const raw = e.target.value;
-                                    const delaySeconds = Math.max(0, Number(raw) || 0);
-                                    const next = soundEffects.map((it, i) =>
-                                      i === sfxIndex ? { ...it, delaySeconds } : it,
-                                    );
-                                    onSoundEffectsChange(next);
-                                  }}
-                                  className="h-9 pr-10"
-                                  placeholder="0.0"
-                                  title="Start offset in seconds (relative to the sentence start)"
-                                />
-                                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
-                                  s
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
-                              <div className="flex items-start gap-2 h-9">
-                                <div className="mt-0.5 p-2 bg-indigo-50 rounded-xl">
-                                  <Volume2 className="h-4 w-4 text-indigo-600" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-xs font-bold text-gray-900">Volume</p>
-                                  <p className="text-[11px] text-gray-500 leading-tight">
-                                    Relative loudness
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="mt-2 relative">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  max={300}
-                                  step={1}
-                                  value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
-                                  onChange={(e) => {
-                                    const raw = e.target.value;
-                                    const volumePercent = Math.max(0, Math.min(300, Number(raw) || 0));
-                                    const next = soundEffects.map((it, i) =>
-                                      i === sfxIndex ? { ...it, volumePercent } : it,
-                                    );
-                                    onSoundEffectsChange(next);
-                                  }}
-                                  className="h-9 pr-10"
-                                  placeholder="100"
-                                  title="Volume percent (100 = original volume)"
-                                />
-                                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
-                                  %
-                                </div>
-                              </div>
-                            </div>
-
-
-                          </div>
-                        </div>
-                      ))}
+                          {soundEffects.map((sfx, sfxIndex) => (
+                            <SortableSentenceSoundEffectCard
+                              key={getSentenceSoundEffectSortableId(sfx, sfxIndex)}
+                              sfx={sfx}
+                              sfxIndex={sfxIndex}
+                              isLast={sfxIndex === soundEffects.length - 1}
+                              nextTimingMode={
+                                soundEffects[sfxIndex + 1]?.timingMode === 'afterPreviousEnds'
+                                  ? 'afterPreviousEnds'
+                                  : 'withPrevious'
+                              }
+                              singleStatus={singleStatusByIndex[sfxIndex] ?? 'idle'}
+                              truncateTitle={truncateSoundEffectTitle}
+                              onTogglePlay={() => {
+                                const status = singleStatusByIndex[sfxIndex] ?? 'idle';
+                                if (status === 'loading' || status === 'playing') {
+                                  stopAllScheduledAudio();
+                                  return;
+                                }
+                                playSingle(sfxIndex);
+                              }}
+                              onEdit={() => setEditingSoundEffectIndex(sfxIndex)}
+                              onRemove={() => {
+                                const next = soundEffects.filter((_, i) => i !== sfxIndex);
+                                commitSoundEffects(next);
+                              }}
+                              onDelayChange={(delaySeconds) => {
+                                const next = soundEffects.map((it, i) =>
+                                  i === sfxIndex ? { ...it, delaySeconds } : it,
+                                );
+                                commitSoundEffects(next);
+                              }}
+                              onVolumeChange={(volumePercent) => {
+                                const next = soundEffects.map((it, i) =>
+                                  i === sfxIndex ? { ...it, volumePercent } : it,
+                                );
+                                commitSoundEffects(next);
+                              }}
+                              onNextTimingModeChange={(timingMode) => {
+                                const next = soundEffects.map((it, i) =>
+                                  i === sfxIndex + 1 ? { ...it, timingMode } : it,
+                                );
+                                commitSoundEffects(next);
+                              }}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
                     </div>
                   )}
                 </div>

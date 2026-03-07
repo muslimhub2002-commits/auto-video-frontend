@@ -14,6 +14,7 @@ export type SoundEffectDto = {
   name?: string;
   url: string;
   volume_percent?: number;
+  duration_seconds?: number | null;
   is_merged?: boolean;
   created_at?: string;
 };

@@ -10,6 +10,8 @@ export type SentenceItem = {
     url: string;
     delaySeconds: number;
     volumePercent: number;
+    timingMode?: 'withPrevious' | 'afterPreviousEnds';
+    durationSeconds?: number | null;
   }>;
 
   transitionSoundEffects?: Array<{

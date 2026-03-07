@@ -325,7 +325,7 @@ export function SceneEditorSection({
               ) : (
                 <>
                   <Sparkles className="h-4 w-4" />
-                  <span className="text-sm font-semibold">Generate All</span>
+                  <span className="text-sm font-semibold">Generate All Images</span>
                 </>
               )}
             </Button>

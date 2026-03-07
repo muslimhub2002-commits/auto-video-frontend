@@ -30,6 +30,7 @@ import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { RenderSettingsSection } from './_components/RenderSettingsSection';
 import { GenerateModalsHost } from './_components/GenerateModalsHost';
 import type { SoundEffectDto } from './_components/SoundEffectsLibraryModal';
+import { computeSentenceSoundEffectTiming } from './_utils/soundEffectsTiming';
 import {
   TranslateScriptModal,
   type TranslateMethod,
@@ -76,11 +77,13 @@ type BackendSentenceDto = {
     index: number;
     delay_seconds: number;
     volume_percent: number | null;
+    timing_mode?: 'with_previous' | 'after_previous_ends' | null;
     sound_effect: {
       id: string;
       title: string;
       url: string;
       volume_percent?: number;
+      duration_seconds?: number | null;
       is_merged?: boolean;
     };
   }>;
@@ -970,11 +973,11 @@ export function GeneratePageInner() {
       const trimmed = text.trim();
 
       const soundEffects = Array.isArray(s.soundEffects)
-        ? s.soundEffects
+        ? computeSentenceSoundEffectTiming(s.soundEffects)
             .filter((e) => Boolean(e?.url))
             .map((e) => ({
               src: String(e.url).trim(),
-              delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+              delaySeconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
               volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
             }))
         : [];
@@ -2363,73 +2366,7 @@ export function GeneratePageInner() {
         );
       }
 
-      const sentencePayload = sentences.map((s) => {
-        const text = String(s.text ?? '');
-        const trimmed = text.trim();
-
-        const soundEffects = Array.isArray(s.soundEffects)
-          ? s.soundEffects
-              .filter((e) => Boolean(e?.url))
-              .map((e) => ({
-                src: String(e.url).trim(),
-                delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
-                volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
-              }))
-          : [];
-
-        const transitionSoundEffects = Array.isArray(s.transitionSoundEffects)
-          ? s.transitionSoundEffects
-              .filter((e) => Boolean(e?.url))
-              .map((e) => ({
-                src: String(e.url).trim(),
-                delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
-                volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
-              }))
-          : [];
-
-        const soundEffectsPatch = soundEffects.length ? { soundEffects } : {};
-        const transitionSoundEffectsPatch = transitionSoundEffects.length
-          ? { transitionSoundEffects }
-          : {};
-
-        const transitionToNext = s.transitionToNext ?? null;
-        if (isSubscribeLikeSentence(trimmed)) {
-          return {
-            text,
-            isSuspense: false,
-            mediaType: 'video' as const,
-            videoUrl: '/subscribe.mp4',
-            ...(transitionToNext ? { transitionToNext } : {}),
-            ...soundEffectsPatch,
-            ...transitionSoundEffectsPatch,
-          };
-        }
-
-        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
-        if (tab === 'video') {
-          return {
-            text,
-            isSuspense: Boolean(s.isSuspense),
-            mediaType: 'video' as const,
-            videoUrl: String(s.videoUrl ?? '').trim(),
-            ...(transitionToNext ? { transitionToNext } : {}),
-            ...soundEffectsPatch,
-            ...transitionSoundEffectsPatch,
-          };
-        }
-
-        const visualEffect = s.visualEffect ?? null;
-
-        return {
-          text,
-          isSuspense: Boolean(s.isSuspense),
-          mediaType: 'image' as const,
-          ...(transitionToNext ? { transitionToNext } : {}),
-          ...(visualEffect ? { visualEffect } : {}),
-          ...soundEffectsPatch,
-          ...transitionSoundEffectsPatch,
-        };
-      });
+      const sentencePayload = buildRenderSentencePayload(sentences);
       form.append('sentences', JSON.stringify(sentencePayload));
       form.append('scriptLength', scriptLength);
       form.append('language', scriptLanguage);
@@ -2939,6 +2876,16 @@ export function GeneratePageInner() {
               0,
               Math.min(300, Number(resolvedVolumePercent ?? 100) || 100),
             ),
+            timingMode: (
+              row.timing_mode === 'after_previous_ends'
+                ? 'afterPreviousEnds'
+                : 'withPrevious'
+            ) as 'withPrevious' | 'afterPreviousEnds',
+            durationSeconds:
+              typeof lib?.duration_seconds === 'number' &&
+              Number.isFinite(lib.duration_seconds)
+                ? Math.max(0, lib.duration_seconds)
+                : null,
           };
         });
 
@@ -4445,6 +4392,11 @@ export function GeneratePageInner() {
           url: it.url,
           delaySeconds: 0,
           volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
+          timingMode: 'withPrevious' as const,
+          durationSeconds:
+            typeof it.duration_seconds === 'number' && Number.isFinite(it.duration_seconds)
+              ? Math.max(0, it.duration_seconds)
+              : null,
         }));
 
         return {
@@ -4475,6 +4427,7 @@ export function GeneratePageInner() {
         name?: string;
         url: string;
         volume_percent?: number;
+        duration_seconds?: number | null;
       }> = [];
 
       if (list.length === 1) {
@@ -4491,6 +4444,7 @@ export function GeneratePageInner() {
           name?: string;
           url: string;
           volume_percent?: number;
+          duration_seconds?: number | null;
         }>('/sound-effects', form, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
@@ -4509,6 +4463,7 @@ export function GeneratePageInner() {
             name?: string;
             url: string;
             volume_percent?: number;
+            duration_seconds?: number | null;
           }>;
         }>('/sound-effects/batch', form, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -4540,6 +4495,12 @@ export function GeneratePageInner() {
                     0,
                     Math.min(300, Number(created.volume_percent ?? 100) || 100),
                   ),
+                  timingMode: 'withPrevious' as const,
+                  durationSeconds:
+                    typeof created.duration_seconds === 'number' &&
+                    Number.isFinite(created.duration_seconds)
+                      ? Math.max(0, created.duration_seconds)
+                      : null,
                 };
               }),
             ],
@@ -4577,16 +4538,18 @@ export function GeneratePageInner() {
 
     try {
       const title = `Sentence ${index + 1} SFX mix`;
+      const timedEffects = computeSentenceSoundEffectTiming(effects);
       const res = await api.post<{
         id: string;
         title: string;
         url: string;
         volume_percent?: number;
+        duration_seconds?: number | null;
       }>('/sound-effects/merge', {
         title,
-        items: effects.map((e) => ({
+        items: timedEffects.map((e) => ({
           sound_effect_id: e.id,
-          delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+          delay_seconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
           volume_percent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
         })),
       });
@@ -4608,6 +4571,12 @@ export function GeneratePageInner() {
                     0,
                     Math.min(300, Number(merged.volume_percent ?? 100) || 100),
                   ),
+                  timingMode: 'withPrevious',
+                  durationSeconds:
+                    typeof merged.duration_seconds === 'number' &&
+                    Number.isFinite(merged.duration_seconds)
+                      ? Math.max(0, merged.duration_seconds)
+                      : null,
                 },
               ],
             }
@@ -4968,9 +4937,9 @@ export function GeneratePageInner() {
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
           sound_effects?: Array<{
             sound_effect_id: string;
-            index: number;
             delay_seconds: number;
             volume_percent: number;
+            timing_mode: 'with_previous' | 'after_previous_ends';
           }>;
           transition_sound_effects?: Array<{
             sound_effect_id: string;
@@ -5039,14 +5008,17 @@ export function GeneratePageInner() {
             sound_effects: Array.isArray(s.soundEffects)
               ? s.soundEffects
                   .filter((e) => Boolean(e?.id))
-                  .map((e, idx) => ({
+                  .map((e) => ({
                     sound_effect_id: String(e.id),
-                    index: idx,
                     delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
                     volume_percent: Math.max(
                       0,
                       Math.min(300, Number(e.volumePercent ?? 100) || 100),
                     ),
+                    timing_mode:
+                      e.timingMode === 'afterPreviousEnds'
+                        ? 'after_previous_ends'
+                        : 'with_previous',
                   }))
               : undefined,
             transition_sound_effects: Array.isArray(s.transitionSoundEffects)
