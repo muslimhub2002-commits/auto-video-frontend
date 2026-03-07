@@ -22,14 +22,28 @@ type SoundEffectsLibraryModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onApply: (items: SoundEffectDto[]) => void;
+  fetchPath?: string;
+  pageSize?: number;
+  title?: string;
+  subtitle?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  applyLabel?: string;
 };
 
 export function SoundEffectsLibraryModal({
   isOpen,
   onClose,
   onApply,
+  fetchPath = '/sound-effects',
+  pageSize = 20,
+  title = 'Sound Effects Library',
+  subtitle = 'Select one or more sound effects to add',
+  emptyTitle = 'No saved sound effects yet',
+  emptyDescription = 'Upload sound effects from a sentence to build your library.',
+  applyLabel = 'Add Selected',
 }: SoundEffectsLibraryModalProps) {
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = pageSize;
   const FILTER_DEBOUNCE_MS = 300;
 
   const [items, setItems] = useState<SoundEffectDto[]>([]);
@@ -99,7 +113,7 @@ export function SoundEffectsLibraryModal({
         total: number;
         page: number;
         limit: number;
-      }>('/sound-effects', {
+      }>(fetchPath, {
         params: { page: pageToLoad, limit: PAGE_SIZE, q: String(query ?? '').trim() || undefined },
       });
 
@@ -229,10 +243,10 @@ export function SoundEffectsLibraryModal({
               </div>
               <div>
                 <h2 className="text-2xl font-bold bg-linear-to-r from-gray-900 via-purple-900 to-indigo-900 bg-clip-text text-transparent">
-                  Sound Effects Library
+                  {title}
                 </h2>
                 <p className="text-sm text-gray-600 mt-0.5">
-                  Select one or more sound effects to add
+                  {subtitle}
                 </p>
               </div>
             </div>
@@ -289,9 +303,9 @@ export function SoundEffectsLibraryModal({
               <div className="p-6 bg-linear-to-br from-gray-50 to-indigo-50 rounded-3xl shadow-xl relative border border-gray-200">
                 <Music2 className="h-12 w-12 text-gray-400" />
               </div>
-              <p className="text-base text-gray-700 font-semibold mb-2 mt-6">No saved sound effects yet</p>
+              <p className="text-base text-gray-700 font-semibold mb-2 mt-6">{emptyTitle}</p>
               <p className="text-sm text-gray-500 text-center max-w-xs">
-                Upload sound effects from a sentence to build your library.
+                {emptyDescription}
               </p>
             </div>
           ) : (
@@ -439,7 +453,7 @@ export function SoundEffectsLibraryModal({
                 disabled={selectedCount === 0}
                 className="gap-2 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md"
               >
-                Add Selected
+                {applyLabel}
               </Button>
             </div>
           </div>

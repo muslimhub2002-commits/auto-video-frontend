@@ -157,6 +157,7 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         sceneTab: 'image',
         mediaMode: 'single',
         soundEffects: [],
+        transitionSoundEffects: [],
         characterKeys: null,
         eraKey: null,
         forcedEraKey: null,

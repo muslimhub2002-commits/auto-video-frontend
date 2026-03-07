@@ -35,8 +35,10 @@ import { ImagePreviewOverlay } from './sentences/ImagePreviewOverlay';
 import { EnhanceWithPromptModal } from './sentences/EnhanceWithPromptModal';
 import { EnhanceImagePromptModal } from './sentences/EnhanceImagePromptModal';
 import { AddSuspenseSceneModal } from './sentences/AddSuspenseSceneModal';
+import { GenerateTestVideoModal } from './sentences/GenerateTestVideoModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
 import { SceneEditorSection } from './sentences/SceneEditorSection';
+import type { TestVideoVoiceMode } from './sentences/test-video.types';
 
 type ScriptCharacter = {
   key: string;
@@ -106,6 +108,7 @@ type SentencesImagesSectionProps = {
       | 'chromaLeak'
       | null,
   ) => void;
+  onOpenTransitionSoundEditor: (index: number) => void;
   imagePromptModel: string;
   onImagePromptModelChange: (value: string) => void;
   imageModel: string;
@@ -169,6 +172,16 @@ type SentencesImagesSectionProps = {
   onMergeSentenceIntoNext: (index: number) => void;
   onDeleteSentence: (index: number) => void;
   onAddSuspenseScene: (sourceIndex: number) => void;
+  onGenerateTestVideo: (params: {
+    selectedIndices: number[];
+    voiceMode: TestVideoVoiceMode;
+    uploadedVoiceOver: File | null;
+  }) => void | Promise<void>;
+  canUseCurrentTestVoiceSettings: boolean;
+  testVideoJobStatus: string | null;
+  testVideoJobError: string | null;
+  testVideoUrl: string | null;
+  onCloseTestVideoModal: () => void;
   scriptStyle?: string | null;
   scriptTechnique?: string | null;
   scriptModel?: string | null;
@@ -204,6 +217,7 @@ export function SentencesImagesSection({
   onSentenceForcedEraKeyChange,
   onSentenceVisualEffectChange,
   onTransitionToNextChange,
+  onOpenTransitionSoundEditor,
   imagePromptModel,
   onImagePromptModelChange,
   imageModel,
@@ -246,6 +260,12 @@ export function SentencesImagesSection({
   onMergeSentenceIntoNext,
   onDeleteSentence,
   onAddSuspenseScene,
+  onGenerateTestVideo,
+  canUseCurrentTestVoiceSettings,
+  testVideoJobStatus,
+  testVideoJobError,
+  testVideoUrl,
+  onCloseTestVideoModal,
   apiUrl,
 }: SentencesImagesSectionProps) {
   const API_URL = apiUrl || 'http://localhost:3000';
@@ -294,6 +314,7 @@ export function SentencesImagesSection({
   const [suspenseModalOpen, setSuspenseModalOpen] = useState(false);
   const [suspenseSelectedIndex, setSuspenseSelectedIndex] = useState<number | null>(null);
   const [isSuspenseNoMediaAlertOpen, setIsSuspenseNoMediaAlertOpen] = useState(false);
+  const [generateTestVideoModalOpen, setGenerateTestVideoModalOpen] = useState(false);
 
   const [isDeleteSentenceOpen, setIsDeleteSentenceOpen] = useState(false);
   const [deleteSentenceIndex, setDeleteSentenceIndex] = useState<number | null>(null);
@@ -540,10 +561,14 @@ export function SentencesImagesSection({
               onSentenceForcedEraKeyChange={onSentenceForcedEraKeyChange}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}
               onTransitionToNextChange={onTransitionToNextChange}
+              onOpenTransitionSoundEditor={onOpenTransitionSoundEditor}
               onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
               onOpenAddSuspense={() => {
                 setSuspenseSelectedIndex(null);
                 setSuspenseModalOpen(true);
+              }}
+              onOpenGenerateTestVideo={() => {
+                setGenerateTestVideoModalOpen(true);
               }}
               enhanceError={enhanceError}
               enhancingById={enhancingById}
@@ -642,6 +667,21 @@ export function SentencesImagesSection({
         onClose={() => setSuspenseModalOpen(false)}
         onAddSuspenseScene={onAddSuspenseScene}
         onMissingMedia={() => setIsSuspenseNoMediaAlertOpen(true)}
+      />
+
+      <GenerateTestVideoModal
+        key={generateTestVideoModalOpen ? 'test-video-open' : 'test-video-closed'}
+        isOpen={generateTestVideoModalOpen}
+        sentences={sentences}
+        jobStatus={testVideoJobStatus}
+        jobError={testVideoJobError}
+        videoUrl={testVideoUrl}
+        canUseCurrentVoiceSettings={canUseCurrentTestVoiceSettings}
+        onClose={() => {
+          setGenerateTestVideoModalOpen(false);
+          onCloseTestVideoModal();
+        }}
+        onGenerate={onGenerateTestVideo}
       />
 
       <AlertDialog

@@ -44,6 +44,7 @@ import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import type { SentenceItem } from './_types/sentences';
+import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
 
 type ScriptCharacter = {
   key: string;
@@ -82,6 +83,13 @@ type BackendSentenceDto = {
       volume_percent?: number;
       is_merged?: boolean;
     };
+  }>;
+  transition_sound_effects?: Array<{
+    sound_effect_id: string;
+    title?: string;
+    url?: string;
+    delay_seconds?: number;
+    volume_percent?: number;
   }>;
   forced_character_keys?: string[] | null;
   character_keys?: string[] | null;
@@ -327,6 +335,8 @@ type ReferenceScriptPayload = {
   script: string;
 };
 
+type TransitionSoundDraftItem = NonNullable<SentenceItem['transitionSoundEffects']>;
+
 export function GeneratePageInner() {
   type VoiceProvider = 'google' | 'elevenlabs';
 
@@ -510,6 +520,9 @@ export function GeneratePageInner() {
   const [videoLibraryTargetIndex, setVideoLibraryTargetIndex] = useState<number | null>(null);
   const [isSoundEffectsLibraryOpen, setIsSoundEffectsLibraryOpen] = useState(false);
   const [soundEffectsLibraryTargetIndex, setSoundEffectsLibraryTargetIndex] = useState<number | null>(null);
+  const [transitionSoundEditorTargetIndex, setTransitionSoundEditorTargetIndex] = useState<number | null>(null);
+  const [transitionSoundDraftItems, setTransitionSoundDraftItems] = useState<TransitionSoundDraftItem>([]);
+  const [isSavingTransitionSoundBySentenceId, setIsSavingTransitionSoundBySentenceId] = useState<Record<string, boolean>>({});
   const [isUploadingSentenceSfxBySentenceId, setIsUploadingSentenceSfxBySentenceId] = useState<Record<string, boolean>>({});
   const [isSavingSentenceSfxMixBySentenceId, setIsSavingSentenceSfxMixBySentenceId] = useState<Record<string, boolean>>({});
   const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
@@ -610,6 +623,14 @@ export function GeneratePageInner() {
     setJobFromResponse,
     setVideoJobError,
     setVideoUrl,
+  } = useVideoJob(API_URL);
+  const {
+    videoJobStatus: testVideoJobStatus,
+    videoJobError: testVideoJobError,
+    videoUrl: testVideoUrl,
+    resetJob: resetTestVideoJob,
+    setJobFromResponse: setTestVideoJobFromResponse,
+    setVideoJobError: setTestVideoJobError,
   } = useVideoJob(API_URL);
 
   const tabKeyForIndex = (index: number | null): TabKey =>
@@ -902,6 +923,365 @@ export function GeneratePageInner() {
   const isLoadingVoices = isLoadingVoicesByProvider[voiceProvider];
   const voicesError = voicesErrorByProvider[voiceProvider];
   const selectedVoiceId = selectedVoiceIdByProvider[voiceProvider];
+
+  const getAudioDurationSeconds = async (file: File): Promise<number | null> => {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const audio = new Audio(url);
+      const finalize = (value: number | null) => {
+        URL.revokeObjectURL(url);
+        resolve(value);
+      };
+
+      audio.addEventListener('loadedmetadata', () => {
+        if (!Number.isNaN(audio.duration) && audio.duration > 0) {
+          finalize(audio.duration);
+          return;
+        }
+        finalize(null);
+      });
+      audio.addEventListener('error', () => finalize(null));
+    });
+  };
+
+  const resolveBackgroundMusicSrcForRender = (): string | undefined => {
+    const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
+    if (value === '__none__') return '__none__';
+
+    const oneOffUrl = String(oneOffBackgroundSoundtrackUrl ?? '').trim();
+    if (oneOffUrl) return oneOffUrl;
+
+    if (!value || value === '__default__') return undefined;
+    if (value === '__oneoff__') return undefined;
+    if (value.startsWith('lib:')) {
+      const id = value.slice('lib:'.length);
+      const found = backgroundSoundtracks.find((t) => t.id === id);
+      return found?.url ? String(found.url).trim() : undefined;
+    }
+    return undefined;
+  };
+
+  const buildRenderSentencePayload = (
+    sourceSentences: SentenceItem[],
+    options?: { clearLastTransition?: boolean },
+  ) => {
+    return sourceSentences.map((s, index) => {
+      const text = String(s.text ?? '');
+      const trimmed = text.trim();
+
+      const soundEffects = Array.isArray(s.soundEffects)
+        ? s.soundEffects
+            .filter((e) => Boolean(e?.url))
+            .map((e) => ({
+              src: String(e.url).trim(),
+              delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+              volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+            }))
+        : [];
+
+      const transitionSoundEffects = Array.isArray(s.transitionSoundEffects)
+        ? s.transitionSoundEffects
+            .filter((e) => Boolean(e?.url))
+            .map((e) => ({
+              src: String(e.url).trim(),
+              delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+              volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+            }))
+        : [];
+
+      const soundEffectsPatch = soundEffects.length ? { soundEffects } : {};
+      const transitionSoundEffectsPatch = transitionSoundEffects.length
+        ? { transitionSoundEffects }
+        : {};
+
+      const transitionToNext =
+        options?.clearLastTransition && index === sourceSentences.length - 1
+          ? null
+          : (s.transitionToNext ?? null);
+
+      if (isSubscribeLikeSentence(trimmed)) {
+        return {
+          text,
+          isSuspense: false,
+          mediaType: 'video' as const,
+          videoUrl: '/subscribe.mp4',
+          ...(transitionToNext ? { transitionToNext } : {}),
+          ...soundEffectsPatch,
+          ...transitionSoundEffectsPatch,
+        };
+      }
+
+      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      if (tab === 'video') {
+        return {
+          text,
+          isSuspense: Boolean(s.isSuspense),
+          mediaType: 'video' as const,
+          videoUrl: String(s.videoUrl ?? '').trim(),
+          ...(transitionToNext ? { transitionToNext } : {}),
+          ...soundEffectsPatch,
+          ...transitionSoundEffectsPatch,
+        };
+      }
+
+      const visualEffect = s.visualEffect ?? null;
+
+      return {
+        text,
+        isSuspense: Boolean(s.isSuspense),
+        mediaType: 'image' as const,
+        ...(transitionToNext ? { transitionToNext } : {}),
+        ...(visualEffect ? { visualEffect } : {}),
+        ...soundEffectsPatch,
+        ...transitionSoundEffectsPatch,
+      };
+    });
+  };
+
+  const prepareImageUploadsForRender = async (sourceSentences: SentenceItem[]) => {
+    const imageUploads: File[] = [];
+
+    for (let index = 0; index < sourceSentences.length; index += 1) {
+      const s = sourceSentences[index];
+      const text = String(s?.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) continue;
+
+      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      if (tab !== 'image') continue;
+
+      if (s.image) {
+        imageUploads.push(s.image);
+        continue;
+      }
+
+      if (s.imageUrl?.startsWith('data:')) {
+        imageUploads.push(dataUrlToFile(s.imageUrl, `sentence-${index + 1}.png`));
+        continue;
+      }
+
+      if (s.imageUrl) {
+        try {
+          const res = await fetch(s.imageUrl);
+          if (!res.ok) {
+            throw new Error('Failed to fetch image URL');
+          }
+          const blob = await res.blob();
+          imageUploads.push(
+            new File([blob], `sentence-${index + 1}.png`, {
+              type: blob.type || 'image/png',
+            }),
+          );
+          continue;
+        } catch {
+          throw new Error(
+            `Failed to prepare image for selected scene ${index + 1}. Please re-select the image and try again.`,
+          );
+        }
+      }
+    }
+
+    return imageUploads;
+  };
+
+  const generateVoiceFileForSentences = async (sentenceTexts: string[], voiceId: string) => {
+    const normalizedSentences = sentenceTexts
+      .map((sentence) => String(sentence ?? '').trim())
+      .filter(Boolean);
+
+    if (normalizedSentences.length === 0) {
+      throw new Error('No sentences available for test voice-over generation');
+    }
+
+    const scriptForVoice = normalizedSentences
+      .map((sentence) => (/[.!?]$/u.test(sentence) ? sentence : `${sentence}.`))
+      .join(' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    const response = await fetch(`${API_URL}/ai/generate-voice`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        script: scriptForVoice,
+        sentences: normalizedSentences,
+        voiceId,
+        styleInstructions:
+          voiceProvider === 'google'
+            ? String(aiStudioStyleInstructions ?? '').trim() || undefined
+            : undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to generate test voice-over');
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type');
+    const disposition = response.headers.get('content-disposition');
+
+    const fallbackMime = voiceProvider === 'google' ? 'audio/wav' : 'audio/mpeg';
+    const mimeType = String(contentType ?? '').trim() || fallbackMime;
+    const headerFilename = filenameFromContentDisposition(disposition);
+    const extFromMime = extensionFromAudioMimeType(mimeType);
+    const defaultExt = voiceProvider === 'google' ? 'wav' : 'mp3';
+    const fileName =
+      headerFilename ||
+      `test-${voiceProvider}-voice-over.${extFromMime || defaultExt}`;
+
+    const blob = new Blob([arrayBuffer], { type: mimeType });
+    const file = new File([blob], fileName, { type: mimeType });
+    const durationSeconds = await getAudioDurationSeconds(file);
+
+    return { file, durationSeconds };
+  };
+
+  const canUseCurrentTestVoiceSettings = Boolean(selectedVoiceId);
+
+  const handleCloseTestVideoModal = () => {
+    resetTestVideoJob();
+  };
+
+  const handleGenerateTestVideo = async (params: {
+    selectedIndices: number[];
+    voiceMode: TestVideoVoiceMode;
+    uploadedVoiceOver: File | null;
+  }) => {
+    const selectedSentences = params.selectedIndices
+      .map((index) => sentences[index])
+      .filter((value): value is SentenceItem => Boolean(value));
+
+    if (selectedSentences.length < 2) {
+      showAlert('Please select at least two scenes for the test video.', { type: 'warning' });
+      return;
+    }
+
+    const missingMediaForImageTab = selectedSentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      if (tab !== 'image') return false;
+      return !s.image && !s.imageUrl;
+    });
+    if (missingMediaForImageTab) {
+      showAlert('Please provide an image for each selected image scene before generating a test video.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    const missingVideoTab = selectedSentences
+      .map((s, index) => {
+        const text = String(s.text ?? '').trim();
+        if (isSubscribeLikeSentence(text)) return null;
+        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+        if (tab !== 'video') return null;
+
+        const url = String(s.videoUrl ?? '').trim();
+        const hasHttpUrl = url.startsWith('http://') || url.startsWith('https://') || url === '/subscribe.mp4';
+        return hasHttpUrl ? null : index;
+      })
+      .filter((value): value is number => value !== null);
+    if (missingVideoTab.length > 0) {
+      showAlert(
+        `One or more selected video scenes do not have a generated video yet. Generate the scene video first or switch those scenes back to the Image tab.`,
+        { type: 'warning' },
+      );
+      return;
+    }
+
+    resetTestVideoJob();
+
+    try {
+      let voiceFile: File | null = null;
+      let audioDurationSeconds: number | null = null;
+      let isSilent = false;
+
+      if (params.voiceMode === 'current') {
+        if (!selectedVoiceId) {
+          isSilent = true;
+        } else {
+          const selectedTexts = selectedSentences
+            .map((s) => String(s.text ?? '').trim())
+            .filter(Boolean);
+          const generated = await generateVoiceFileForSentences(selectedTexts, selectedVoiceId);
+          voiceFile = generated.file;
+          audioDurationSeconds = generated.durationSeconds;
+        }
+      } else if (params.voiceMode === 'upload') {
+        voiceFile = params.uploadedVoiceOver;
+        if (!voiceFile) {
+          showAlert('Please upload a voice-over file for this test video.', { type: 'warning' });
+          return;
+        }
+        audioDurationSeconds = await getAudioDurationSeconds(voiceFile);
+      } else {
+        isSilent = true;
+      }
+
+      const form = new FormData();
+      if (voiceFile) {
+        form.append('voiceOver', voiceFile);
+      }
+      if (isSilent) {
+        form.append('isSilent', 'true');
+      }
+
+      const backgroundMusicSrc = resolveBackgroundMusicSrcForRender();
+      if (backgroundMusicSrc) {
+        form.append('backgroundMusicSrc', backgroundMusicSrc);
+      }
+
+      const normalizedBackgroundMusicVolume = Math.max(
+        0,
+        Math.min(1, (backgroundSoundtrackVolumePercent ?? 100) / 100),
+      );
+      if (normalizedBackgroundMusicVolume !== 1) {
+        form.append('backgroundMusicVolume', String(normalizedBackgroundMusicVolume));
+      }
+
+      form.append(
+        'sentences',
+        JSON.stringify(buildRenderSentencePayload(selectedSentences, { clearLastTransition: true })),
+      );
+      form.append('scriptLength', scriptLength);
+      form.append('language', scriptLanguage);
+      if (audioDurationSeconds && audioDurationSeconds > 0) {
+        form.append('audioDurationSeconds', String(audioDurationSeconds));
+      }
+
+      form.append('isShort', effectiveIsShort ? 'true' : 'false');
+      form.append('useLowerFps', useLowerFps ? 'true' : 'false');
+      form.append('useLowerResolution', useLowerResolution ? 'true' : 'false');
+      form.append('addSubtitles', addSubtitles ? 'true' : 'false');
+      form.append('enableGlitchTransitions', enableGlitchTransitions ? 'true' : 'false');
+      form.append('enableZoomRotateTransitions', enableZoomRotateTransitions ? 'true' : 'false');
+
+      const imageUploads = await prepareImageUploadsForRender(selectedSentences);
+      imageUploads.forEach((file) => form.append('images', file));
+
+      const res = await fetch(`${API_URL}/videos/test`, {
+        method: 'POST',
+        body: form,
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to start test video generation');
+      }
+
+      const data = (await res.json()) as {
+        id: string;
+        status: string;
+      };
+
+      setTestVideoJobFromResponse(data.id, data.status);
+    } catch (error) {
+      console.error('Start test video generation failed', error);
+      setTestVideoJobError('Failed to start test video generation. Please try again.');
+    }
+  };
 
   const handleSelectVoice = (voiceId: string) => {
     setSelectedVoiceIdByProvider((prev) => ({ ...prev, [voiceProvider]: voiceId }));
@@ -1997,7 +2377,20 @@ export function GeneratePageInner() {
               }))
           : [];
 
+        const transitionSoundEffects = Array.isArray(s.transitionSoundEffects)
+          ? s.transitionSoundEffects
+              .filter((e) => Boolean(e?.url))
+              .map((e) => ({
+                src: String(e.url).trim(),
+                delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+                volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+              }))
+          : [];
+
         const soundEffectsPatch = soundEffects.length ? { soundEffects } : {};
+        const transitionSoundEffectsPatch = transitionSoundEffects.length
+          ? { transitionSoundEffects }
+          : {};
 
         const transitionToNext = s.transitionToNext ?? null;
         if (isSubscribeLikeSentence(trimmed)) {
@@ -2008,6 +2401,7 @@ export function GeneratePageInner() {
             videoUrl: '/subscribe.mp4',
             ...(transitionToNext ? { transitionToNext } : {}),
             ...soundEffectsPatch,
+            ...transitionSoundEffectsPatch,
           };
         }
 
@@ -2020,6 +2414,7 @@ export function GeneratePageInner() {
             videoUrl: String(s.videoUrl ?? '').trim(),
             ...(transitionToNext ? { transitionToNext } : {}),
             ...soundEffectsPatch,
+            ...transitionSoundEffectsPatch,
           };
         }
 
@@ -2032,6 +2427,7 @@ export function GeneratePageInner() {
           ...(transitionToNext ? { transitionToNext } : {}),
           ...(visualEffect ? { visualEffect } : {}),
           ...soundEffectsPatch,
+          ...transitionSoundEffectsPatch,
         };
       });
       form.append('sentences', JSON.stringify(sentencePayload));
@@ -2546,10 +2942,21 @@ export function GeneratePageInner() {
           };
         });
 
+      const transitionSoundEffects = (s.transition_sound_effects ?? [])
+        .map((row) => ({
+          id: String(row.sound_effect_id ?? '').trim(),
+          title: String(row.title ?? 'Transition sound').trim() || 'Transition sound',
+          url: String(row.url ?? '').trim(),
+          delaySeconds: Math.max(0, Number(row.delay_seconds ?? 0) || 0),
+          volumePercent: Math.max(0, Math.min(300, Number(row.volume_percent ?? 100) || 100)),
+        }))
+        .filter((row) => Boolean(row.id) && Boolean(row.url));
+
       return {
         id: s.id,
         text: s.text,
         soundEffects,
+        transitionSoundEffects,
         characterKeys: inferredCharacterKeys,
         eraKey: inferredEraKey,
         forcedEraKey: resolvedForcedEraKey,
@@ -2603,85 +3010,66 @@ export function GeneratePageInner() {
     }
   };
 
-  const getAudioDurationSeconds = (file: File): Promise<number | null> => {
-    return new Promise((resolve) => {
-      try {
-        const objectUrl = URL.createObjectURL(file);
-        const audio = new Audio(objectUrl);
-
-        const cleanup = () => {
-          try {
-            URL.revokeObjectURL(objectUrl);
-          } catch {
-            // ignore
-          }
-        };
-
-        audio.addEventListener(
-          'loadedmetadata',
-          () => {
-            const dur = Number.isFinite(audio.duration) ? audio.duration : null;
-            cleanup();
-            resolve(dur && dur > 0 ? dur : null);
-          },
-          { once: true },
-        );
-
-        audio.addEventListener(
-          'error',
-          () => {
-            cleanup();
-            resolve(null);
-          },
-          { once: true },
-        );
-      } catch {
-        resolve(null);
-      }
-    });
-  };
-
   const handleSelectScriptFromLibrary = (draft: ScriptDraftDto) => {
-    setFullScriptId(draft.id);
     setActiveScriptId(draft.id);
+    setFullScriptId(draft.id);
     setActiveShortTabIndex(null);
+    setManualSplitEnabled(false);
     setShortRanges([]);
     setShortScriptIds([]);
-    setManualSplitEnabled(false);
     setShortsValidationError(null);
-    tabSnapshotsRef.current = {};
+    resetJob();
+    resetTestVideoJob();
 
-    setScript(draft.script);
+    Object.keys(tabSnapshotsRef.current)
+      .filter((k) => k.startsWith('short-'))
+      .forEach((k) => {
+        delete tabSnapshotsRef.current[k as keyof typeof tabSnapshotsRef.current];
+      });
 
-    const loadedLanguage = String(draft.language ?? '').trim() || 'en';
-    setScriptLanguage(loadedLanguage);
+    setScript(String(draft.script ?? ''));
+    if (draft.language) {
+      setScriptLanguage(String(draft.language));
+    }
 
-    const loadedSubject = (draft.subject ?? '').trim() || 'religious (Islam)';
-    const loadedSubjectContent = (draft.subject_content ?? '').trim();
-    const loadedLength = (draft.length ?? '').trim() || '1 minute';
-    const loadedStyle = (draft.style ?? '').trim() || 'Conversational';
-    const loadedTechnique = (draft.technique ?? '').trim() || 'The Dance (Context, Conflict)';
+    const loadedSubject = String(draft.subject ?? '').trim();
+    const loadedSubjectContent = String(draft.subject_content ?? '').trim();
+    if (loadedSubject) {
+      setScriptSubject(loadedSubject);
+    }
+    setScriptSubjectContent(loadedSubjectContent);
+    if (draft.length) {
+      setScriptLength(String(draft.length));
+    }
+    if (draft.style) {
+      setScriptStyle(String(draft.style));
+    }
+    if (draft.technique) {
+      setScriptTechnique(String(draft.technique));
+    }
 
-    setScriptSubject(loadedSubject);
-    setScriptSubjectContent(loadedSubject === 'religious (Islam)' ? loadedSubjectContent : '');
-    setScriptLength(loadedLength);
-    setScriptStyle(loadedStyle);
-    setScriptTechnique(loadedTechnique);
+    setReferenceScripts(
+      Array.isArray(draft.reference_scripts)
+        ? draft.reference_scripts.map((item) => ({
+            id: item.id,
+            title: item.title,
+            script: item.script,
+          }))
+        : [],
+    );
 
-    // Restore reference scripts (if any) so UI disables style/system prompt accordingly.
-    const loadedRefs = (draft.reference_scripts ?? [])
-      .filter((s) => Boolean(s?.id) && Boolean(s?.script?.trim()))
-      .map((s) => ({ id: s.id, title: s.title ?? null, script: s.script }));
-    setReferenceScripts(loadedRefs);
-
-    // Capture loaded config as the "original" baseline for the loaded script
-    setOriginalScriptSubject(loadedSubject);
+    setOriginalScriptSubject(loadedSubject || undefined);
     setOriginalScriptSubjectContent(
-      loadedSubject === 'religious (Islam)' ? loadedSubjectContent : ''
+      loadedSubject === 'religious (Islam)' ? loadedSubjectContent : '',
     );
 
     setScriptCharacters(Array.isArray(draft.characters) ? draft.characters : []);
     setScriptEras(Array.isArray(draft.eras) ? draft.eras : []);
+
+    setVoiceOver(null);
+    setVoiceDuration(null);
+    setSavedVoiceId(null);
+    setVoiceLibraryUrl(null);
 
     if (draft.sentences && draft.sentences.length > 0) {
       const mapped = mapBackendSentencesToUi(draft.sentences);
@@ -2703,15 +3091,13 @@ export function GeneratePageInner() {
       setSentences([]);
     }
 
-    // If the draft has an associated voice, load it as the current voice-over
     if (draft.voice?.voice && draft.voice.id) {
-      (async () => {
+      void (async () => {
         try {
           const res = await fetch(draft.voice!.voice);
           if (!res.ok) return;
           const blob = await res.blob();
-          const fileName = 'draft-voice-over.mp3';
-          const file = new File([blob], fileName, {
+          const file = new File([blob], 'draft-voice-over.mp3', {
             type: blob.type || 'audio/mpeg',
           });
 
@@ -2719,55 +3105,42 @@ export function GeneratePageInner() {
           setSavedVoiceId(draft.voice!.id);
           setVoiceLibraryUrl(draft.voice!.voice);
 
-          const url = URL.createObjectURL(file);
-          const audio = new Audio(url);
-          audio.addEventListener('loadedmetadata', () => {
-            if (!Number.isNaN(audio.duration) && audio.duration > 0) {
-              setVoiceDuration(audio.duration);
-            }
-          });
+          const duration = await getAudioDurationSeconds(file);
+          setVoiceDuration(duration);
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.error('Failed to load draft voice-over', error);
         }
       })();
     }
 
-    // Restore the generated video (if the draft has one)
     if (draft.video_url) {
       setVideoJobError(null);
       setVideoUrl(draft.video_url);
-      // We just need a stable key so VideoStatusCard renders;
-      // status is set to completed so we don't poll.
       setJobFromResponse(draft.id, 'completed');
 
       if (videoSectionRef.current) {
         videoSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-    } else {
-      resetJob();
     }
 
     setSplitError(null);
+    setRandomScriptError(null);
 
     const shortIds = Array.isArray(draft.shorts_scripts)
-      ? draft.shorts_scripts.map((s) => String(s ?? '').trim()).filter(Boolean)
+      ? draft.shorts_scripts.map((s: string) => String(s ?? '').trim()).filter(Boolean)
       : [];
 
     if (shortIds.length > 0) {
       setManualSplitEnabled(true);
       setShortScriptIds(shortIds);
 
-      (async () => {
+      void (async () => {
         try {
           const embeddedShorts = Array.isArray(draft.short_scripts)
             ? draft.short_scripts
             : [];
 
           if (embeddedShorts.length === 0) {
-            // No embedded shorts available; avoid making N API calls.
-            // The Script Library selection flow should fetch `/scripts/:id` which includes `short_scripts`.
-            // eslint-disable-next-line no-console
             console.warn('Selected script has shorts_scripts but no short_scripts payload.');
             return;
           }
@@ -2783,12 +3156,9 @@ export function GeneratePageInner() {
 
           for (let idx = 0; idx < embeddedShorts.length; idx += 1) {
             const shortScript = embeddedShorts[idx];
-
             const mappedShortRaw = Array.isArray(shortScript.sentences)
               ? mapBackendSentencesToUi(shortScript.sentences)
               : [];
-
-            // Normalize: remove any subscribe sentences and always end with the shorts CTA.
             const mappedShort = normalizeShortTabSentences(mappedShortRaw);
 
             const shortVoiceFile =
@@ -2816,7 +3186,6 @@ export function GeneratePageInner() {
               videoUrl: shortScript.video_url ?? null,
             };
 
-            // Derive a best-effort mapping back onto the full story sentences.
             const shortStory = mappedShort
               .filter((s) => !isSubscribeLikeSentence(s.text))
               .map((s) => normalizeSentenceForMatch(s.text));
@@ -2840,7 +3209,6 @@ export function GeneratePageInner() {
             }
 
             if (foundStart === -1) {
-              // Fallback: assume sequential split based on lengths.
               foundStart = cursor;
             }
 
@@ -2853,7 +3221,6 @@ export function GeneratePageInner() {
             setShortRanges(ranges);
           }
         } catch (e) {
-          // eslint-disable-next-line no-console
           console.error('Failed to load short scripts', e);
         }
       })();
@@ -4074,7 +4441,7 @@ export function GeneratePageInner() {
         const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
         const additions = (items ?? []).map((it) => ({
           id: it.id,
-          title: String((it as any).name ?? it.title ?? 'Sound effect'),
+          title: String(it.name ?? it.title ?? 'Sound effect'),
           url: it.url,
           delaySeconds: 0,
           volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
@@ -4272,6 +4639,93 @@ export function GeneratePageInner() {
           : s,
       ),
     );
+  };
+
+  const handleOpenTransitionSoundEditor = (index: number) => {
+    const sentence = sentences[index];
+    setTransitionSoundDraftItems(
+      Array.isArray(sentence?.transitionSoundEffects)
+        ? sentence.transitionSoundEffects.map((item) => ({ ...item }))
+        : [],
+    );
+    setTransitionSoundEditorTargetIndex(index);
+  };
+
+  const handleCloseTransitionSoundEditor = () => {
+    setTransitionSoundDraftItems([]);
+    setTransitionSoundEditorTargetIndex(null);
+  };
+
+  const handleSentenceTransitionSoundEffectsChange = (
+    index: number,
+    next: NonNullable<SentenceItem['transitionSoundEffects']>,
+  ) => {
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? {
+            ...s,
+            transitionSoundEffects: Array.isArray(next) ? next : [],
+          }
+          : s,
+      ),
+    );
+  };
+
+  const handleApplyTransitionSoundEditor = () => {
+    if (transitionSoundEditorTargetIndex === null) {
+      handleCloseTransitionSoundEditor();
+      return;
+    }
+
+    handleSentenceTransitionSoundEffectsChange(transitionSoundEditorTargetIndex, transitionSoundDraftItems);
+    handleCloseTransitionSoundEditor();
+  };
+
+  const handleSaveSentenceTransitionSound = async (
+    index: number,
+    itemsOverride?: NonNullable<SentenceItem['transitionSoundEffects']>,
+  ) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+
+    const itemsSource = itemsOverride ?? sentence.transitionSoundEffects;
+    const items = Array.isArray(itemsSource)
+      ? itemsSource.filter((item) => Boolean(item?.id))
+      : [];
+    if (items.length === 0) return;
+
+    const sentenceId = sentence.id;
+    setIsSavingTransitionSoundBySentenceId((prev) => ({ ...prev, [sentenceId]: true }));
+
+    try {
+      if (items.length === 1) {
+        await api.patch(`/sound-effects/transition/${encodeURIComponent(items[0].id)}`, {
+          isTransitionSound: true,
+        });
+      } else {
+        const mergedRes = await api.post<SoundEffectDto>('/sound-effects/merge', {
+          title: `Transition sound mix ${index + 1}`,
+          items: items.map((item) => ({
+            sound_effect_id: item.id,
+            delay_seconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
+            volume_percent: Math.max(0, Math.min(300, Number(item.volumePercent ?? 100) || 100)),
+          })),
+        });
+
+        await api.patch(`/sound-effects/transition/${encodeURIComponent(mergedRes.data.id)}`, {
+          isTransitionSound: true,
+        });
+      }
+
+      showToast('Transition sound saved for reuse.', 'success');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to save transition sound', err);
+      showToast('Failed to save transition sound.', 'error');
+    } finally {
+      setIsSavingTransitionSoundBySentenceId((prev) => ({ ...prev, [sentenceId]: false }));
+    }
   };
 
   const handleSyncElevenLabsVoices = async () => {
@@ -4518,6 +4972,13 @@ export function GeneratePageInner() {
             delay_seconds: number;
             volume_percent: number;
           }>;
+          transition_sound_effects?: Array<{
+            sound_effect_id: string;
+            title?: string;
+            url?: string;
+            delay_seconds: number;
+            volume_percent: number;
+          }>;
         }[] = [];
 
         for (let index = 0; index < items.length; index += 1) {
@@ -4581,6 +5042,20 @@ export function GeneratePageInner() {
                   .map((e, idx) => ({
                     sound_effect_id: String(e.id),
                     index: idx,
+                    delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+                    volume_percent: Math.max(
+                      0,
+                      Math.min(300, Number(e.volumePercent ?? 100) || 100),
+                    ),
+                  }))
+              : undefined,
+            transition_sound_effects: Array.isArray(s.transitionSoundEffects)
+              ? s.transitionSoundEffects
+                  .filter((e) => Boolean(e?.id) && Boolean(e?.url))
+                  .map((e) => ({
+                    sound_effect_id: String(e.id),
+                    title: String(e.title ?? '').trim() || undefined,
+                    url: String(e.url ?? '').trim() || undefined,
                     delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
                     volume_percent: Math.max(
                       0,
@@ -5035,11 +5510,15 @@ export function GeneratePageInner() {
     const sourceScript = String(script ?? '').trim();
 
     const coerceTranslateResponse = (data: unknown): { script?: unknown; sentences?: unknown[] } => {
-      if (data && typeof data === 'object') return data as any;
+      if (data && typeof data === 'object') {
+        return data as { script?: unknown; sentences?: unknown[] };
+      }
       if (typeof data === 'string') {
         try {
-          const parsed = JSON.parse(data);
-          if (parsed && typeof parsed === 'object') return parsed as any;
+          const parsed: unknown = JSON.parse(data);
+          if (parsed && typeof parsed === 'object') {
+            return parsed as { script?: unknown; sentences?: unknown[] };
+          }
         } catch {
           // ignore
         }
@@ -5581,6 +6060,7 @@ export function GeneratePageInner() {
                   onSentenceForcedEraKeyChange={handleSentenceForcedEraKeyChange}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
                   onTransitionToNextChange={handleTransitionToNextChange}
+                  onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                   onSentenceImageUpload={handleSentenceImageUpload}
                   onRemoveSentenceImage={removeSentenceImage}
@@ -5623,6 +6103,12 @@ export function GeneratePageInner() {
                   onSelectFromLibrary={handleSelectFromLibrary}
                   onSelectVideoFromLibrary={handleSelectVideoFromLibrary}
                   onAddSuspenseScene={handleAddSuspenseScene}
+                  onGenerateTestVideo={handleGenerateTestVideo}
+                  canUseCurrentTestVoiceSettings={canUseCurrentTestVoiceSettings}
+                  testVideoJobStatus={testVideoJobStatus}
+                  testVideoJobError={testVideoJobError}
+                  testVideoUrl={testVideoUrl}
+                  onCloseTestVideoModal={handleCloseTestVideoModal}
                   scriptStyle={scriptStyle}
                   scriptTechnique={scriptTechnique}
                   scriptModel={scriptModel}
@@ -5803,6 +6289,29 @@ export function GeneratePageInner() {
           setSoundEffectsLibraryTargetIndex(null);
         }}
         onApplySoundEffects={handleApplySentenceSoundEffectsFromLibrary}
+        isTransitionSoundModalOpen={transitionSoundEditorTargetIndex !== null}
+        transitionSoundTransitionType={
+          transitionSoundEditorTargetIndex === null
+            ? null
+            : sentences[transitionSoundEditorTargetIndex]?.transitionToNext ?? null
+        }
+        transitionSoundItems={transitionSoundDraftItems}
+        onCloseTransitionSoundModal={handleCloseTransitionSoundEditor}
+        onChangeTransitionSoundDraft={setTransitionSoundDraftItems}
+        onApplyTransitionSound={handleApplyTransitionSoundEditor}
+        onSaveTransitionSoundReusable={() => {
+          if (transitionSoundEditorTargetIndex === null) return;
+          return handleSaveSentenceTransitionSound(transitionSoundEditorTargetIndex, transitionSoundDraftItems);
+        }}
+        isSavingTransitionSoundReusable={
+          transitionSoundEditorTargetIndex === null
+            ? false
+            : Boolean(
+              isSavingTransitionSoundBySentenceId[
+                sentences[transitionSoundEditorTargetIndex]?.id ?? ''
+              ],
+            )
+        }
         alertState={alertState}
         onCloseAlert={closeAlert}
       />

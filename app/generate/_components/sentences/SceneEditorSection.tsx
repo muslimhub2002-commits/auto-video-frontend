@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Clock, Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users } from 'lucide-react';
+import { Clock, Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users, Music2, Clapperboard } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
@@ -69,10 +69,12 @@ type SceneEditorSectionProps = {
       | 'chromaLeak'
       | null,
   ) => void;
+  onOpenTransitionSoundEditor: (index: number) => void;
 
   onInsertEmptySentenceAfter: (index: number) => string;
 
   onOpenAddSuspense: () => void;
+  onOpenGenerateTestVideo: () => void;
 
   enhanceError: string | null;
   enhancingById: Record<string, boolean>;
@@ -159,8 +161,10 @@ export function SceneEditorSection({
   onSentenceForcedEraKeyChange,
   onSentenceVisualEffectChange,
   onTransitionToNextChange,
+  onOpenTransitionSoundEditor,
   onInsertEmptySentenceAfter,
   onOpenAddSuspense,
+  onOpenGenerateTestVideo,
 
   enhanceError,
   enhancingById,
@@ -290,7 +294,20 @@ export function SceneEditorSection({
               title="Copy one existing scene and insert it at the beginning"
             >
               <VideoIcon className="h-4 w-4" />
-              <span className="text-sm font-semibold">Add Suspense</span>
+              <span className="text-sm font-semibold">Add Suspense Scene</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onOpenGenerateTestVideo}
+              disabled={sentences.length < 2}
+              className="gap-2 h-10 px-4 border-sky-200 bg-white text-sky-700 hover:bg-sky-50 hover:border-sky-300 shadow-sm hover:shadow transition-all"
+              title="Preview a subset of scenes with current transitions and audio"
+            >
+              <Clapperboard className="h-4 w-4" />
+              <span className="text-sm font-semibold">Generate Test Video</span>
             </Button>
 
             <Button
@@ -474,43 +491,66 @@ export function SceneEditorSection({
                   <div className="relative flex items-center justify-center gap-2">
                     {(() => {
                       const value = item.transitionToNext ?? '__auto__';
+                      const transitionSoundCount = Array.isArray(item.transitionSoundEffects)
+                        ? item.transitionSoundEffects.length
+                        : 0;
 
                       return (
-                        <Select
-                          value={value}
-                          onValueChange={(v) => {
-                            if (v === '__auto__') {
-                              onTransitionToNextChange(index, null);
-                              return;
-                            }
-                            onTransitionToNextChange(
-                              index,
-                              v as
-                              | 'none'
-                              | 'glitch'
-                              | 'whip'
-                              | 'flash'
-                              | 'fade'
-                              | 'chromaLeak',
-                            );
-                          }}
-                        >
-                          <SelectTrigger
-                            className="h-9 w-44 bg-white border-gray-200 text-gray-700 shadow-sm"
-                            title="Optional: override the transition into the next scene"
+                        <>
+                          <Select
+                            value={value}
+                            onValueChange={(v) => {
+                              if (v === '__auto__') {
+                                onTransitionToNextChange(index, null);
+                                return;
+                              }
+                              onTransitionToNextChange(
+                                index,
+                                v as
+                                | 'none'
+                                | 'glitch'
+                                | 'whip'
+                                | 'flash'
+                                | 'fade'
+                                | 'chromaLeak',
+                              );
+                            }}
                           >
-                            <SelectValue placeholder="Transition (Auto)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__auto__">Transition (Random)</SelectItem>
-                            <SelectItem value="none">None</SelectItem>
-                            <SelectItem value="glitch">Glitch</SelectItem>
-                            <SelectItem value="whip">Whip</SelectItem>
-                            <SelectItem value="flash">Flash</SelectItem>
-                            <SelectItem value="fade">Fade</SelectItem>
-                            <SelectItem value="chromaLeak">Chroma leak</SelectItem>
-                          </SelectContent>
-                        </Select>
+                            <SelectTrigger
+                              className="h-9 w-44 bg-white border-gray-200 text-gray-700 shadow-sm"
+                              title="Optional: override the transition into the next scene"
+                            >
+                              <SelectValue placeholder="Transition (Auto)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__auto__">Transition (Random)</SelectItem>
+                              <SelectItem value="none">None</SelectItem>
+                              <SelectItem value="glitch">Glitch</SelectItem>
+                              <SelectItem value="whip">Whip</SelectItem>
+                              <SelectItem value="flash">Flash</SelectItem>
+                              <SelectItem value="fade">Fade</SelectItem>
+                              <SelectItem value="chromaLeak">Chroma leak</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onOpenTransitionSoundEditor(index)}
+                            className={
+                              transitionSoundCount > 0
+                                ? 'h-9 gap-2 border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                                : 'h-9 gap-2 bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 shadow-sm'
+                            }
+                            title="Configure the sound used for this transition"
+                          >
+                            <Music2 className="h-4 w-4" />
+                            <span className="text-xs font-semibold">
+                              Sound Transition{transitionSoundCount > 0 ? ` (${transitionSoundCount})` : ''}
+                            </span>
+                          </Button>
+                        </>
                       );
                     })()}
                     <Button

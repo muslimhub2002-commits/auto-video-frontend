@@ -1,0 +1,1 @@
+export type TestVideoVoiceMode = 'current' | 'none' | 'upload';

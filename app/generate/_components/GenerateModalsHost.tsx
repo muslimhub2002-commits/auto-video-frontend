@@ -6,6 +6,7 @@ import { ImageLibraryModal } from './ImageLibraryModal';
 import { VideoLibraryModal } from './VideoLibraryModal';
 import { ScriptLibraryModal, type ScriptDto } from './ScriptLibraryModal';
 import { ScriptReferencesModal, type ScriptReferenceDto } from './ScriptReferencesModal';
+import { TransitionSoundModal } from './TransitionSoundModal';
 import { VoiceLibraryModal } from './VoiceLibraryModal';
 import { SoundEffectsLibraryModal, type SoundEffectDto } from './SoundEffectsLibraryModal';
 
@@ -53,6 +54,15 @@ type GenerateModalsHostProps = {
   onCloseSoundEffectsLibrary: () => void;
   onApplySoundEffects: (items: SoundEffectDto[]) => void;
 
+  isTransitionSoundModalOpen: boolean;
+  transitionSoundTransitionType: SentenceItem['transitionToNext'] | null | undefined;
+  transitionSoundItems: NonNullable<SentenceItem['transitionSoundEffects']>;
+  onCloseTransitionSoundModal: () => void;
+  onChangeTransitionSoundDraft: (next: NonNullable<SentenceItem['transitionSoundEffects']>) => void;
+  onApplyTransitionSound: () => void;
+  onSaveTransitionSoundReusable: () => void | Promise<void>;
+  isSavingTransitionSoundReusable: boolean;
+
   alertState: AlertState;
   onCloseAlert: () => void;
 };
@@ -94,6 +104,14 @@ export function GenerateModalsHost({
   isSoundEffectsLibraryOpen,
   onCloseSoundEffectsLibrary,
   onApplySoundEffects,
+  isTransitionSoundModalOpen,
+  transitionSoundTransitionType,
+  transitionSoundItems,
+  onCloseTransitionSoundModal,
+  onChangeTransitionSoundDraft,
+  onApplyTransitionSound,
+  onSaveTransitionSoundReusable,
+  isSavingTransitionSoundReusable,
   alertState,
   onCloseAlert,
 }: GenerateModalsHostProps) {
@@ -139,6 +157,17 @@ export function GenerateModalsHost({
         isOpen={isSoundEffectsLibraryOpen}
         onClose={onCloseSoundEffectsLibrary}
         onApply={onApplySoundEffects}
+      />
+
+      <TransitionSoundModal
+        isOpen={isTransitionSoundModalOpen}
+        onClose={onCloseTransitionSoundModal}
+        onApply={onApplyTransitionSound}
+        transitionType={transitionSoundTransitionType}
+        items={transitionSoundItems}
+        onChange={onChangeTransitionSoundDraft}
+        onSaveReusable={onSaveTransitionSoundReusable}
+        isSavingReusable={isSavingTransitionSoundReusable}
       />
 
       <AlertModal
