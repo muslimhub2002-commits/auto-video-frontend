@@ -4,6 +4,14 @@ export type SentenceItem = {
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
 
+  soundEffects?: Array<{
+    id: string;
+    title: string;
+    url: string;
+    delaySeconds: number;
+    volumePercent: number;
+  }>;
+
   // Non-forced mappings inferred during split (used for draft round-tripping).
   characterKeys?: string[] | null;
   eraKey?: string | null;

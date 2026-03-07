@@ -143,6 +143,13 @@ type SentencesImagesSectionProps = {
   onSentenceVideoPromptChange: (index: number, next: string) => void;
   onGenerateSentenceVideoPrompt?: (index: number) => void | Promise<void>;
   isGeneratingVideoPromptBySentenceId: Record<string, boolean>;
+
+  onOpenSentenceSoundEffectsLibrary: (index: number) => void;
+  onSentenceSoundEffectsChange: (index: number, next: NonNullable<SentenceItem['soundEffects']>) => void;
+  onUploadSentenceSoundEffect: (index: number, files: File[]) => void | Promise<void>;
+  isUploadingSentenceSfxBySentenceId: Record<string, boolean>;
+  onSaveSentenceSoundEffectsMix: (index: number) => void | Promise<void>;
+  isSavingSentenceSfxMixBySentenceId: Record<string, boolean>;
   onSentenceReferenceImageUpload: (
     index: number,
     e: ChangeEvent<HTMLInputElement>,
@@ -220,6 +227,13 @@ export function SentencesImagesSection({
   onSentenceVideoPromptChange,
   onGenerateSentenceVideoPrompt,
   isGeneratingVideoPromptBySentenceId,
+
+  onOpenSentenceSoundEffectsLibrary,
+  onSentenceSoundEffectsChange,
+  onUploadSentenceSoundEffect,
+  isUploadingSentenceSfxBySentenceId,
+  onSaveSentenceSoundEffectsMix,
+  isSavingSentenceSfxMixBySentenceId,
   onSentenceReferenceImageUpload,
   onRemoveSentenceReferenceImage,
   onSelectVideoFromLibrary,
@@ -510,6 +524,14 @@ export function SentencesImagesSection({
               onGenerateAllImages={onGenerateAllImages}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
               videoModel={videoModel}
+
+              onOpenSentenceSoundEffectsLibrary={onOpenSentenceSoundEffectsLibrary}
+              onSentenceSoundEffectsChange={onSentenceSoundEffectsChange}
+              onUploadSentenceSoundEffect={onUploadSentenceSoundEffect}
+              isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
+              onSaveSentenceSoundEffectsMix={onSaveSentenceSoundEffectsMix}
+              isSavingSentenceSfxMixBySentenceId={isSavingSentenceSfxMixBySentenceId}
+
               scriptCharacters={scriptCharacters}
               onScriptCharactersChange={onScriptCharactersChange}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { api } from '@/lib/api';
 import {
   Select,
   SelectContent,
@@ -16,18 +18,27 @@ import {
   X,
   Image as ImageIcon,
   Library,
+  Music2,
+  Upload,
+  Play,
+  Pause,
+  Pencil,
+  Save,
   Video as VideoIcon,
   ArrowUp,
   ArrowDown,
   Trash2,
+  Volume2,
   Users,
   Repeat2,
   Clock,
+  Timer,
 } from 'lucide-react';
 
 import { ForcedCharactersModal } from './ForcedCharactersModal';
 import { ForcedEraModal } from './ForcedEraModal';
 import type { ScriptEra } from './ErasModal';
+import { SoundEffectEditModal } from '../SoundEffectEditModal';
 
 import type { SentenceItem } from '../../_types/sentences';
 
@@ -138,6 +149,13 @@ type SentenceEditorCardProps = {
   isFirst: boolean;
   isLast: boolean;
 
+  onOpenSoundEffectsLibrary: () => void;
+  onSoundEffectsChange: (next: NonNullable<SentenceItem['soundEffects']>) => void;
+  onUploadSoundEffect: (files: File[]) => void | Promise<void>;
+  isUploadingSoundEffect: boolean;
+  onSaveSoundEffectsMix: () => void | Promise<void>;
+  isSavingSoundEffectsMix: boolean;
+
   onSelectVideoFromLibrary?: () => void;
 
   videoModel: 'gemini' | 'grok';
@@ -204,6 +222,13 @@ export function SentenceEditorCard({
   isFirst,
   isLast,
 
+  onOpenSoundEffectsLibrary,
+  onSoundEffectsChange,
+  onUploadSoundEffect,
+  isUploadingSoundEffect,
+  onSaveSoundEffectsMix,
+  isSavingSoundEffectsMix,
+
   onSelectVideoFromLibrary,
 
   videoModel,
@@ -266,6 +291,162 @@ export function SentenceEditorCard({
   const isSubscribeClip = item.videoUrl === '/subscribe.mp4';
   const hasAnyImage = Boolean(item.image || item.imageUrl);
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
+
+  const soundEffects = Array.isArray(item.soundEffects) ? item.soundEffects : [];
+
+  const [mixStatus, setMixStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const [singleStatusByIndex, setSingleStatusByIndex] = useState<
+    Record<number, 'idle' | 'loading' | 'playing'>
+  >({});
+
+  const [isSoundEffectsOpen, setIsSoundEffectsOpen] = useState(true);
+
+  const [editingSoundEffectIndex, setEditingSoundEffectIndex] = useState<number | null>(null);
+  const [isSavingSoundEffectEdit, setIsSavingSoundEffectEdit] = useState(false);
+
+  const soundEffectsPreviewRef = useRef<{
+    timeouts: number[];
+    audios: HTMLAudioElement[];
+  }>({ timeouts: [], audios: [] });
+
+  const soundEffectsEverStartedRef = useRef<Set<string>>(new Set());
+
+  const truncateSoundEffectTitle = (value: string) => {
+    const v = String(value ?? '').trim();
+    if (!v) return 'Sound effect';
+    return v.length > 18 ? `${v.slice(0, 18)}…` : v;
+  };
+
+  const getSfxPreviewKey = (sfx: { id?: unknown; url: string }) => {
+    const id = (sfx as any)?.id;
+    if (typeof id === 'string' && id.trim().length > 0) return `id:${id}`;
+    return `url:${String(sfx.url ?? '')}`;
+  };
+
+  const stopAllScheduledAudio = () => {
+    const timeouts = soundEffectsPreviewRef.current.timeouts;
+    const audios = soundEffectsPreviewRef.current.audios;
+
+    for (const t of timeouts) window.clearTimeout(t);
+    soundEffectsPreviewRef.current.timeouts = [];
+
+    for (const audio of audios) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    soundEffectsPreviewRef.current.audios = [];
+
+    setMixStatus('idle');
+    setSingleStatusByIndex({});
+  };
+
+  const scheduleAudio = (params: {
+    url: string;
+    delaySeconds: number;
+    volumePercent: number;
+    onPlaying?: () => void;
+    onEnded?: () => void;
+    onError?: () => void;
+  }) => {
+    const audio = new Audio(params.url);
+    audio.volume = Math.max(0, Math.min(1, (Number(params.volumePercent) || 0) / 100));
+    if (params.onEnded) audio.onended = params.onEnded;
+    if (params.onError) audio.onerror = params.onError;
+    soundEffectsPreviewRef.current.audios.push(audio);
+
+    const delayMs = Math.max(0, Number(params.delaySeconds) || 0) * 1000;
+    const timeoutId = window.setTimeout(() => {
+      const playPromise = audio.play();
+      if (!playPromise || typeof (playPromise as any).then !== 'function') {
+        params.onPlaying?.();
+        return;
+      }
+
+      (playPromise as Promise<void>)
+        .then(() => {
+          params.onPlaying?.();
+        })
+        .catch(() => {
+          params.onError?.();
+        });
+    }, delayMs);
+
+    soundEffectsPreviewRef.current.timeouts.push(timeoutId);
+  };
+
+  const playMix = () => {
+    if (soundEffects.length === 0) return;
+
+    // Stop any single first.
+    stopAllScheduledAudio();
+
+    const shouldShowLoading = soundEffects.some((sfx) => {
+      const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
+      return !soundEffectsEverStartedRef.current.has(key);
+    });
+    setMixStatus(shouldShowLoading ? 'loading' : 'playing');
+
+    let started = 0;
+    let ended = 0;
+    const total = soundEffects.length;
+
+    for (const sfx of soundEffects) {
+      const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
+      scheduleAudio({
+        url: sfx.url,
+        delaySeconds: sfx.delaySeconds,
+        volumePercent: sfx.volumePercent,
+        onPlaying: () => {
+          started += 1;
+          soundEffectsEverStartedRef.current.add(key);
+          setMixStatus('playing');
+        },
+        onEnded: () => {
+          ended += 1;
+          if (ended >= total) setMixStatus('idle');
+        },
+        onError: () => {
+          // Autoplay policy or load error.
+          setMixStatus('idle');
+        },
+      });
+    }
+  };
+
+  const playSingle = (sfxIndex: number) => {
+    const sfx = soundEffects[sfxIndex];
+    if (!sfx) return;
+
+    const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
+    const shouldShowLoading = !soundEffectsEverStartedRef.current.has(key);
+
+    // Stop any mix first.
+    stopAllScheduledAudio();
+    setSingleStatusByIndex({ [sfxIndex]: shouldShowLoading ? 'loading' : 'playing' });
+
+    scheduleAudio({
+      url: sfx.url,
+      delaySeconds: sfx.delaySeconds,
+      volumePercent: sfx.volumePercent,
+      onPlaying: () => {
+        soundEffectsEverStartedRef.current.add(key);
+        setSingleStatusByIndex({ [sfxIndex]: 'playing' });
+      },
+      onEnded: () => setSingleStatusByIndex({}),
+      onError: () => setSingleStatusByIndex({}),
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      stopAllScheduledAudio();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sentenceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sentenceDraftTextRef = useRef<string>(String(item.text ?? ''));
@@ -353,7 +534,7 @@ export function SentenceEditorCard({
               ? 'Glass (reflections)'
               : visualEffectValue === 'glassStrong'
                 ? 'Glass (strong)'
-          : 'None';
+                : 'None';
 
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
   const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
@@ -736,6 +917,407 @@ export function SentenceEditorCard({
                 onClear={() => onForcedEraKeyChange('')}
                 onSave={(next) => onForcedEraKeyChange(next)}
               />
+            </div>
+
+            {/* Sound Effects */}
+            <div className="rounded-2xl border border-indigo-200/70 bg-linear-to-br from-white via-indigo-50/40 to-purple-50/30 shadow-sm overflow-hidden">
+              <div className="px-4 py-4 border-b border-indigo-200/60 bg-linear-to-r from-indigo-50 via-purple-50/40 to-pink-50/30">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-white/70 rounded-xl border border-indigo-200/60 shadow-sm">
+                      <Music2 className="h-4 w-4 text-indigo-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold bg-linear-to-r from-gray-900 via-purple-900 to-indigo-900 bg-clip-text text-transparent">Sound Effects</p>
+                      <p className="text-xs text-gray-500">Start with this sentence (plus delay)</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (mixStatus === 'playing' || mixStatus === 'loading') {
+                          stopAllScheduledAudio();
+                          return;
+                        }
+                        playMix();
+                      }}
+                      disabled={soundEffects.length === 0}
+                      className="gap-2 h-8 border-gray-200 text-gray-700 hover:bg-gray-50"
+                      title={mixStatus !== 'idle' ? 'Stop mix preview' : 'Preview all sound effects together'}
+                    >
+                      {mixStatus === 'loading' ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-xs font-semibold">Loading...</span>
+                        </>
+                      ) : mixStatus === 'playing' ? (
+                        <>
+                          <Pause className="h-4 w-4" />
+                          <span className="text-xs font-semibold">Stop</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-4 w-4" />
+                          <span className="text-xs font-semibold">Play all</span>
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void Promise.resolve(onSaveSoundEffectsMix());
+                      }}
+                      disabled={soundEffects.length < 2 || isSavingSoundEffectsMix}
+                      className="gap-2 h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                      title={
+                        soundEffects.length < 2
+                          ? 'Add at least 2 sound effects to save a mix'
+                          : 'Save these sound effects as one merged file'
+                      }
+                    >
+                      {isSavingSoundEffectsMix ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-xs font-semibold">Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" />
+                          <span className="text-xs font-semibold">Save mix</span>
+                        </>
+                      )}
+                    </Button>
+
+                    <button
+                      type="button"
+                      className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-xl border border-indigo-200/70 bg-white/70 text-indigo-700 hover:bg-white"
+                      title={isSoundEffectsOpen ? 'Collapse sound effects' : 'Expand sound effects'}
+                      aria-label={isSoundEffectsOpen ? 'Collapse sound effects' : 'Expand sound effects'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSoundEffectsOpen((prev) => {
+                          const next = !prev;
+                          if (!next) stopAllScheduledAudio();
+                          return next;
+                        });
+                      }}
+                    >
+                      <ArrowDown
+                        className={
+                          isSoundEffectsOpen
+                            ? 'h-4 w-4 transition-transform duration-200'
+                            : 'h-4 w-4 rotate-180 transition-transform duration-200'
+                        }
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {isSoundEffectsOpen ? (
+                <div className="px-4 py-4 fade-in animate-in duration-500">
+                  <SoundEffectEditModal
+                    isOpen={
+                      editingSoundEffectIndex !== null &&
+                      Boolean(soundEffects[editingSoundEffectIndex])
+                    }
+                    title="Edit sound effect"
+                    audioUrl={soundEffects[editingSoundEffectIndex ?? 0]?.url ?? null}
+                    initialName={String(soundEffects[editingSoundEffectIndex ?? 0]?.title ?? '').trim()}
+                    initialVolumePercent={
+                      Number(soundEffects[editingSoundEffectIndex ?? 0]?.volumePercent ?? 100) || 100
+                    }
+                    isSaving={isSavingSoundEffectEdit}
+                    onClose={() => setEditingSoundEffectIndex(null)}
+                    onSave={async (values) => {
+                      const idx = editingSoundEffectIndex;
+                      if (idx === null) return;
+                      const current = soundEffects[idx];
+                      if (!current) return;
+
+                      const nextTitle = String(values.name ?? '').trim() || String(current.title ?? '').trim();
+                      const nextVolumePercent = Math.max(
+                        0,
+                        Math.min(300, Number(values.volumePercent) || 0),
+                      );
+
+                      // Optimistically update the sentence first.
+                      onSoundEffectsChange(
+                        soundEffects.map((it, i) =>
+                          i === idx
+                            ? {
+                              ...it,
+                              title: nextTitle,
+                              volumePercent: nextVolumePercent,
+                            }
+                            : it,
+                        ),
+                      );
+
+                      // Best-effort persist to the library so future inserts match.
+                      setIsSavingSoundEffectEdit(true);
+                      try {
+                        await Promise.all([
+                          api.patch(`/sound-effects/${encodeURIComponent(current.id)}`, {
+                            name: nextTitle,
+                          }),
+                          api.patch(`/sound-effects/volume/${encodeURIComponent(current.id)}`, {
+                            volumePercent: nextVolumePercent,
+                          }),
+                        ]);
+                        setEditingSoundEffectIndex(null);
+                      } catch (err) {
+                        // eslint-disable-next-line no-console
+                        console.error('Failed to update sound effect', err);
+                        setEditingSoundEffectIndex(null);
+                      } finally {
+                        setIsSavingSoundEffectEdit(false);
+                      }
+                    }}
+                  />
+
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="file"
+                      id={`sentence-sfx-${item.id}`}
+                      accept="audio/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        const list = Array.from(e.target.files ?? []);
+                        if (list.length === 0) return;
+                        void Promise.resolve(onUploadSoundEffect(list));
+                        e.currentTarget.value = '';
+                      }}
+                    />
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => document.getElementById(`sentence-sfx-${item.id}`)?.click()}
+                      disabled={isUploadingSoundEffect}
+                      className="gap-2 h-9 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                      title="Upload a sound effect"
+                    >
+                      {isUploadingSoundEffect ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-xs font-bold">Uploading...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4" />
+                          <span className="text-xs font-bold">Upload</span>
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={onOpenSoundEffectsLibrary}
+                      className="gap-2 h-9 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold"
+                      title="Choose from your sound effects library"
+                    >
+                      <Library className="h-4 w-4" />
+                      <span className="text-xs font-bold">From Library</span>
+                    </Button>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        stopAllScheduledAudio();
+                        onSoundEffectsChange([]);
+                      }}
+                      disabled={soundEffects.length === 0}
+                      className="gap-2 h-9 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-semibold"
+                      title="Remove all sound effects from this sentence"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span className="text-xs font-bold">Remove all</span>
+                    </Button>
+                  </div>
+
+                  {soundEffects.length === 0 ? (
+                    <p className="mt-3 text-xs text-gray-500">
+                      No sound effects yet. Upload one or pick from your library.
+                    </p>
+                  ) : (
+                    <div className="mt-4 space-y-2">
+                      {soundEffects.map((sfx, sfxIndex) => (
+                        <div
+                          key={`${sfx.id}-${sfxIndex}`}
+                          className="rounded-xl border border-gray-200 bg-gray-50/50 p-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p
+                                className="text-sm font-bold text-gray-900 truncate"
+                                title={String(sfx.title ?? '').trim()}
+                              >
+                                {truncateSoundEffectTitle(String(sfx.title ?? ''))}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate" title={sfx.url}>
+                                {sfx.url}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const status = singleStatusByIndex[sfxIndex] ?? 'idle';
+                                  if (status === 'loading' || status === 'playing') {
+                                    stopAllScheduledAudio();
+                                    return;
+                                  }
+                                  playSingle(sfxIndex);
+                                }}
+                                className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
+                                title="Preview this sound effect"
+                              >
+                                {singleStatusByIndex[sfxIndex] === 'loading' ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : singleStatusByIndex[sfxIndex] === 'playing' ? (
+                                  <Pause className="h-4 w-4" />
+                                ) : (
+                                  <Play className="h-4 w-4" />
+                                )}
+                                <span className="text-xs font-semibold">
+                                  {singleStatusByIndex[sfxIndex] === 'loading'
+                                    ? 'Loading...'
+                                    : singleStatusByIndex[sfxIndex] === 'playing'
+                                      ? 'Stop'
+                                      : 'Play'}
+                                </span>
+                              </Button>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditingSoundEffectIndex(sfxIndex)}
+                                className=" border-gray-200 text-gray-700 hover:bg-white"
+                                title="Edit name & volume"
+                              >
+                                <Pencil className="h-4 w-4" />
+                                <span className="text-xs font-semibold">Edit</span>
+                              </Button>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const next = soundEffects.filter((_, i) => i !== sfxIndex);
+                                  onSoundEffectsChange(next);
+                                }}
+                                className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                                title="Remove"
+                              >
+                                <X className="h-4 w-4" />
+                                <span className="text-xs font-semibold">Remove</span>
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+                              <div className="flex items-start gap-2 h-9">
+                                <div className="mt-0.5 p-2 bg-indigo-50 rounded-xl">
+                                  <Timer className="h-4 w-4 text-indigo-600" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-gray-900">Start offset</p>
+                                  <p className="text-[11px] text-gray-500 leading-tight">
+                                    Seconds after sentence starts
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-2 relative">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.1}
+                                  value={String(Number(sfx.delaySeconds ?? 0))}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const delaySeconds = Math.max(0, Number(raw) || 0);
+                                    const next = soundEffects.map((it, i) =>
+                                      i === sfxIndex ? { ...it, delaySeconds } : it,
+                                    );
+                                    onSoundEffectsChange(next);
+                                  }}
+                                  className="h-9 pr-10"
+                                  placeholder="0.0"
+                                  title="Start offset in seconds (relative to the sentence start)"
+                                />
+                                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                                  s
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+                              <div className="flex items-start gap-2 h-9">
+                                <div className="mt-0.5 p-2 bg-indigo-50 rounded-xl">
+                                  <Volume2 className="h-4 w-4 text-indigo-600" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-gray-900">Volume</p>
+                                  <p className="text-[11px] text-gray-500 leading-tight">
+                                    Relative loudness
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-2 relative">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={300}
+                                  step={1}
+                                  value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const volumePercent = Math.max(0, Math.min(300, Number(raw) || 0));
+                                    const next = soundEffects.map((it, i) =>
+                                      i === sfxIndex ? { ...it, volumePercent } : it,
+                                    );
+                                    onSoundEffectsChange(next);
+                                  }}
+                                  className="h-9 pr-10"
+                                  placeholder="100"
+                                  title="Volume percent (100 = original volume)"
+                                />
+                                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                                  %
+                                </div>
+                              </div>
+                            </div>
+
+
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             {/* Error Message */}
@@ -1281,105 +1863,105 @@ export function SentenceEditorCard({
                         ) : null}
 
                         <div className="flex items-center gap-2">
-                        <div className="relative" ref={videoModeMenuRef}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isVideoModeMenuOpen) {
-                                closeVideoModeMenu();
-                                return;
-                              }
-                              openVideoModeMenu();
-                            }}
-                            className="h-10 w-10 rounded-xl bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center"
-                            title={`Video mode: ${videoModeLabel}`}
-                          >
-                            <Repeat2 className="h-4 w-4" />
-                          </button>
-
-                          {isVideoModeMenuMounted ? (
-                            <div
-                              className={
-                                isVideoModeMenuShown
-                                  ? 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-100 scale-100 translate-y-0 pointer-events-auto transition duration-150 ease-out'
-                                  : 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-0 scale-95 translate-y-2 pointer-events-none transition duration-150 ease-in'
-                              }
-                              onClick={(e) => e.stopPropagation()}
+                          <div className="relative" ref={videoModeMenuRef}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isVideoModeMenuOpen) {
+                                  closeVideoModeMenu();
+                                  return;
+                                }
+                                openVideoModeMenu();
+                              }}
+                              className="h-10 w-10 rounded-xl bg-linear-to-br from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center"
+                              title={`Video mode: ${videoModeLabel}`}
                             >
-                              <div className="p-2 space-y-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onVideoGenerationModeChange?.('referenceImage');
-                                    closeVideoModeMenu();
-                                  }}
-                                  className={
-                                    effectiveVideoGenerationMode === 'referenceImage'
-                                      ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-indigo-50 to-purple-50 border border-indigo-200'
-                                      : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
-                                  }
-                                >
-                                  <p className="text-sm font-bold text-gray-900">Reference image</p>
-                                  <p className="text-xs text-gray-500">One image + sentence text</p>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    onVideoGenerationModeChange?.('text');
-                                    closeVideoModeMenu();
-                                  }}
-                                  className={
-                                    effectiveVideoGenerationMode === 'text'
-                                      ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200'
-                                      : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
-                                  }
-                                >
-                                  <p className="text-sm font-bold text-gray-900">Text to video</p>
-                                  <p className="text-xs text-gray-500">Prompt only (no images)</p>
-                                </button>
-                                {videoModel !== 'grok' ? (
+                              <Repeat2 className="h-4 w-4" />
+                            </button>
+
+                            {isVideoModeMenuMounted ? (
+                              <div
+                                className={
+                                  isVideoModeMenuShown
+                                    ? 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-100 scale-100 translate-y-0 pointer-events-auto transition duration-150 ease-out'
+                                    : 'absolute right-0 bottom-full mb-2 z-30 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden origin-bottom-right transform-gpu opacity-0 scale-95 translate-y-2 pointer-events-none transition duration-150 ease-in'
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="p-2 space-y-1">
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      onVideoGenerationModeChange?.('frames');
+                                      onVideoGenerationModeChange?.('referenceImage');
                                       closeVideoModeMenu();
                                     }}
                                     className={
-                                      effectiveVideoGenerationMode === 'frames'
-                                        ? 'w-full text-left rounded-xl px-3 py-2 bg-gray-50 border border-gray-200'
+                                      effectiveVideoGenerationMode === 'referenceImage'
+                                        ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-indigo-50 to-purple-50 border border-indigo-200'
                                         : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
                                     }
                                   >
-                                    <p className="text-sm font-bold text-gray-900">Frames</p>
-                                    <p className="text-xs text-gray-500">Start + end frames</p>
+                                    <p className="text-sm font-bold text-gray-900">Reference image</p>
+                                    <p className="text-xs text-gray-500">One image + sentence text</p>
                                   </button>
-                                ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onVideoGenerationModeChange?.('text');
+                                      closeVideoModeMenu();
+                                    }}
+                                    className={
+                                      effectiveVideoGenerationMode === 'text'
+                                        ? 'w-full text-left rounded-xl px-3 py-2 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200'
+                                        : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                    }
+                                  >
+                                    <p className="text-sm font-bold text-gray-900">Text to video</p>
+                                    <p className="text-xs text-gray-500">Prompt only (no images)</p>
+                                  </button>
+                                  {videoModel !== 'grok' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onVideoGenerationModeChange?.('frames');
+                                        closeVideoModeMenu();
+                                      }}
+                                      className={
+                                        effectiveVideoGenerationMode === 'frames'
+                                          ? 'w-full text-left rounded-xl px-3 py-2 bg-gray-50 border border-gray-200'
+                                          : 'w-full text-left rounded-xl px-3 py-2 hover:bg-gray-50'
+                                      }
+                                    >
+                                      <p className="text-sm font-bold text-gray-900">Frames</p>
+                                      <p className="text-xs text-gray-500">Start + end frames</p>
+                                    </button>
+                                  ) : null}
+                                </div>
                               </div>
-                            </div>
-                          ) : null}
-                        </div>
+                            ) : null}
+                          </div>
 
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
-                          disabled={!onGenerateVideo || isGeneratingVideo}
-                          className="h-10 flex-1 min-w-0 gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isGeneratingVideo ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span className="text-sm font-bold">Generating Video...</span>
-                            </>
-                          ) : (
-                            <>
-                              <VideoIcon className="h-4 w-4" />
-                              <span className="text-sm font-bold">Regenerate Video</span>
-                            </>
-                          )}
-                        </Button>
-                      </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void Promise.resolve(onGenerateVideo?.(canGenerateVideo))}
+                            disabled={!onGenerateVideo || isGeneratingVideo}
+                            className="h-10 flex-1 min-w-0 gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {isGeneratingVideo ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span className="text-sm font-bold">Generating Video...</span>
+                              </>
+                            ) : (
+                              <>
+                                <VideoIcon className="h-4 w-4" />
+                                <span className="text-sm font-bold">Regenerate Video</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     ) : null}
                   </div>

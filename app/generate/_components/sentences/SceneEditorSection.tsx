@@ -33,6 +33,16 @@ type SceneEditorSectionProps = {
 
   onSelectVideoFromLibrary?: (index: number) => void;
 
+  onOpenSentenceSoundEffectsLibrary: (index: number) => void;
+  onSentenceSoundEffectsChange: (
+    index: number,
+    next: NonNullable<SentenceItem['soundEffects']>,
+  ) => void;
+  onUploadSentenceSoundEffect: (index: number, files: File[]) => void | Promise<void>;
+  isUploadingSentenceSfxBySentenceId: Record<string, boolean>;
+  onSaveSentenceSoundEffectsMix: (index: number) => void | Promise<void>;
+  isSavingSentenceSfxMixBySentenceId: Record<string, boolean>;
+
   videoModel: 'gemini' | 'grok';
 
   scriptCharacters: ScriptCharacter[];
@@ -130,6 +140,13 @@ export function SceneEditorSection({
   onGenerateAllImages,
 
   onSelectVideoFromLibrary,
+
+  onOpenSentenceSoundEffectsLibrary,
+  onSentenceSoundEffectsChange,
+  onUploadSentenceSoundEffect,
+  isUploadingSentenceSfxBySentenceId,
+  onSaveSentenceSoundEffectsMix,
+  isSavingSentenceSfxMixBySentenceId,
 
   videoModel,
 
@@ -337,6 +354,12 @@ export function SceneEditorSection({
                   isShortVideo={isShortVideo}
                   isFirst={index === 0}
                   isLast={index === sentences.length - 1}
+                  onOpenSoundEffectsLibrary={() => onOpenSentenceSoundEffectsLibrary(index)}
+                  onSoundEffectsChange={(next) => onSentenceSoundEffectsChange(index, next)}
+                  onUploadSoundEffect={(files) => onUploadSentenceSoundEffect(index, files)}
+                  isUploadingSoundEffect={Boolean(isUploadingSentenceSfxBySentenceId[item.id])}
+                  onSaveSoundEffectsMix={() => onSaveSentenceSoundEffectsMix(index)}
+                  isSavingSoundEffectsMix={Boolean(isSavingSentenceSfxMixBySentenceId[item.id])}
                   onSelectVideoFromLibrary={
                     onSelectVideoFromLibrary
                       ? () => onSelectVideoFromLibrary(index)

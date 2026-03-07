@@ -29,6 +29,7 @@ import type { ScriptReferenceDto } from './_components/ScriptReferencesModal';
 import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { RenderSettingsSection } from './_components/RenderSettingsSection';
 import { GenerateModalsHost } from './_components/GenerateModalsHost';
+import type { SoundEffectDto } from './_components/SoundEffectsLibraryModal';
 import {
   TranslateScriptModal,
   type TranslateMethod,
@@ -69,6 +70,19 @@ type BackendSentenceDto = {
   video?: { id: string; video: string } | null;
   video_prompt?: string | null;
   isSuspense?: boolean;
+  sound_effects?: Array<{
+    id: string;
+    index: number;
+    delay_seconds: number;
+    volume_percent: number | null;
+    sound_effect: {
+      id: string;
+      title: string;
+      url: string;
+      volume_percent?: number;
+      is_merged?: boolean;
+    };
+  }>;
   forced_character_keys?: string[] | null;
   character_keys?: string[] | null;
   era_key?: string | null;
@@ -494,6 +508,10 @@ export function GeneratePageInner() {
   >(null);
   const [isVideoLibraryOpen, setIsVideoLibraryOpen] = useState(false);
   const [videoLibraryTargetIndex, setVideoLibraryTargetIndex] = useState<number | null>(null);
+  const [isSoundEffectsLibraryOpen, setIsSoundEffectsLibraryOpen] = useState(false);
+  const [soundEffectsLibraryTargetIndex, setSoundEffectsLibraryTargetIndex] = useState<number | null>(null);
+  const [isUploadingSentenceSfxBySentenceId, setIsUploadingSentenceSfxBySentenceId] = useState<Record<string, boolean>>({});
+  const [isSavingSentenceSfxMixBySentenceId, setIsSavingSentenceSfxMixBySentenceId] = useState<Record<string, boolean>>({});
   const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
   const [isGeneratingVideoPromptBySentenceId, setIsGeneratingVideoPromptBySentenceId] = useState<Record<string, boolean>>({});
   const [selectedChatId, setSelectedChatId] = useState<string | null>(
@@ -1969,6 +1987,18 @@ export function GeneratePageInner() {
         const text = String(s.text ?? '');
         const trimmed = text.trim();
 
+        const soundEffects = Array.isArray(s.soundEffects)
+          ? s.soundEffects
+              .filter((e) => Boolean(e?.url))
+              .map((e) => ({
+                src: String(e.url).trim(),
+                delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+                volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+              }))
+          : [];
+
+        const soundEffectsPatch = soundEffects.length ? { soundEffects } : {};
+
         const transitionToNext = s.transitionToNext ?? null;
         if (isSubscribeLikeSentence(trimmed)) {
           return {
@@ -1977,6 +2007,7 @@ export function GeneratePageInner() {
             mediaType: 'video' as const,
             videoUrl: '/subscribe.mp4',
             ...(transitionToNext ? { transitionToNext } : {}),
+            ...soundEffectsPatch,
           };
         }
 
@@ -1988,6 +2019,7 @@ export function GeneratePageInner() {
             mediaType: 'video' as const,
             videoUrl: String(s.videoUrl ?? '').trim(),
             ...(transitionToNext ? { transitionToNext } : {}),
+            ...soundEffectsPatch,
           };
         }
 
@@ -1999,6 +2031,7 @@ export function GeneratePageInner() {
           mediaType: 'image' as const,
           ...(transitionToNext ? { transitionToNext } : {}),
           ...(visualEffect ? { visualEffect } : {}),
+          ...soundEffectsPatch,
         };
       });
       form.append('sentences', JSON.stringify(sentencePayload));
@@ -2493,9 +2526,30 @@ export function GeneratePageInner() {
           : String(s.forced_era_key).trim();
       const resolvedForcedEraKey = forcedEraKey !== null ? forcedEraKey : inferredEraKey;
 
+      const soundEffects = (s.sound_effects ?? [])
+        .slice()
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+        .map((row) => {
+          const lib = row.sound_effect;
+          const resolvedVolumePercent =
+            row.volume_percent ?? (lib?.volume_percent ?? 100);
+
+          return {
+            id: lib.id,
+            title: lib.title,
+            url: lib.url,
+            delaySeconds: Number(row.delay_seconds ?? 0) || 0,
+            volumePercent: Math.max(
+              0,
+              Math.min(300, Number(resolvedVolumePercent ?? 100) || 100),
+            ),
+          };
+        });
+
       return {
         id: s.id,
         text: s.text,
+        soundEffects,
         characterKeys: inferredCharacterKeys,
         eraKey: inferredEraKey,
         forcedEraKey: resolvedForcedEraKey,
@@ -4004,6 +4058,222 @@ export function GeneratePageInner() {
     setLibraryTarget(null);
   };
 
+  const handleOpenSentenceSoundEffectsLibrary = (index: number) => {
+    setSoundEffectsLibraryTargetIndex(index);
+    setIsSoundEffectsLibraryOpen(true);
+  };
+
+  const handleApplySentenceSoundEffectsFromLibrary = (items: SoundEffectDto[]) => {
+    if (soundEffectsLibraryTargetIndex === null) return;
+    const index = soundEffectsLibraryTargetIndex;
+
+    setSentences((prev) =>
+      prev.map((s, i) => {
+        if (i !== index) return s;
+
+        const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
+        const additions = (items ?? []).map((it) => ({
+          id: it.id,
+          title: String((it as any).name ?? it.title ?? 'Sound effect'),
+          url: it.url,
+          delaySeconds: 0,
+          volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
+        }));
+
+        return {
+          ...s,
+          soundEffects: [...current, ...additions],
+        };
+      }),
+    );
+
+    setIsSoundEffectsLibraryOpen(false);
+    setSoundEffectsLibraryTargetIndex(null);
+  };
+
+  const handleUploadSentenceSoundEffect = async (index: number, files: File[]) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+
+    const list = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (list.length === 0) return;
+
+    const sentenceId = sentence.id;
+    setIsUploadingSentenceSfxBySentenceId((prev) => ({ ...prev, [sentenceId]: true }));
+
+    try {
+      const createdItems: Array<{
+        id: string;
+        title: string;
+        name?: string;
+        url: string;
+        volume_percent?: number;
+      }> = [];
+
+      if (list.length === 1) {
+        const file = list[0];
+        const title = String(file.name ?? '').replace(/\.[^.]+$/u, '').trim() || 'Sound effect';
+
+        const form = new FormData();
+        form.append('soundEffect', file);
+        form.append('title', title);
+
+        const res = await api.post<{
+          id: string;
+          title: string;
+          name?: string;
+          url: string;
+          volume_percent?: number;
+        }>('/sound-effects', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+
+        createdItems.push(res.data);
+      } else {
+        const form = new FormData();
+        for (const f of list) {
+          form.append('soundEffects', f);
+        }
+
+        const res = await api.post<{
+          items: Array<{
+            id: string;
+            title: string;
+            name?: string;
+            url: string;
+            volume_percent?: number;
+          }>;
+        }>('/sound-effects/batch', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+
+        const items = Array.isArray(res.data?.items) ? res.data.items : [];
+        createdItems.push(...items);
+      }
+
+      setSentences((prev) =>
+        prev.map((s, i) => {
+          if (i !== index) return s;
+          const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
+          return {
+            ...s,
+            soundEffects: [
+              ...current,
+              ...createdItems.map((created, idx) => {
+                const fallbackTitle =
+                  String(list[idx]?.name ?? '')
+                    .replace(/\.[^.]+$/u, '')
+                    .trim() || 'Sound effect';
+                return {
+                  id: created.id,
+                  title: String(created.name ?? created.title ?? fallbackTitle),
+                  url: created.url,
+                  delaySeconds: 0,
+                  volumePercent: Math.max(
+                    0,
+                    Math.min(300, Number(created.volume_percent ?? 100) || 100),
+                  ),
+                };
+              }),
+            ],
+          };
+        }),
+      );
+
+      showToast(
+        createdItems.length > 1
+          ? `${createdItems.length} sound effects uploaded.`
+          : 'Sound effect uploaded.',
+        'success',
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Upload sound effect failed', err);
+      showToast('Failed to upload sound effect. Try again.', 'error');
+    } finally {
+      setIsUploadingSentenceSfxBySentenceId((prev) => ({ ...prev, [sentenceId]: false }));
+    }
+  };
+
+  const handleSaveSentenceSoundEffectsMix = async (index: number) => {
+    const sentence = sentences[index];
+    if (!sentence) return;
+
+    const effects = Array.isArray(sentence.soundEffects) ? sentence.soundEffects : [];
+    if (effects.length < 2) {
+      showToast('Add at least 2 sound effects to save a mix.', 'warning');
+      return;
+    }
+
+    const sentenceId = sentence.id;
+    setIsSavingSentenceSfxMixBySentenceId((prev) => ({ ...prev, [sentenceId]: true }));
+
+    try {
+      const title = `Sentence ${index + 1} SFX mix`;
+      const res = await api.post<{
+        id: string;
+        title: string;
+        url: string;
+        volume_percent?: number;
+      }>('/sound-effects/merge', {
+        title,
+        items: effects.map((e) => ({
+          sound_effect_id: e.id,
+          delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+          volume_percent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+        })),
+      });
+
+      const merged = res.data;
+
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? {
+              ...s,
+              soundEffects: [
+                {
+                  id: merged.id,
+                  title: merged.title,
+                  url: merged.url,
+                  delaySeconds: 0,
+                  volumePercent: Math.max(
+                    0,
+                    Math.min(300, Number(merged.volume_percent ?? 100) || 100),
+                  ),
+                },
+              ],
+            }
+            : s,
+        ),
+      );
+
+      showToast('Mix saved to your sound effects library.', 'success');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Save sound effects mix failed', err);
+      showToast('Failed to save mix. Try again.', 'error');
+    } finally {
+      setIsSavingSentenceSfxMixBySentenceId((prev) => ({ ...prev, [sentenceId]: false }));
+    }
+  };
+
+  const handleSentenceSoundEffectsChange = (
+    index: number,
+    next: NonNullable<SentenceItem['soundEffects']>,
+  ) => {
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? {
+            ...s,
+            soundEffects: Array.isArray(next) ? next : [],
+          }
+          : s,
+      ),
+    );
+  };
+
   const handleSyncElevenLabsVoices = async () => {
     setSyncVoicesResult(null);
     setIsSyncingVoices(true);
@@ -4242,6 +4512,12 @@ export function GeneratePageInner() {
           forced_character_keys?: string[];
           transition_to_next?: SentenceItem['transitionToNext'] | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+          sound_effects?: Array<{
+            sound_effect_id: string;
+            index: number;
+            delay_seconds: number;
+            volume_percent: number;
+          }>;
         }[] = [];
 
         for (let index = 0; index < items.length; index += 1) {
@@ -4299,6 +4575,19 @@ export function GeneratePageInner() {
               s.visualEffect === 'glassStrong'
                 ? s.visualEffect
                 : null,
+            sound_effects: Array.isArray(s.soundEffects)
+              ? s.soundEffects
+                  .filter((e) => Boolean(e?.id))
+                  .map((e, idx) => ({
+                    sound_effect_id: String(e.id),
+                    index: idx,
+                    delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+                    volume_percent: Math.max(
+                      0,
+                      Math.min(300, Number(e.volumePercent ?? 100) || 100),
+                    ),
+                  }))
+              : undefined,
           });
         }
 
@@ -5307,6 +5596,13 @@ export function GeneratePageInner() {
                   onSentenceVideoPromptChange={handleSentenceVideoPromptChange}
                   onGenerateSentenceVideoPrompt={handleGenerateSentenceVideoPromptWithAi}
                   isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
+
+                  onOpenSentenceSoundEffectsLibrary={handleOpenSentenceSoundEffectsLibrary}
+                  onSentenceSoundEffectsChange={handleSentenceSoundEffectsChange}
+                  onUploadSentenceSoundEffect={handleUploadSentenceSoundEffect}
+                  isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
+                  onSaveSentenceSoundEffectsMix={handleSaveSentenceSoundEffectsMix}
+                  isSavingSentenceSfxMixBySentenceId={isSavingSentenceSfxMixBySentenceId}
                   onSentenceReferenceImageUpload={
                     handleSentenceReferenceImageUpload
                   }
@@ -5500,6 +5796,13 @@ export function GeneratePageInner() {
           script: s.script,
         }))}
         onApplyReferenceScripts={handleApplyReferenceScripts}
+
+        isSoundEffectsLibraryOpen={isSoundEffectsLibraryOpen}
+        onCloseSoundEffectsLibrary={() => {
+          setIsSoundEffectsLibraryOpen(false);
+          setSoundEffectsLibraryTargetIndex(null);
+        }}
+        onApplySoundEffects={handleApplySentenceSoundEffectsFromLibrary}
         alertState={alertState}
         onCloseAlert={closeAlert}
       />

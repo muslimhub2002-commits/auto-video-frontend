@@ -7,6 +7,7 @@ import { VideoLibraryModal } from './VideoLibraryModal';
 import { ScriptLibraryModal, type ScriptDto } from './ScriptLibraryModal';
 import { ScriptReferencesModal, type ScriptReferenceDto } from './ScriptReferencesModal';
 import { VoiceLibraryModal } from './VoiceLibraryModal';
+import { SoundEffectsLibraryModal, type SoundEffectDto } from './SoundEffectsLibraryModal';
 
 type LibraryTarget =
   | {
@@ -48,6 +49,10 @@ type GenerateModalsHostProps = {
   initialSelectedReferenceScripts: ScriptReferenceDto[];
   onApplyReferenceScripts: (scripts: ScriptReferenceDto[]) => void;
 
+  isSoundEffectsLibraryOpen: boolean;
+  onCloseSoundEffectsLibrary: () => void;
+  onApplySoundEffects: (items: SoundEffectDto[]) => void;
+
   alertState: AlertState;
   onCloseAlert: () => void;
 };
@@ -85,6 +90,10 @@ export function GenerateModalsHost({
   onCloseScriptReferences,
   initialSelectedReferenceScripts,
   onApplyReferenceScripts,
+
+  isSoundEffectsLibraryOpen,
+  onCloseSoundEffectsLibrary,
+  onApplySoundEffects,
   alertState,
   onCloseAlert,
 }: GenerateModalsHostProps) {
@@ -124,6 +133,12 @@ export function GenerateModalsHost({
         onClose={onCloseScriptReferences}
         initialSelected={initialSelectedReferenceScripts}
         onApply={onApplyReferenceScripts}
+      />
+
+      <SoundEffectsLibraryModal
+        isOpen={isSoundEffectsLibraryOpen}
+        onClose={onCloseSoundEffectsLibrary}
+        onApply={onApplySoundEffects}
       />
 
       <AlertModal
