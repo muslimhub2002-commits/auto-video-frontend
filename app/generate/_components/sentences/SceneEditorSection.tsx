@@ -28,6 +28,7 @@ type ScriptCharacter = {
 type SceneEditorSectionProps = {
   sentences: SentenceItem[];
   isShortVideo: boolean;
+  sceneDurationSecondsByIndex: Array<number | null>;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
 
@@ -37,6 +38,10 @@ type SceneEditorSectionProps = {
   onSentenceSoundEffectsChange: (
     index: number,
     next: NonNullable<SentenceItem['soundEffects']>,
+  ) => void;
+  onSentenceAlignSoundEffectsToSceneEndChange: (
+    index: number,
+    next: boolean,
   ) => void;
   onUploadSentenceSoundEffect: (index: number, files: File[]) => void | Promise<void>;
   isUploadingSentenceSfxBySentenceId: Record<string, boolean>;
@@ -138,6 +143,7 @@ type SceneEditorSectionProps = {
 export function SceneEditorSection({
   sentences,
   isShortVideo,
+  sceneDurationSecondsByIndex,
   isGeneratingAllImages,
   onGenerateAllImages,
 
@@ -145,6 +151,7 @@ export function SceneEditorSection({
 
   onOpenSentenceSoundEffectsLibrary,
   onSentenceSoundEffectsChange,
+  onSentenceAlignSoundEffectsToSceneEndChange,
   onUploadSentenceSoundEffect,
   isUploadingSentenceSfxBySentenceId,
   onSaveSentenceSoundEffectsMix,
@@ -369,10 +376,14 @@ export function SceneEditorSection({
                   item={item}
                   index={index}
                   isShortVideo={isShortVideo}
+                  sceneDurationSeconds={sceneDurationSecondsByIndex[index] ?? null}
                   isFirst={index === 0}
                   isLast={index === sentences.length - 1}
                   onOpenSoundEffectsLibrary={() => onOpenSentenceSoundEffectsLibrary(index)}
                   onSoundEffectsChange={(next) => onSentenceSoundEffectsChange(index, next)}
+                  onAlignSoundEffectsToSceneEndChange={(next) =>
+                    onSentenceAlignSoundEffectsToSceneEndChange(index, next)
+                  }
                   onUploadSoundEffect={(files) => onUploadSentenceSoundEffect(index, files)}
                   isUploadingSoundEffect={Boolean(isUploadingSentenceSfxBySentenceId[item.id])}
                   onSaveSoundEffectsMix={() => onSaveSentenceSoundEffectsMix(index)}

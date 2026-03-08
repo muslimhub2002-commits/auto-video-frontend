@@ -19,7 +19,10 @@ import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
-import { computeSentenceSoundEffectTiming } from '../../_utils/soundEffectsTiming';
+import {
+  computeSentenceSoundEffectTiming,
+  getSentenceSoundEffectsStackDuration,
+} from '../../_utils/soundEffectsTiming';
 import {
   Select,
   SelectContent,
@@ -159,6 +162,7 @@ type SortableSentenceSoundEffectCardProps = {
   sfx: NonNullable<SentenceItem['soundEffects']>[number];
   sfxIndex: number;
   isLast: boolean;
+  isDelayDisabled: boolean;
   nextTimingMode: 'withPrevious' | 'afterPreviousEnds';
   singleStatus: 'idle' | 'loading' | 'playing';
   truncateTitle: (value: string) => string;
@@ -174,6 +178,7 @@ function SortableSentenceSoundEffectCard({
   sfx,
   sfxIndex,
   isLast,
+  isDelayDisabled,
   nextTimingMode,
   singleStatus,
   truncateTitle,
@@ -251,13 +256,7 @@ function SortableSentenceSoundEffectCard({
               ) : (
                 <Play className="h-4 w-4" />
               )}
-              <span className="text-xs font-semibold">
-                {singleStatus === 'loading'
-                  ? 'Loading...'
-                  : singleStatus === 'playing'
-                    ? 'Stop'
-                    : 'Play'}
-              </span>
+              
             </Button>
 
             <Button
@@ -269,7 +268,6 @@ function SortableSentenceSoundEffectCard({
               title="Edit name & volume"
             >
               <Pencil className="h-4 w-4" />
-              <span className="text-xs font-semibold">Edit</span>
             </Button>
 
             <Button
@@ -281,7 +279,6 @@ function SortableSentenceSoundEffectCard({
               title="Remove"
             >
               <X className="h-4 w-4" />
-              <span className="text-xs font-semibold">Remove</span>
             </Button>
           </div>
         </div>
@@ -308,8 +305,13 @@ function SortableSentenceSoundEffectCard({
                 value={String(Number(sfx.delaySeconds ?? 0))}
                 onChange={(e) => onDelayChange(Math.max(0, Number(e.target.value) || 0))}
                 className="h-9 pr-10"
+                disabled={isDelayDisabled}
                 placeholder="0.0"
-                title="Start offset in seconds"
+                title={
+                  isDelayDisabled
+                    ? 'Start offset is disabled while ending the sound stack with the scene'
+                    : 'Start offset in seconds'
+                }
               />
               <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
                 s
@@ -399,11 +401,13 @@ type SentenceEditorCardProps = {
   item: SentenceItem;
   index: number;
   isShortVideo: boolean;
+  sceneDurationSeconds: number | null;
   isFirst: boolean;
   isLast: boolean;
 
   onOpenSoundEffectsLibrary: () => void;
   onSoundEffectsChange: (next: NonNullable<SentenceItem['soundEffects']>) => void;
+  onAlignSoundEffectsToSceneEndChange: (next: boolean) => void;
   onUploadSoundEffect: (files: File[]) => void | Promise<void>;
   isUploadingSoundEffect: boolean;
   onSaveSoundEffectsMix: () => void | Promise<void>;
@@ -472,11 +476,13 @@ export function SentenceEditorCard({
   item,
   index,
   isShortVideo,
+  sceneDurationSeconds,
   isFirst,
   isLast,
 
   onOpenSoundEffectsLibrary,
   onSoundEffectsChange,
+  onAlignSoundEffectsToSceneEndChange,
   onUploadSoundEffect,
   isUploadingSoundEffect,
   onSaveSoundEffectsMix,
@@ -546,6 +552,20 @@ export function SentenceEditorCard({
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
 
   const soundEffects = Array.isArray(item.soundEffects) ? item.soundEffects : [];
+  const soundEffectsStackDuration = getSentenceSoundEffectsStackDuration(soundEffects, {
+    ignoreOffsets: true,
+  });
+  const hasUnknownSoundEffectDuration =
+    soundEffects.length > 0 && soundEffectsStackDuration === null;
+  const canCompareStackToSceneDuration =
+    typeof sceneDurationSeconds === 'number' && Number.isFinite(sceneDurationSeconds);
+  const soundEffectsOverflowScene =
+    canCompareStackToSceneDuration &&
+    soundEffectsStackDuration !== null &&
+    soundEffectsStackDuration > (sceneDurationSeconds ?? 0) + 0.0001;
+  const isAlignSoundEffectsToSceneEndEnabled = item.alignSoundEffectsToSceneEnd === true;
+  const isAlignSoundEffectsToSceneEndDisabled =
+    soundEffects.length === 0 || hasUnknownSoundEffectDuration || soundEffectsOverflowScene;
   const soundEffectSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -572,12 +592,22 @@ export function SentenceEditorCard({
     onSoundEffectsChange(normalizeSoundEffects(next));
   };
 
+  useEffect(() => {
+    if (!isAlignSoundEffectsToSceneEndEnabled) return;
+    if (!isAlignSoundEffectsToSceneEndDisabled) return;
+    onAlignSoundEffectsToSceneEndChange(false);
+  }, [
+    isAlignSoundEffectsToSceneEndDisabled,
+    isAlignSoundEffectsToSceneEndEnabled,
+    onAlignSoundEffectsToSceneEndChange,
+  ]);
+
   const [mixStatus, setMixStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [singleStatusByIndex, setSingleStatusByIndex] = useState<
     Record<number, 'idle' | 'loading' | 'playing'>
   >({});
 
-  const [isSoundEffectsOpen, setIsSoundEffectsOpen] = useState(true);
+  const [isSoundEffectsOpen, setIsSoundEffectsOpen] = useState(false);
 
   const [editingSoundEffectIndex, setEditingSoundEffectIndex] = useState<number | null>(null);
   const [isSavingSoundEffectEdit, setIsSavingSoundEffectEdit] = useState(false);
@@ -662,7 +692,9 @@ export function SentenceEditorCard({
     // Stop any single first.
     stopAllScheduledAudio();
 
-    const timedSoundEffects = computeSentenceSoundEffectTiming(soundEffects);
+    const timedSoundEffects = computeSentenceSoundEffectTiming(soundEffects, {
+      ignoreOffsets: isAlignSoundEffectsToSceneEndEnabled,
+    });
     const shouldShowLoading = timedSoundEffects.some((sfx) => {
       const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
       return !soundEffectsEverStartedRef.current.has(key);
@@ -707,7 +739,9 @@ export function SentenceEditorCard({
 
     scheduleAudio({
       url: sfx.url,
-      delaySeconds: sfx.delaySeconds,
+      delaySeconds: isAlignSoundEffectsToSceneEndEnabled
+        ? 0
+        : Math.max(0, Number(sfx.delaySeconds ?? 0) || 0),
       volumePercent: sfx.volumePercent,
       onPlaying: () => {
         soundEffectsEverStartedRef.current.add(key);
@@ -949,7 +983,7 @@ export function SentenceEditorCard({
                 className={
                   visualEffectValue === '__none__'
                     ? 'border-none focus-none h-9 w-48 bg-white border-gray-200 text-gray-600 shadow-sm [&>svg]:text-gray-600'
-                    : 'border-none focus-none h-9 w-48 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 outline-none font-semibold text-white border-transparent shadow-md [&>svg]:text-white'
+                    : 'border-none focus-none capitalize h-9 w-48 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 outline-none font-semibold text-white border-transparent shadow-md [&>svg]:text-white'
                 }
                 title={`Visual effect: ${visualEffectLabel}`}
               >
@@ -1215,12 +1249,12 @@ export function SentenceEditorCard({
             <div className="rounded-2xl border border-indigo-200/70 bg-linear-to-br from-white via-indigo-50/40 to-purple-50/30 shadow-sm overflow-hidden">
               <div className="px-4 py-4 border-b border-indigo-200/60 bg-linear-to-r from-indigo-50 via-purple-50/40 to-pink-50/30">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-3">
                     <div className="p-2 bg-white/70 rounded-xl border border-indigo-200/60 shadow-sm">
                       <Music2 className="h-4 w-4 text-indigo-600" />
                     </div>
                     <div>
-                      <p className="text-sm font-bold bg-linear-to-r from-gray-900 via-purple-900 to-indigo-900 bg-clip-text text-transparent">Sound Effects</p>
+                      <p className="text-sm font-bold bg-linear-to-r from-gray-900 via-purple-900 to-indigo-900 bg-clip-text text-transparent">Sound Effects ({soundEffects.length})</p>
                       <p className="text-xs text-gray-500">Start with this sentence (plus delay)</p>
                     </div>
                   </div>
@@ -1441,6 +1475,65 @@ export function SentenceEditorCard({
                     </Button>
                   </div>
 
+                  <div className="mt-3 rounded-xl border border-sky-200 bg-linear-to-r from-sky-50 via-white to-indigo-50 px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="rounded-lg bg-white/80 p-1.5 shadow-sm ring-1 ring-sky-100">
+                            <Clock className="h-3.5 w-3.5 text-sky-700" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-bold text-gray-900">Scene-end alignment</p>
+                            <p className="text-[10px] text-gray-600">
+                              Make all sound effects finish exactly when this scene ends.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        <span
+                          className={
+                            isAlignSoundEffectsToSceneEndEnabled
+                              ? 'inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700'
+                              : 'inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600'
+                          }
+                        >
+                          {isAlignSoundEffectsToSceneEndEnabled ? 'Aligned to scene end' : 'Using normal timing'}
+                        </span>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={isAlignSoundEffectsToSceneEndEnabled ? 'default' : 'outline'}
+                          disabled={isAlignSoundEffectsToSceneEndDisabled}
+                          onClick={() =>
+                            onAlignSoundEffectsToSceneEndChange(
+                              !isAlignSoundEffectsToSceneEndEnabled,
+                            )
+                          }
+                          className={
+                            isAlignSoundEffectsToSceneEndEnabled
+                              ? 'mt-2 h-7 px-3 text-[11px] bg-sky-600 text-white hover:bg-sky-700'
+                              : 'mt-2 h-7 px-3 text-[11px] border-sky-200 text-sky-700 hover:bg-sky-100'
+                          }
+                        >
+                          {isAlignSoundEffectsToSceneEndEnabled ? 'Disable alignment' : 'Align to scene end'}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* <p className="mt-2 text-[10px] leading-relaxed text-gray-600">
+                      {hasUnknownSoundEffectDuration
+                        ? 'This mode needs duration metadata for every sound effect before it can be enabled.'
+                        : soundEffectsOverflowScene
+                          ? `This stack is ${soundEffectsStackDuration?.toFixed(2)}s long and exceeds the estimated ${Number(sceneDurationSeconds ?? 0).toFixed(2)}s scene duration.`
+                          : canCompareStackToSceneDuration && soundEffectsStackDuration !== null
+                            ? `Current stack: ${soundEffectsStackDuration.toFixed(2)}s within an estimated ${Number(sceneDurationSeconds ?? 0).toFixed(2)}s scene. When enabled, start offsets are ignored and the whole stack is shifted to the scene end.`
+                            : 'Scene duration will be validated again by the backend when you render or reopen the draft.'}
+                    </p> */}
+                  </div>
+
                   {soundEffects.length === 0 ? (
                     <p className="mt-3 text-xs text-gray-500">
                       No sound effects yet. Upload one or pick from your library.
@@ -1462,6 +1555,7 @@ export function SentenceEditorCard({
                               sfx={sfx}
                               sfxIndex={sfxIndex}
                               isLast={sfxIndex === soundEffects.length - 1}
+                              isDelayDisabled={isAlignSoundEffectsToSceneEndEnabled}
                               nextTimingMode={
                                 soundEffects[sfxIndex + 1]?.timingMode === 'afterPreviousEnds'
                                   ? 'afterPreviousEnds'

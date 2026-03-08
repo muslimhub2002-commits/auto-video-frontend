@@ -3,6 +3,7 @@ export type SentenceItem = {
   text: string;
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
+  alignSoundEffectsToSceneEnd?: boolean;
 
   soundEffects?: Array<{
     id: string;

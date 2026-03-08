@@ -47,6 +47,12 @@ export function SoundEffectsLibraryModal({
   const PAGE_SIZE = pageSize;
   const FILTER_DEBOUNCE_MS = 300;
 
+  const applySavedVolumeToAudio = (audioElement: HTMLAudioElement | null, volumePercent?: number) => {
+    if (!audioElement) return;
+    const normalizedVolume = Math.max(0, Math.min(1, (Number(volumePercent ?? 100) || 0) / 100));
+    audioElement.volume = normalizedVolume;
+  };
+
   const [items, setItems] = useState<SoundEffectDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -409,7 +415,13 @@ export function SoundEffectsLibraryModal({
                           </div>
                         </div>
                         <div className="mt-2">
-                          <audio controls src={it.url} className="w-full h-8" />
+                          <audio
+                            controls
+                            src={it.url}
+                            className="w-full h-8"
+                            ref={(node) => applySavedVolumeToAudio(node, resolvedVolume)}
+                            onPlay={(event) => applySavedVolumeToAudio(event.currentTarget, resolvedVolume)}
+                          />
                         </div>
                       </div>
                     </button>

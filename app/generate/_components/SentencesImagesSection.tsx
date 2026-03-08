@@ -63,6 +63,7 @@ type ShortsTabMeta = {
 type SentencesImagesSectionProps = {
   sentences: SentenceItem[];
   isShortVideo: boolean;
+  sceneDurationSecondsByIndex: Array<number | null>;
   isLongForm?: boolean;
 
   shortsTabs?: ShortsTabMeta[];
@@ -149,6 +150,7 @@ type SentencesImagesSectionProps = {
 
   onOpenSentenceSoundEffectsLibrary: (index: number) => void;
   onSentenceSoundEffectsChange: (index: number, next: NonNullable<SentenceItem['soundEffects']>) => void;
+  onSentenceAlignSoundEffectsToSceneEndChange: (index: number, next: boolean) => void;
   onUploadSentenceSoundEffect: (index: number, files: File[]) => void | Promise<void>;
   isUploadingSentenceSfxBySentenceId: Record<string, boolean>;
   onSaveSentenceSoundEffectsMix: (index: number) => void | Promise<void>;
@@ -192,6 +194,7 @@ type SentencesImagesSectionProps = {
 export function SentencesImagesSection({
   sentences,
   isShortVideo,
+  sceneDurationSecondsByIndex,
   isGeneratingAllImages,
   onGenerateAllImages,
 
@@ -244,6 +247,7 @@ export function SentencesImagesSection({
 
   onOpenSentenceSoundEffectsLibrary,
   onSentenceSoundEffectsChange,
+  onSentenceAlignSoundEffectsToSceneEndChange,
   onUploadSentenceSoundEffect,
   isUploadingSentenceSfxBySentenceId,
   onSaveSentenceSoundEffectsMix,
@@ -541,6 +545,7 @@ export function SentencesImagesSection({
             <SceneEditorSection
               sentences={sentences}
               isShortVideo={isShortVideo}
+              sceneDurationSecondsByIndex={sceneDurationSecondsByIndex}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
@@ -548,6 +553,9 @@ export function SentencesImagesSection({
 
               onOpenSentenceSoundEffectsLibrary={onOpenSentenceSoundEffectsLibrary}
               onSentenceSoundEffectsChange={onSentenceSoundEffectsChange}
+              onSentenceAlignSoundEffectsToSceneEndChange={
+                onSentenceAlignSoundEffectsToSceneEndChange
+              }
               onUploadSentenceSoundEffect={onUploadSentenceSoundEffect}
               isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
               onSaveSentenceSoundEffectsMix={onSaveSentenceSoundEffectsMix}

@@ -30,7 +30,9 @@ import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { RenderSettingsSection } from './_components/RenderSettingsSection';
 import { GenerateModalsHost } from './_components/GenerateModalsHost';
 import type { SoundEffectDto } from './_components/SoundEffectsLibraryModal';
-import { computeSentenceSoundEffectTiming } from './_utils/soundEffectsTiming';
+import {
+  computeSentenceSoundEffectTiming,
+} from './_utils/soundEffectsTiming';
 import {
   TranslateScriptModal,
   type TranslateMethod,
@@ -66,6 +68,7 @@ type BackendSentenceDto = {
   id: string;
   text: string;
   index: number;
+  align_sound_effects_to_scene_end?: boolean | null;
   image?: { id: string; image: string; prompt?: string | null } | null;
   startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
@@ -695,6 +698,26 @@ export function GeneratePageInner() {
     return words / 2.5;
   };
 
+  const buildEstimatedSceneDurationSeconds = (
+    items: SentenceItem[],
+    totalDurationSeconds: number | null,
+  ) => {
+    if (!Array.isArray(items) || items.length === 0) return [] as Array<number | null>;
+    if (!totalDurationSeconds || !Number.isFinite(totalDurationSeconds) || totalDurationSeconds <= 0) {
+      return items.map(() => null);
+    }
+
+    const weights = items.map((sentence) => Math.max(estimateSecondsForText(sentence.text), 0));
+    const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+
+    if (totalWeight <= 0) {
+      const evenDuration = totalDurationSeconds / items.length;
+      return items.map(() => evenDuration);
+    }
+
+    return weights.map((weight) => (totalDurationSeconds * weight) / totalWeight);
+  };
+
   const buildManualShortRanges = (storySentences: SentenceItem[]) => {
     const minSecondsPerShort = 30;
     const totalSentences = storySentences.length;
@@ -973,11 +996,17 @@ export function GeneratePageInner() {
       const trimmed = text.trim();
 
       const soundEffects = Array.isArray(s.soundEffects)
-        ? computeSentenceSoundEffectTiming(s.soundEffects)
+        ? computeSentenceSoundEffectTiming(s.soundEffects, {
+            ignoreOffsets: s.alignSoundEffectsToSceneEnd === true,
+          })
             .filter((e) => Boolean(e?.url))
             .map((e) => ({
               src: String(e.url).trim(),
               delaySeconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
+              durationSeconds:
+                typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
+                  ? Math.max(0, e.durationSeconds)
+                  : undefined,
               volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
             }))
         : [];
@@ -993,6 +1022,8 @@ export function GeneratePageInner() {
         : [];
 
       const soundEffectsPatch = soundEffects.length ? { soundEffects } : {};
+      const soundEffectsAlignPatch =
+        s.alignSoundEffectsToSceneEnd === true ? { soundEffectsAlignToSceneEnd: true } : {};
       const transitionSoundEffectsPatch = transitionSoundEffects.length
         ? { transitionSoundEffects }
         : {};
@@ -1010,6 +1041,7 @@ export function GeneratePageInner() {
           videoUrl: '/subscribe.mp4',
           ...(transitionToNext ? { transitionToNext } : {}),
           ...soundEffectsPatch,
+          ...soundEffectsAlignPatch,
           ...transitionSoundEffectsPatch,
         };
       }
@@ -1023,6 +1055,7 @@ export function GeneratePageInner() {
           videoUrl: String(s.videoUrl ?? '').trim(),
           ...(transitionToNext ? { transitionToNext } : {}),
           ...soundEffectsPatch,
+          ...soundEffectsAlignPatch,
           ...transitionSoundEffectsPatch,
         };
       }
@@ -1036,6 +1069,7 @@ export function GeneratePageInner() {
         ...(transitionToNext ? { transitionToNext } : {}),
         ...(visualEffect ? { visualEffect } : {}),
         ...soundEffectsPatch,
+        ...soundEffectsAlignPatch,
         ...transitionSoundEffectsPatch,
       };
     });
@@ -2902,6 +2936,7 @@ export function GeneratePageInner() {
       return {
         id: s.id,
         text: s.text,
+        alignSoundEffectsToSceneEnd: s.align_sound_effects_to_scene_end === true,
         soundEffects,
         transitionSoundEffects,
         characterKeys: inferredCharacterKeys,
@@ -4538,7 +4573,9 @@ export function GeneratePageInner() {
 
     try {
       const title = `Sentence ${index + 1} SFX mix`;
-      const timedEffects = computeSentenceSoundEffectTiming(effects);
+      const timedEffects = computeSentenceSoundEffectTiming(effects, {
+        ignoreOffsets: sentence.alignSoundEffectsToSceneEnd === true,
+      });
       const res = await api.post<{
         id: string;
         title: string;
@@ -4604,6 +4641,22 @@ export function GeneratePageInner() {
           ? {
             ...s,
             soundEffects: Array.isArray(next) ? next : [],
+          }
+          : s,
+      ),
+    );
+  };
+
+  const handleSentenceAlignSoundEffectsToSceneEndChange = (
+    index: number,
+    next: boolean,
+  ) => {
+    setSentences((prev) =>
+      prev.map((s, i) =>
+        i === index
+          ? {
+            ...s,
+            alignSoundEffectsToSceneEnd: next,
           }
           : s,
       ),
@@ -4933,6 +4986,7 @@ export function GeneratePageInner() {
           video_prompt?: string;
           isSuspense?: boolean;
           forced_character_keys?: string[];
+          align_sound_effects_to_scene_end?: boolean;
           transition_to_next?: SentenceItem['transitionToNext'] | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
           sound_effects?: Array<{
@@ -4996,6 +5050,7 @@ export function GeneratePageInner() {
             forced_character_keys: Array.isArray(s.forcedCharacterKeys)
               ? s.forcedCharacterKeys
               : undefined,
+            align_sound_effects_to_scene_end: s.alignSoundEffectsToSceneEnd === true,
             transition_to_next: s.transitionToNext ?? null,
             visual_effect:
               s.visualEffect === 'colorGrading' ||
@@ -5945,6 +6000,10 @@ export function GeneratePageInner() {
                 <SentencesImagesSection
                   sentences={sentences}
                   isShortVideo={effectiveIsShort}
+                  sceneDurationSecondsByIndex={buildEstimatedSceneDurationSeconds(
+                    sentences,
+                    voiceDuration,
+                  )}
                   isLongForm={isLongForm}
                   shortsTabs={(shortRanges.length
                     ? shortRanges
@@ -6051,6 +6110,9 @@ export function GeneratePageInner() {
 
                   onOpenSentenceSoundEffectsLibrary={handleOpenSentenceSoundEffectsLibrary}
                   onSentenceSoundEffectsChange={handleSentenceSoundEffectsChange}
+                  onSentenceAlignSoundEffectsToSceneEndChange={
+                    handleSentenceAlignSoundEffectsToSceneEndChange
+                  }
                   onUploadSentenceSoundEffect={handleUploadSentenceSoundEffect}
                   isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
                   onSaveSentenceSoundEffectsMix={handleSaveSentenceSoundEffectsMix}

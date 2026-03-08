@@ -55,7 +55,7 @@ export function GenerateTestVideoModal({
   onGenerate,
 }: GenerateTestVideoModalProps) {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
-  const [voiceMode, setVoiceMode] = useState<TestVideoVoiceMode>('current');
+  const [voiceMode, setVoiceMode] = useState<TestVideoVoiceMode>('none');
   const [uploadedVoiceOver, setUploadedVoiceOver] = useState<File | null>(null);
   const [showSilentFallbackAlert, setShowSilentFallbackAlert] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
