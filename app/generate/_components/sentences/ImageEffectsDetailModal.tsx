@@ -566,7 +566,7 @@ export function ImageEffectsDetailModal({
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Save className="h-4 w-4 text-sky-600" />
-                    Save custom motion
+                    <span className='capitalize'>Save custom motion</span>
                   </div>
                   <div className="flex gap-2">
                     <Input

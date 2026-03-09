@@ -4,10 +4,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import {
   Loader2,
   Music2,
   Pause,
   Play,
+  Repeat,
+  Scissors,
   Save,
   SlidersHorizontal,
   Sparkles,
@@ -52,6 +60,7 @@ type RangeFieldProps = {
   max: number;
   step: number;
   suffix?: string;
+  displayValue?: string;
   disabled?: boolean;
   onChange: (next: number) => void;
 };
@@ -60,6 +69,21 @@ const clampVolume = (raw: unknown) => {
   const value = Number(raw);
   if (!Number.isFinite(value)) return 100;
   return Math.max(0, Math.min(300, value));
+};
+
+const clampDuration = (raw: unknown, fallback = 0) => {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(600, value));
+};
+
+const roundDuration = (value: number) => Math.round(value * 100) / 100;
+const MIN_TRIM_GAP_SECONDS = 0.05;
+const WAVEFORM_BAR_COUNT = 72;
+
+const formatSeconds = (value: number | null) => {
+  if (value === null || !Number.isFinite(value)) return 'Unknown';
+  return `${roundDuration(value).toFixed(value >= 10 ? 1 : 2)} s`;
 };
 
 const createDistortionCurve = (drive: number) => {
@@ -99,6 +123,7 @@ function RangeField({
   max,
   step,
   suffix,
+  displayValue,
   disabled,
   onChange,
 }: RangeFieldProps) {
@@ -107,7 +132,7 @@ function RangeField({
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs font-semibold text-slate-300">{label}</p>
         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700">
-          {Number.isInteger(value) ? value : value.toFixed(step >= 1 ? 0 : 2)}{suffix ?? ''}
+          {displayValue ?? `${Number.isInteger(value) ? value : value.toFixed(step >= 1 ? 0 : 2)}${suffix ?? ''}`}
         </span>
       </div>
       <input
@@ -146,7 +171,17 @@ export function SoundEffectEditModal({
     cloneSoundEffectAudioSettings(DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS),
   );
   const [previewStatus, setPreviewStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const [isPreviewLoopEnabled, setIsPreviewLoopEnabled] = useState(false);
+  const [audioDurationSeconds, setAudioDurationSeconds] = useState<number | null>(null);
+  const [waveformSamples, setWaveformSamples] = useState<number[]>([]);
   const editSessionKeyRef = useRef<string | null>(null);
+  const previewLoopEnabledRef = useRef(false);
+  const previewStartRef = useRef(0);
+  const previewEndRef = useRef<number | null>(null);
+  const trimWaveformRef = useRef<HTMLDivElement | null>(null);
+  const trimDragModeRef = useRef<'start' | 'end' | null>(null);
+  const playheadAnimationFrameRef = useRef<number | null>(null);
+  const playheadIndicatorRef = useRef<HTMLDivElement | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -165,24 +200,205 @@ export function SoundEffectEditModal({
   const reverbWetGainRef = useRef<GainNode | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
 
+  const resolveTrimWindow = (settings: SoundEffectAudioSettings, sourceDuration = audioDurationSeconds) => {
+    const hasSourceDuration = Number.isFinite(sourceDuration) && (sourceDuration ?? 0) > 0;
+    const safeSourceDuration = hasSourceDuration ? Number(sourceDuration) : null;
+    const maxStart = safeSourceDuration === null ? 600 : Math.max(0, safeSourceDuration - MIN_TRIM_GAP_SECONDS);
+    const startSeconds = Math.min(clampDuration(settings.trim.startSeconds), maxStart);
+    const requestedDuration = clampDuration(settings.trim.durationSeconds);
+    const remainingDuration = safeSourceDuration === null ? null : Math.max(MIN_TRIM_GAP_SECONDS, safeSourceDuration - startSeconds);
+
+    if (requestedDuration <= 0) {
+      return {
+        startSeconds,
+        endSeconds: remainingDuration === null ? null : startSeconds + remainingDuration,
+        effectiveDurationSeconds: remainingDuration,
+      };
+    }
+
+    const effectiveDurationSeconds =
+      remainingDuration === null ? requestedDuration : Math.min(requestedDuration, remainingDuration);
+
+    return {
+      startSeconds,
+      endSeconds: startSeconds + effectiveDurationSeconds,
+      effectiveDurationSeconds,
+    };
+  };
+
+  const syncAudioTrimWindow = (settings: SoundEffectAudioSettings, sourceDuration = audioDurationSeconds) => {
+    const nextWindow = resolveTrimWindow(settings, sourceDuration);
+    previewStartRef.current = nextWindow.startSeconds;
+    previewEndRef.current = nextWindow.endSeconds;
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.loop = false;
+
+    if (audio.currentTime < nextWindow.startSeconds) {
+      audio.currentTime = nextWindow.startSeconds;
+      updatePlayheadIndicator(nextWindow.startSeconds);
+      return;
+    }
+
+    if (nextWindow.endSeconds !== null && audio.currentTime > nextWindow.endSeconds) {
+      audio.currentTime = nextWindow.startSeconds;
+      updatePlayheadIndicator(nextWindow.startSeconds);
+    }
+  };
+
+  const updatePlayheadIndicator = (currentTimeSeconds: number | null) => {
+    const indicator = playheadIndicatorRef.current;
+    if (!indicator || !audioDurationSeconds || audioDurationSeconds <= 0 || currentTimeSeconds === null) {
+      if (indicator) {
+        indicator.style.opacity = '0';
+      }
+      return;
+    }
+
+    const percent = Math.max(0, Math.min(100, (currentTimeSeconds / audioDurationSeconds) * 100));
+    indicator.style.left = `${percent}%`;
+    indicator.style.opacity = '1';
+  };
+
+  const stopPlayheadAnimation = () => {
+    if (typeof window === 'undefined') return;
+    if (playheadAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(playheadAnimationFrameRef.current);
+      playheadAnimationFrameRef.current = null;
+    }
+  };
+
+  const startPlayheadAnimation = () => {
+    if (typeof window === 'undefined') return;
+
+    stopPlayheadAnimation();
+
+    const updatePlayhead = () => {
+      const audio = audioRef.current;
+      if (!audio) {
+        updatePlayheadIndicator(null);
+        playheadAnimationFrameRef.current = null;
+        return;
+      }
+
+      updatePlayheadIndicator(audio.currentTime);
+
+      if (!audio.paused && !audio.ended) {
+        playheadAnimationFrameRef.current = window.requestAnimationFrame(updatePlayhead);
+        return;
+      }
+
+      playheadAnimationFrameRef.current = null;
+    };
+
+    playheadAnimationFrameRef.current = window.requestAnimationFrame(updatePlayhead);
+  };
+
+  const updateTrimFromRatio = (mode: 'start' | 'end', ratio: number) => {
+    if (!audioDurationSeconds || audioDurationSeconds <= 0) return;
+
+    const boundedRatio = Math.max(0, Math.min(1, ratio));
+    const pointerSeconds = boundedRatio * audioDurationSeconds;
+
+    setAudioSettings((prev) => {
+      const normalizedSettings = normalizeSoundEffectAudioSettings(prev);
+      const currentWindow = resolveTrimWindow(normalizedSettings, audioDurationSeconds);
+
+      if (mode === 'start') {
+        const currentEndSeconds = currentWindow.endSeconds ?? audioDurationSeconds;
+        const nextStartSeconds = Math.min(
+          Math.max(0, pointerSeconds),
+          Math.max(0, currentEndSeconds - MIN_TRIM_GAP_SECONDS),
+        );
+        const nextDurationSeconds = normalizedSettings.trim.durationSeconds <= 0
+          ? 0
+          : Math.max(MIN_TRIM_GAP_SECONDS, currentEndSeconds - nextStartSeconds);
+
+        return {
+          ...prev,
+          trim: {
+            startSeconds: roundDuration(nextStartSeconds),
+            durationSeconds: normalizedSettings.trim.durationSeconds <= 0
+              ? 0
+              : roundDuration(nextDurationSeconds),
+          },
+        };
+      }
+
+      const nextEndSeconds = Math.max(
+        currentWindow.startSeconds + MIN_TRIM_GAP_SECONDS,
+        Math.min(pointerSeconds, audioDurationSeconds),
+      );
+      const reachesSourceEnd = nextEndSeconds >= audioDurationSeconds - MIN_TRIM_GAP_SECONDS;
+
+      return {
+        ...prev,
+        trim: {
+          startSeconds: roundDuration(currentWindow.startSeconds),
+          durationSeconds: reachesSourceEnd
+            ? 0
+            : roundDuration(nextEndSeconds - currentWindow.startSeconds),
+        },
+      };
+    });
+  };
+
+  const handleWaveformPointerMove = (event: PointerEvent) => {
+    const mode = trimDragModeRef.current;
+    const container = trimWaveformRef.current;
+    if (!mode || !container) return;
+
+    const bounds = container.getBoundingClientRect();
+    if (!bounds.width) return;
+
+    updateTrimFromRatio(mode, (event.clientX - bounds.left) / bounds.width);
+  };
+
+  const handleWaveformPointerUp = () => {
+    trimDragModeRef.current = null;
+    window.removeEventListener('pointermove', handleWaveformPointerMove);
+    window.removeEventListener('pointerup', handleWaveformPointerUp);
+  };
+
+  const startTrimHandleDrag = (mode: 'start' | 'end') => (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (isBusy) return;
+    trimDragModeRef.current = mode;
+    window.addEventListener('pointermove', handleWaveformPointerMove);
+    window.addEventListener('pointerup', handleWaveformPointerUp, { once: true });
+    const container = trimWaveformRef.current;
+    if (container) {
+      const bounds = container.getBoundingClientRect();
+      if (bounds.width) {
+        updateTrimFromRatio(mode, (event.clientX - bounds.left) / bounds.width);
+      }
+    }
+  };
+
   const stopPreview = () => {
     const audio = audioRef.current;
     if (!audio) {
       setPreviewStatus('idle');
+      updatePlayheadIndicator(null);
       return;
     }
 
     try {
       audio.pause();
-      audio.currentTime = 0;
+      audio.currentTime = previewStartRef.current;
+      updatePlayheadIndicator(previewStartRef.current);
     } catch {
       // ignore preview shutdown errors
     }
 
+    stopPlayheadAnimation();
     setPreviewStatus('idle');
   };
 
   const teardownAudio = async () => {
+    stopPlayheadAnimation();
     stopPreview();
 
     const audio = audioRef.current;
@@ -299,6 +515,8 @@ export function SoundEffectEditModal({
 
   const handleClose = () => {
     editSessionKeyRef.current = null;
+    setAudioDurationSeconds(null);
+    updatePlayheadIndicator(null);
     void teardownAudio();
     onClose();
   };
@@ -320,7 +538,80 @@ export function SoundEffectEditModal({
     setName(String(initialName ?? '').trim());
     setVolumePercent(clampVolume(initialVolumePercent));
     setAudioSettings(normalizedInitialAudioSettings);
+    setAudioDurationSeconds(null);
+    setWaveformSamples([]);
+    setIsPreviewLoopEnabled(false);
+    updatePlayheadIndicator(null);
   }, [isOpen, audioUrl, initialName, initialVolumePercent, initialAudioSettings]);
+
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+
+    const url = String(audioUrl ?? '').trim();
+    if (!url) {
+      setWaveformSamples([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadWaveform = async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to load audio waveform');
+        const buffer = await response.arrayBuffer();
+
+        const AudioContextCtor = window.AudioContext || (window as typeof window & {
+          webkitAudioContext?: typeof AudioContext;
+        }).webkitAudioContext;
+
+        if (!AudioContextCtor) {
+          setWaveformSamples([]);
+          return;
+        }
+
+        const decodeContext = new AudioContextCtor();
+        try {
+          const decodedBuffer = await decodeContext.decodeAudioData(buffer.slice(0));
+          if (cancelled) return;
+
+          const channelData = decodedBuffer.getChannelData(0);
+          const bucketSize = Math.max(1, Math.floor(channelData.length / WAVEFORM_BAR_COUNT));
+          const nextSamples = Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => {
+            const start = index * bucketSize;
+            const end = Math.min(channelData.length, start + bucketSize);
+            let peak = 0;
+            for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+              peak = Math.max(peak, Math.abs(channelData[sampleIndex] ?? 0));
+            }
+            return peak;
+          });
+          const maxPeak = Math.max(...nextSamples, 0.001);
+          setWaveformSamples(nextSamples.map((sample) => Math.max(0.08, sample / maxPeak)));
+        } finally {
+          await decodeContext.close().catch(() => undefined);
+        }
+      } catch {
+        if (!cancelled) {
+          setWaveformSamples([]);
+        }
+      }
+    };
+
+    void loadWaveform();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, audioUrl]);
+
+  useEffect(() => {
+    return () => {
+      stopPlayheadAnimation();
+      window.removeEventListener('pointermove', handleWaveformPointerMove);
+      window.removeEventListener('pointerup', handleWaveformPointerUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -340,8 +631,47 @@ export function SoundEffectEditModal({
       const audio = new Audio(url);
       audio.crossOrigin = 'anonymous';
       audio.preload = 'auto';
-      audio.onended = () => setPreviewStatus('idle');
-      audio.onerror = () => setPreviewStatus('idle');
+      audio.onloadedmetadata = () => {
+        const nextDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null;
+        setAudioDurationSeconds(nextDuration);
+        syncAudioTrimWindow(normalizeSoundEffectAudioSettings(audioSettings), nextDuration);
+        updatePlayheadIndicator(previewStartRef.current);
+      };
+      audio.ontimeupdate = () => {
+        updatePlayheadIndicator(audio.currentTime);
+        const endSeconds = previewEndRef.current;
+        if (endSeconds === null || audio.currentTime < endSeconds - 0.02) return;
+
+        if (previewLoopEnabledRef.current) {
+          audio.currentTime = previewStartRef.current;
+          updatePlayheadIndicator(previewStartRef.current);
+          const replay = audio.play();
+          if (replay && typeof (replay as Promise<void>).catch === 'function') {
+            void (replay as Promise<void>).catch(() => setPreviewStatus('idle'));
+          }
+          return;
+        }
+
+        stopPreview();
+      };
+      audio.onended = () => {
+        if (previewLoopEnabledRef.current) {
+          audio.currentTime = previewStartRef.current;
+          updatePlayheadIndicator(previewStartRef.current);
+          const replay = audio.play();
+          if (replay && typeof (replay as Promise<void>).catch === 'function') {
+            void (replay as Promise<void>).catch(() => setPreviewStatus('idle'));
+          }
+          return;
+        }
+        stopPlayheadAnimation();
+        setPreviewStatus('idle');
+      };
+      audio.onerror = () => {
+        stopPlayheadAnimation();
+        updatePlayheadIndicator(null);
+        setPreviewStatus('idle');
+      };
 
       const AudioContextCtor = window.AudioContext || (window as typeof window & {
         webkitAudioContext?: typeof AudioContext;
@@ -412,6 +742,8 @@ export function SoundEffectEditModal({
       convolverRef.current = convolver;
       reverbWetGainRef.current = reverbWetGain;
       masterGainRef.current = masterGain;
+
+      syncAudioTrimWindow(normalizeSoundEffectAudioSettings(audioSettings));
     };
 
     void setup();
@@ -426,12 +758,54 @@ export function SoundEffectEditModal({
   useEffect(() => {
     const settings = normalizeSoundEffectAudioSettings(audioSettings);
     applyAudioSettingsToNodes(settings, volumePercent);
+    syncAudioTrimWindow(settings);
   }, [audioSettings, volumePercent]);
+
+  useEffect(() => {
+    previewLoopEnabledRef.current = isPreviewLoopEnabled;
+    if (!audioRef.current) return;
+    audioRef.current.loop = false;
+  }, [isPreviewLoopEnabled]);
+
+  useEffect(() => {
+    if (previewStatus !== 'playing') {
+      stopPlayheadAnimation();
+      return;
+    }
+
+    startPlayheadAnimation();
+
+    return () => {
+      stopPlayheadAnimation();
+    };
+  }, [previewStatus]);
 
   const resolvedTitle = useMemo(() => {
     const value = String(title ?? '').trim();
     return value || 'Advanced sound effect editor';
   }, [title]);
+
+  const resolvedTrimWindow = useMemo(
+    () => resolveTrimWindow(normalizeSoundEffectAudioSettings(audioSettings)),
+    [audioSettings, audioDurationSeconds],
+  );
+  const trimStartMax = audioDurationSeconds === null ? 30 : Math.max(0, roundDuration(audioDurationSeconds - MIN_TRIM_GAP_SECONDS));
+  const trimDurationMax = audioDurationSeconds === null
+    ? 30
+    : Math.max(MIN_TRIM_GAP_SECONDS, roundDuration(audioDurationSeconds - resolvedTrimWindow.startSeconds));
+  const trimDurationDisplay =
+    audioSettings.trim.durationSeconds <= 0
+      ? audioDurationSeconds === null
+        ? 'Full'
+        : `Full (${formatSeconds(resolvedTrimWindow.effectiveDurationSeconds)})`
+      : formatSeconds(resolvedTrimWindow.effectiveDurationSeconds);
+  const trimSelectionStartPercent = audioDurationSeconds && audioDurationSeconds > 0
+    ? (resolvedTrimWindow.startSeconds / audioDurationSeconds) * 100
+    : 0;
+  const trimSelectionEndPercent = audioDurationSeconds && audioDurationSeconds > 0
+    ? ((resolvedTrimWindow.endSeconds ?? audioDurationSeconds) / audioDurationSeconds) * 100
+    : 100;
+  const hasWaveform = waveformSamples.length > 0 && Boolean(audioDurationSeconds && audioDurationSeconds > 0);
 
   const isBusy = Boolean(isSaving || isApplying || isSavingAsPreset);
   const canSubmit = Boolean(String(name ?? '').trim());
@@ -485,9 +859,32 @@ export function SoundEffectEditModal({
                 <div className="flex items-center gap-2 self-end">
                   <Button
                     type="button"
+                    size="icon"
+                    variant="outline"
+                    className={`h-11 w-11 border-white/15 bg-white/5 text-white hover:bg-white/10 ${
+                      isPreviewLoopEnabled ? 'ring-2 ring-cyan-300/70 ring-offset-0' : ''
+                    }`}
+                    disabled={!audioRef.current || isBusy}
+                    onClick={() => {
+                      setIsPreviewLoopEnabled((current) => {
+                        const next = !current;
+                        if (audioRef.current) {
+                          audioRef.current.loop = next;
+                        }
+                        return next;
+                      });
+                    }}
+                    aria-pressed={isPreviewLoopEnabled}
+                    aria-label={isPreviewLoopEnabled ? 'Disable preview loop' : 'Enable preview loop'}
+                    title={isPreviewLoopEnabled ? 'Disable preview loop' : 'Enable preview loop'}
+                  >
+                    <Repeat className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
                     size="sm"
                     variant="outline"
-                    className="h-11 border-white/15 bg-white/5 text-white hover:bg-white/10"
+                    className="h-11 w-11 border-white/15 bg-white/5 text-white hover:bg-white/10"
                     disabled={!audioRef.current || isBusy}
                     onClick={async () => {
                       const audio = audioRef.current;
@@ -501,6 +898,7 @@ export function SoundEffectEditModal({
 
                       setPreviewStatus('loading');
                       try {
+                        syncAudioTrimWindow(normalizeSoundEffectAudioSettings(audioSettings));
                         if (audioContext?.state === 'suspended') {
                           await audioContext.resume();
                         }
@@ -508,7 +906,8 @@ export function SoundEffectEditModal({
                           normalizeSoundEffectAudioSettings(audioSettings),
                           volumePercent,
                         );
-                        audio.currentTime = 0;
+                        audio.currentTime = previewStartRef.current;
+                        updatePlayheadIndicator(previewStartRef.current);
                         const promise = audio.play();
                         if (!promise || typeof (promise as Promise<void>).then !== 'function') {
                           setPreviewStatus('playing');
@@ -522,22 +921,190 @@ export function SoundEffectEditModal({
                     }}
                   >
                     {previewStatus === 'loading' ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : previewStatus === 'playing' ? (
-                      <Pause className="mr-2 h-4 w-4" />
+                      <Pause className="h-4 w-4" />
                     ) : (
-                      <Play className="mr-2 h-4 w-4" />
+                      <Play className="h-4 w-4" />
                     )}
-                    {previewStatus === 'loading'
-                      ? 'Loading...'
-                      : previewStatus === 'playing'
-                        ? 'Stop preview'
-                        : 'Play preview'}
+                    
                   </Button>
                 </div>
               </div>
 
-              <div className="mt-5 grid flex-1 grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="mt-5 flex flex-col gap-4">
+                <Accordion type="single" collapsible className="w-full rounded-2xl border border-white/10 bg-white/5 px-4">
+                  <AccordionItem value="trim" className="border-none">
+                    <AccordionTrigger className="py-4 text-left text-white hover:no-underline">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-400/15 text-rose-200">
+                          <Scissors className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-white capitalize">Trim & waveform selection</p>
+                          <p className="text-xs text-slate-300">
+                            {formatSeconds(resolvedTrimWindow.startSeconds)} to {resolvedTrimWindow.endSeconds === null ? 'End' : formatSeconds(resolvedTrimWindow.endSeconds)}
+                          </p>
+                        </div>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      <div className="space-y-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-200">
+                          <p>Source duration: <span className="font-semibold text-white">{formatSeconds(audioDurationSeconds)}</span></p>
+                          <p>Current cut: <span className="font-semibold text-white">{formatSeconds(resolvedTrimWindow.startSeconds)} to {resolvedTrimWindow.endSeconds === null ? 'End' : formatSeconds(resolvedTrimWindow.endSeconds)}</span></p>
+                        </div>
+
+                        <div
+                          ref={trimWaveformRef}
+                          className="relative h-36 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-4"
+                          onClick={(event) => {
+                            if (isBusy) return;
+                            if (!audioDurationSeconds || audioDurationSeconds <= 0) return;
+                            const bounds = event.currentTarget.getBoundingClientRect();
+                            if (!bounds.width) return;
+                            const ratio = (event.clientX - bounds.left) / bounds.width;
+                            const currentEnd = resolvedTrimWindow.endSeconds ?? audioDurationSeconds;
+                            const startDistance = Math.abs(ratio * audioDurationSeconds - resolvedTrimWindow.startSeconds);
+                            const endDistance = Math.abs(ratio * audioDurationSeconds - currentEnd);
+                            updateTrimFromRatio(startDistance <= endDistance ? 'start' : 'end', ratio);
+                          }}
+                        >
+                          {hasWaveform ? (
+                            <>
+                              <div className="absolute inset-y-4 left-0 bg-slate-950/65" style={{ width: `${trimSelectionStartPercent}%` }} />
+                              <div className="absolute inset-y-4 right-0 bg-slate-950/65" style={{ width: `${100 - trimSelectionEndPercent}%` }} />
+                              <div
+                                className="absolute inset-y-4 rounded-xl border border-cyan-300/70 bg-cyan-400/10"
+                                style={{
+                                  left: `${trimSelectionStartPercent}%`,
+                                  width: `${Math.max(1, trimSelectionEndPercent - trimSelectionStartPercent)}%`,
+                                }}
+                              />
+                              <div
+                                ref={playheadIndicatorRef}
+                                className="pointer-events-none absolute inset-y-3 z-20 w-0 opacity-0"
+                                style={{ left: `${trimSelectionStartPercent}%` }}
+                              >
+                                <div className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.75)]" />
+                                <div className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 rounded-full border border-amber-100 bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.55)]" />
+                              </div>
+                              <div className="relative flex h-full items-end gap-1">
+                                {waveformSamples.map((sample, index) => {
+                                  const barTime = audioDurationSeconds
+                                    ? (index / Math.max(1, waveformSamples.length - 1)) * audioDurationSeconds
+                                    : 0;
+                                  const isInsideSelection =
+                                    barTime >= resolvedTrimWindow.startSeconds &&
+                                    barTime <= (resolvedTrimWindow.endSeconds ?? Number.POSITIVE_INFINITY);
+
+                                  return (
+                                    <div
+                                      key={`${index}-${sample}`}
+                                      className={`flex-1 rounded-full transition-colors ${isInsideSelection ? 'bg-cyan-300/95' : 'bg-white/25'}`}
+                                      style={{ height: `${Math.max(12, sample * 100)}%` }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                              <button
+                                type="button"
+                                className="absolute inset-y-3 z-10 w-4 -translate-x-1/2 rounded-full border border-cyan-200 bg-cyan-300/90 shadow-[0_0_0_4px_rgba(34,211,238,0.12)]"
+                                style={{ left: `${trimSelectionStartPercent}%` }}
+                                onPointerDown={startTrimHandleDrag('start')}
+                                onClick={(event) => event.stopPropagation()}
+                                disabled={isBusy}
+                                aria-label="Adjust trim start"
+                              />
+                              <button
+                                type="button"
+                                className="absolute inset-y-3 z-10 w-4 -translate-x-1/2 rounded-full border border-cyan-200 bg-cyan-300/90 shadow-[0_0_0_4px_rgba(34,211,238,0.12)]"
+                                style={{ left: `${trimSelectionEndPercent}%` }}
+                                onPointerDown={startTrimHandleDrag('end')}
+                                onClick={(event) => event.stopPropagation()}
+                                disabled={isBusy}
+                                aria-label="Adjust trim end"
+                              />
+                            </>
+                          ) : (
+                            <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/15 text-sm text-slate-400">
+                              {audioDurationSeconds ? 'Preparing waveform...' : 'Load a sound to trim it with waveform selection.'}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                          <RangeField
+                            label="Start"
+                            value={audioSettings.trim.startSeconds}
+                            min={0}
+                            max={trimStartMax}
+                            step={0.05}
+                            suffix=" s"
+                            disabled={isBusy}
+                            onChange={(next) =>
+                              setAudioSettings((prev) => {
+                                const nextStartSeconds = Math.min(clampDuration(next), trimStartMax);
+                                const remainingAfterStart = audioDurationSeconds === null
+                                  ? 600
+                                  : Math.max(MIN_TRIM_GAP_SECONDS, audioDurationSeconds - nextStartSeconds);
+                                const nextDurationSeconds = prev.trim.durationSeconds > 0
+                                  ? Math.min(prev.trim.durationSeconds, remainingAfterStart)
+                                  : prev.trim.durationSeconds;
+
+                                return {
+                                  ...prev,
+                                  trim: {
+                                    startSeconds: nextStartSeconds,
+                                    durationSeconds: nextDurationSeconds,
+                                  },
+                                };
+                              })
+                            }
+                          />
+                          <RangeField
+                            label="Clip length"
+                            value={audioSettings.trim.durationSeconds}
+                            min={0}
+                            max={trimDurationMax}
+                            step={0.05}
+                            suffix=" s"
+                            displayValue={trimDurationDisplay}
+                            disabled={isBusy}
+                            onChange={(next) =>
+                              setAudioSettings((prev) => ({
+                                ...prev,
+                                trim: {
+                                  ...prev.trim,
+                                  durationSeconds: Math.min(clampDuration(next), trimDurationMax),
+                                },
+                              }))
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 self-end rounded-xl border-white/15 bg-white/5 text-white hover:bg-white/10"
+                            disabled={isBusy}
+                            onClick={() =>
+                              setAudioSettings((prev) => ({
+                                ...prev,
+                                trim: {
+                                  startSeconds: 0,
+                                  durationSeconds: 0,
+                                },
+                              }))
+                            }
+                          >
+                            Use full sound
+                          </Button>
+                        </div>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+
+                <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-2">
                 <div className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center gap-2 text-sm font-semibold text-white">
                     <SlidersHorizontal className="h-4 w-4 text-cyan-300" />
@@ -617,6 +1184,7 @@ export function SoundEffectEditModal({
                   <RangeField label="Drive" value={audioSettings.saturation.drive} min={1} max={10} step={0.1} disabled={isBusy || !audioSettings.saturation.enabled} onChange={(next) => setAudioSettings((prev) => ({ ...prev, saturation: { ...prev.saturation, drive: next } }))} />
                   <RangeField label="Wet mix" value={audioSettings.saturation.mix} min={0} max={1} step={0.01} disabled={isBusy || !audioSettings.saturation.enabled} onChange={(next) => setAudioSettings((prev) => ({ ...prev, saturation: { ...prev.saturation, mix: next } }))} />
                 </div>
+                </div>
               </div>
             </div>
 
@@ -653,6 +1221,7 @@ export function SoundEffectEditModal({
               </div>
               <div className="mt-3 space-y-2 text-sm text-slate-600">
                 <p>Volume: <span className="font-semibold text-slate-900">{Math.round(volumePercent)}%</span></p>
+                <p>Trim: <span className="font-semibold text-slate-900">{formatSeconds(resolvedTrimWindow.startSeconds)} to {resolvedTrimWindow.endSeconds === null ? 'End' : formatSeconds(resolvedTrimWindow.endSeconds)}</span></p>
                 <p>EQ: <span className="font-semibold text-slate-900">{audioSettings.eq.lowGainDb.toFixed(1)} / {audioSettings.eq.midGainDb.toFixed(1)} / {audioSettings.eq.highGainDb.toFixed(1)} dB</span></p>
                 <p>Compressor: <span className="font-semibold text-slate-900">{audioSettings.compressor.enabled ? 'On' : 'Off'}</span></p>
                 <p>Reverb: <span className="font-semibold text-slate-900">{audioSettings.reverb.enabled ? 'On' : 'Off'}</span></p>
