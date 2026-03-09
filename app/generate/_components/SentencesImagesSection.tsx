@@ -98,6 +98,11 @@ type SentencesImagesSectionProps = {
       | 'glassStrong'
       | null,
   ) => void;
+  onSentenceImageMotionEffectChange: (
+    index: number,
+    value: NonNullable<SentenceItem['imageMotionEffect']> | null,
+  ) => void;
+  onSentenceImageMotionSpeedChange: (index: number, value: number) => void;
   onTransitionToNextChange: (
     index: number,
     value:
@@ -219,6 +224,8 @@ export function SentencesImagesSection({
   onScriptErasChange,
   onSentenceForcedEraKeyChange,
   onSentenceVisualEffectChange,
+  onSentenceImageMotionEffectChange,
+  onSentenceImageMotionSpeedChange,
   onTransitionToNextChange,
   onOpenTransitionSoundEditor,
   imagePromptModel,
@@ -298,6 +305,8 @@ export function SentencesImagesSection({
 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewVisualEffect, setPreviewVisualEffect] = useState<SentenceItem['visualEffect'] | null>(null);
+  const [previewImageMotionEffect, setPreviewImageMotionEffect] = useState<SentenceItem['imageMotionEffect'] | null>(null);
+  const [previewImageMotionSpeed, setPreviewImageMotionSpeed] = useState<number | null>(null);
   const [isPreviewClosing, setIsPreviewClosing] = useState(false);
 
   const {
@@ -568,6 +577,8 @@ export function SentencesImagesSection({
               onScriptErasChange={onScriptErasChange}
               onSentenceForcedEraKeyChange={onSentenceForcedEraKeyChange}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}
+              onSentenceImageMotionEffectChange={onSentenceImageMotionEffectChange}
+              onSentenceImageMotionSpeedChange={onSentenceImageMotionSpeedChange}
               onTransitionToNextChange={onTransitionToNextChange}
               onOpenTransitionSoundEditor={onOpenTransitionSoundEditor}
               onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
@@ -616,10 +627,12 @@ export function SentencesImagesSection({
               onSelectFromLibrary={onSelectFromLibrary}
               onRemoveSentenceImage={onRemoveSentenceImage}
               onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
-              onPreviewImage={(url, effect) => {
+              onPreviewImage={(url, effect, imageMotionEffect, imageMotionSpeed) => {
                 setIsPreviewClosing(false);
                 setPreviewImageUrl(url);
                 setPreviewVisualEffect(effect ?? null);
+                setPreviewImageMotionEffect(imageMotionEffect ?? 'default');
+                setPreviewImageMotionSpeed(imageMotionSpeed ?? 1);
               }}
             />
           ) : (
@@ -629,12 +642,16 @@ export function SentencesImagesSection({
             <ImagePreviewOverlay
               previewImageUrl={previewImageUrl}
               visualEffect={previewVisualEffect}
+              imageMotionEffect={previewImageMotionEffect}
+              imageMotionSpeed={previewImageMotionSpeed}
               isPreviewClosing={isPreviewClosing}
               onRequestClose={() => {
                 setIsPreviewClosing(true);
                 setTimeout(() => {
                   setPreviewImageUrl(null);
                   setPreviewVisualEffect(null);
+                  setPreviewImageMotionEffect(null);
+                  setPreviewImageMotionSpeed(null);
                 }, 200);
               }}
             />

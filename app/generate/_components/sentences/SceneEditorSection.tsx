@@ -62,6 +62,11 @@ type SceneEditorSectionProps = {
     index: number,
     value: NonNullable<SentenceItem['visualEffect']> | null,
   ) => void;
+  onSentenceImageMotionEffectChange: (
+    index: number,
+    value: NonNullable<SentenceItem['imageMotionEffect']> | null,
+  ) => void;
+  onSentenceImageMotionSpeedChange: (index: number, value: number) => void;
 
   onTransitionToNextChange: (
     index: number,
@@ -137,7 +142,12 @@ type SceneEditorSectionProps = {
   onRemoveSentenceImage: (index: number) => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
 
-  onPreviewImage: (url: string, effect: SentenceItem['visualEffect'] | null) => void;
+  onPreviewImage: (
+    url: string,
+    visualEffect: SentenceItem['visualEffect'] | null,
+    imageMotionEffect: SentenceItem['imageMotionEffect'] | null,
+    imageMotionSpeed: number | null,
+  ) => void;
 };
 
 export function SceneEditorSection({
@@ -167,6 +177,8 @@ export function SceneEditorSection({
   onScriptErasChange,
   onSentenceForcedEraKeyChange,
   onSentenceVisualEffectChange,
+  onSentenceImageMotionEffectChange,
+  onSentenceImageMotionSpeedChange,
   onTransitionToNextChange,
   onOpenTransitionSoundEditor,
   onInsertEmptySentenceAfter,
@@ -404,6 +416,12 @@ export function SceneEditorSection({
 
                   onVisualEffectChange={(value) =>
                     onSentenceVisualEffectChange(index, value)
+                  }
+                  onImageMotionEffectChange={(value) =>
+                    onSentenceImageMotionEffectChange(index, value)
+                  }
+                  onImageMotionSpeedChange={(value) =>
+                    onSentenceImageMotionSpeedChange(index, value)
                   }
                   enhanceError={enhanceError}
                   isEnhancing={isEnhancing}

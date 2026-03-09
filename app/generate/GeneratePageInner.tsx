@@ -103,7 +103,15 @@ type BackendSentenceDto = {
   forced_era_key?: string | null;
   transition_to_next?: SentenceItem['transitionToNext'] | null;
   visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+  image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
+  image_motion_speed?: number | null;
 };
+
+function normalizeImageMotionSpeedValue(value: number | null | undefined) {
+  const numeric = Number(value ?? 1);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(2.5, Math.max(0.5, numeric));
+}
 
 type ScriptDraftDto = {
   id: string;
@@ -471,6 +479,8 @@ export function GeneratePageInner() {
     handleSentenceForcedCharacterKeysChange,
     handleSentenceForcedEraKeyChange,
     handleSentenceVisualEffectChange,
+    handleSentenceImageMotionEffectChange,
+    handleSentenceImageMotionSpeedChange,
     handleTransitionToNextChange,
     handleSentenceTextChange,
     handleMergeSentenceIntoPrevious,
@@ -1068,6 +1078,8 @@ export function GeneratePageInner() {
         mediaType: 'image' as const,
         ...(transitionToNext ? { transitionToNext } : {}),
         ...(visualEffect ? { visualEffect } : {}),
+        imageMotionEffect: s.imageMotionEffect ?? 'default',
+        imageMotionSpeed: normalizeImageMotionSpeedValue(s.imageMotionSpeed),
         ...soundEffectsPatch,
         ...soundEffectsAlignPatch,
         ...transitionSoundEffectsPatch,
@@ -2947,6 +2959,8 @@ export function GeneratePageInner() {
         forcedCharacterKeys: resolvedForcedCharacterKeys,
         transitionToNext: s.transition_to_next ?? null,
         visualEffect: s.visual_effect ?? null,
+        imageMotionEffect: s.image_motion_effect ?? 'default',
+        imageMotionSpeed: normalizeImageMotionSpeedValue(s.image_motion_speed),
         image: null,
         imageUrl: subscribeLike ? null : s.image?.image ?? null,
         startImage: null,
@@ -4989,6 +5003,8 @@ export function GeneratePageInner() {
           align_sound_effects_to_scene_end?: boolean;
           transition_to_next?: SentenceItem['transitionToNext'] | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+          image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
+          image_motion_speed?: number | null;
           sound_effects?: Array<{
             sound_effect_id: string;
             delay_seconds: number;
@@ -5060,6 +5076,8 @@ export function GeneratePageInner() {
               s.visualEffect === 'glassStrong'
                 ? s.visualEffect
                 : null,
+            image_motion_effect: s.imageMotionEffect ?? 'default',
+            image_motion_speed: normalizeImageMotionSpeedValue(s.imageMotionSpeed),
             sound_effects: Array.isArray(s.soundEffects)
               ? s.soundEffects
                   .filter((e) => Boolean(e?.id))
@@ -5343,6 +5361,8 @@ export function GeneratePageInner() {
           forced_character_keys?: string[];
           transition_to_next?: SentenceItem['transitionToNext'] | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+          image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
+          image_motion_speed?: number | null;
         }[];
         subject?: string;
         subject_content?: string | null;
@@ -6090,6 +6110,12 @@ export function GeneratePageInner() {
                   onScriptErasChange={handleScriptErasChange}
                   onSentenceForcedEraKeyChange={handleSentenceForcedEraKeyChange}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
+                  onSentenceImageMotionEffectChange={
+                    handleSentenceImageMotionEffectChange
+                  }
+                  onSentenceImageMotionSpeedChange={
+                    handleSentenceImageMotionSpeedChange
+                  }
                   onTransitionToNextChange={handleTransitionToNextChange}
                   onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}

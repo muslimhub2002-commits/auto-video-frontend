@@ -28,6 +28,19 @@ interface ScriptSentenceDto {
     | 'glassReflections'
     | 'glassStrong'
     | null;
+  image_motion_effect?:
+    | 'default'
+    | 'slowZoomIn'
+    | 'slowZoomOut'
+    | 'diagonalDrift'
+    | 'cinematicPan'
+    | 'focusShift'
+    | 'parallaxMotion'
+    | 'shakeMicroMotion'
+    | 'splitMotion'
+    | 'rotationDrift'
+    | null;
+  image_motion_speed?: number | null;
   image?: {
     id: string;
     image: string;

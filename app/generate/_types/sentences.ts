@@ -4,6 +4,19 @@ export type SentenceItem = {
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
   alignSoundEffectsToSceneEnd?: boolean;
+  imageMotionEffect?:
+    | 'default'
+    | 'slowZoomIn'
+    | 'slowZoomOut'
+    | 'diagonalDrift'
+    | 'cinematicPan'
+    | 'focusShift'
+    | 'parallaxMotion'
+    | 'shakeMicroMotion'
+    | 'splitMotion'
+    | 'rotationDrift'
+    | null;
+  imageMotionSpeed?: number | null;
 
   soundEffects?: Array<{
     id: string;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   DndContext,
   PointerSensor,
@@ -59,6 +59,18 @@ import { ForcedCharactersModal } from './ForcedCharactersModal';
 import { ForcedEraModal } from './ForcedEraModal';
 import type { ScriptEra } from './ErasModal';
 import { SoundEffectEditModal } from '../SoundEffectEditModal';
+import {
+  DEFAULT_IMAGE_MOTION_SPEED,
+  getImageMotionEffectLabel,
+  IMAGE_MOTION_SPEED_MAX,
+  IMAGE_MOTION_SPEED_MIN,
+  IMAGE_MOTION_SPEED_STEP,
+  getVisualEffectLabel,
+  ImageEffectPreview,
+  IMAGE_MOTION_EFFECT_SELECT_VALUES,
+  isImageMotionEffectSelectValue,
+  normalizeImageMotionSpeed,
+} from './ImageEffectPreview';
 
 import type { SentenceItem } from '../../_types/sentences';
 
@@ -76,81 +88,6 @@ type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
 
 function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
   return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
-}
-
-function VisualEffectPreview({
-  effect,
-  children,
-}: {
-  effect: VisualEffectValue;
-  children: ReactNode;
-}) {
-  const normalized = effect ?? null;
-
-  const isColorGrading = normalized === 'colorGrading';
-  const isAnimatedLighting = normalized === 'animatedLighting';
-  const isGlassSubtle = normalized === 'glassSubtle';
-  const isGlassReflections = normalized === 'glassReflections';
-  const isGlassStrong = normalized === 'glassStrong';
-
-  const glassFilter = isGlassSubtle
-    ? 'contrast(1.06) saturate(1.08) brightness(1.02)'
-    : isGlassReflections
-      ? 'contrast(1.07) saturate(1.10) brightness(1.02)'
-      : isGlassStrong
-        ? 'contrast(1.10) saturate(1.12) brightness(1.03)'
-        : undefined;
-
-  const shouldShowGlassOverlay = isGlassReflections || isGlassStrong;
-  const glassOverlayOpacity = isGlassStrong ? 0.22 : 0.16;
-
-  const mediaFilter = [
-    isColorGrading ? 'contrast(1.12) saturate(1.16) brightness(0.98)' : null,
-    glassFilter ?? null,
-  ]
-    .filter(Boolean)
-    .join(' ') || undefined;
-
-  return (
-    <div className="relative">
-      <style>{`
-        @keyframes av-light-sweep {
-          0% { transform: translate(-10%, -6%) scale(1.05); }
-          50% { transform: translate(10%, 4%) scale(1.12); }
-          100% { transform: translate(-6%, 8%) scale(1.08); }
-        }
-      `}</style>
-
-      <div style={{ filter: mediaFilter }}>
-        {children}
-      </div>
-
-      {isAnimatedLighting ? (
-        <div
-          className="pointer-events-none absolute -inset-[20%]"
-          style={{
-            animation: 'av-light-sweep 5200ms ease-in-out infinite',
-            opacity: 0.34,
-            mixBlendMode: 'screen',
-            background:
-              'radial-gradient(circle at 40% 35%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)',
-          }}
-        />
-      ) : null}
-
-      {shouldShowGlassOverlay ? (
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            opacity: glassOverlayOpacity,
-            mixBlendMode: 'screen',
-            background:
-              'linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 18%, rgba(255,255,255,0.00) 45%, rgba(255,255,255,0.10) 62%, rgba(255,255,255,0.00) 100%)',
-          }}
-        />
-      ) : null}
-    </div>
-  );
 }
 
 const getSentenceSoundEffectSortableId = (
@@ -426,6 +363,10 @@ type SentenceEditorCardProps = {
   onVisualEffectChange: (
     value: NonNullable<SentenceItem['visualEffect']> | null,
   ) => void;
+  onImageMotionEffectChange: (
+    value: NonNullable<SentenceItem['imageMotionEffect']> | null,
+  ) => void;
+  onImageMotionSpeedChange: (value: number) => void;
 
   enhanceError: string | null;
   isEnhancing: boolean;
@@ -469,7 +410,12 @@ type SentenceEditorCardProps = {
   onGenerateVideo?: (canGenerateVideo: boolean) => void | Promise<void>;
   onRemoveGeneratedVideo?: () => void;
 
-  onPreviewImage: (url: string, effect: SentenceItem['visualEffect'] | null) => void;
+  onPreviewImage: (
+    url: string,
+    visualEffect: SentenceItem['visualEffect'] | null,
+    imageMotionEffect: SentenceItem['imageMotionEffect'] | null,
+    imageMotionSpeed: number | null,
+  ) => void;
 };
 
 export function SentenceEditorCard({
@@ -499,6 +445,8 @@ export function SentenceEditorCard({
   onForcedEraKeyChange,
 
   onVisualEffectChange,
+  onImageMotionEffectChange,
+  onImageMotionSpeedChange,
 
   enhanceError,
   isEnhancing,
@@ -818,6 +766,15 @@ export function SentenceEditorCard({
 
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
   const [isForcedEraOpen, setIsForcedEraOpen] = useState(false);
+  const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion'>('visual');
+  const isImageSceneTab = mediaMode === 'single';
+  const shouldAnimateImagePreview = isImageSceneTab && imageEffectsTab === 'motion';
+
+  useEffect(() => {
+    if (isImageSceneTab) return;
+    if (imageEffectsTab !== 'motion') return;
+    setImageEffectsTab('visual');
+  }, [imageEffectsTab, isImageSceneTab]);
 
   const handleSoundEffectsDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -848,19 +805,11 @@ export function SentenceEditorCard({
       : '__none__';
 
   const visualEffectLabel =
-    visualEffectValue === '__none__'
-      ? 'None'
-      : visualEffectValue === 'colorGrading'
-        ? 'Color grading'
-        : visualEffectValue === 'animatedLighting'
-          ? 'Animated lighting'
-          : visualEffectValue === 'glassSubtle'
-            ? 'Glass (subtle)'
-            : visualEffectValue === 'glassReflections'
-              ? 'Glass (reflections)'
-              : visualEffectValue === 'glassStrong'
-                ? 'Glass (strong)'
-                : 'None';
+    visualEffectValue === '__none__' ? 'None' : getVisualEffectLabel(visualEffectValue);
+
+  const imageMotionEffectValue = item.imageMotionEffect ?? 'default';
+  const imageMotionEffectLabel = getImageMotionEffectLabel(imageMotionEffectValue);
+  const imageMotionSpeedValue = normalizeImageMotionSpeed(item.imageMotionSpeed);
 
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
   const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
@@ -963,44 +912,157 @@ export function SentenceEditorCard({
             </Button>
           </div>
 
-          <div className="shrink-0">
-            <Select
-              value={visualEffectValue}
-              onValueChange={(v) => {
-                if (v === '__none__') {
-                  onVisualEffectChange(null);
-                  return;
-                }
-                if (isVisualEffectSelectValue(v)) {
-                  onVisualEffectChange(v);
-                  return;
-                }
-
-                onVisualEffectChange(null);
-              }}
-            >
-              <SelectTrigger
+          <div className="shrink-0 flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50/80 p-1.5 shadow-sm">
+            <div className="inline-flex items-center gap-1 rounded-xl bg-white p-1 shadow-inner">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setImageEffectsTab('visual')}
                 className={
-                  visualEffectValue === '__none__'
-                    ? 'border-none focus-none h-9 w-48 bg-white border-gray-200 text-gray-600 shadow-sm [&>svg]:text-gray-600'
-                    : 'border-none focus-none capitalize h-9 w-48 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 outline-none font-semibold text-white border-transparent shadow-md [&>svg]:text-white'
+                  imageEffectsTab === 'visual'
+                    ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
+                    : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                 }
                 title={`Visual effect: ${visualEffectLabel}`}
               >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  <SelectValue placeholder="Effect" />
+                <Sparkles className="mr-2 h-4 w-4" />
+                Look
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (!isImageSceneTab) return;
+                  setImageEffectsTab('motion');
+                }}
+                disabled={!isImageSceneTab}
+                className={
+                  imageEffectsTab === 'motion'
+                    ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-sky-600 to-cyan-600 text-white hover:from-sky-700 hover:to-cyan-700'
+                    : !isImageSceneTab
+                      ? 'h-8 px-3 rounded-lg text-gray-500 hover:text-gray-500 cursor-not-allowed'
+                      : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                }
+                title={
+                  isImageSceneTab
+                    ? `Motion effect: ${imageMotionEffectLabel}`
+                    : 'Motion effects are only available on the Image tab'
+                }
+              >
+                <Timer className="mr-2 h-4 w-4" />
+                Motion
+              </Button>
+            </div>
+
+            {imageEffectsTab === 'visual' ? (
+              <Select
+                value={visualEffectValue}
+                onValueChange={(v) => {
+                  if (v === '__none__') {
+                    onVisualEffectChange(null);
+                    return;
+                  }
+                  if (isVisualEffectSelectValue(v)) {
+                    onVisualEffectChange(v);
+                    return;
+                  }
+
+                  onVisualEffectChange(null);
+                }}
+              >
+                <SelectTrigger
+                  className={
+                    visualEffectValue === '__none__'
+                      ? 'h-9 w-48 border-gray-200 bg-white text-gray-600 shadow-sm [&>svg]:text-gray-600'
+                      : 'h-9 w-48 border-transparent bg-linear-to-r from-indigo-600 to-purple-600 font-semibold text-white shadow-md [&>svg]:text-white'
+                  }
+                  title={`Visual effect: ${visualEffectLabel}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    <SelectValue placeholder="Effect" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  <SelectItem value="colorGrading">Color grading</SelectItem>
+                  <SelectItem value="animatedLighting">Animated lighting</SelectItem>
+                  <SelectItem value="glassSubtle">Glass (subtle)</SelectItem>
+                  <SelectItem value="glassReflections">Glass (reflections)</SelectItem>
+                  <SelectItem value="glassStrong">Glass (strong)</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Select
+                  value={imageMotionEffectValue}
+                  onValueChange={(value) => {
+                    if (isImageMotionEffectSelectValue(value)) {
+                      onImageMotionEffectChange(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    className={
+                      imageMotionEffectValue === 'default'
+                        ? 'h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm [&>svg]:text-gray-700'
+                        : 'h-9 w-full border-transparent bg-linear-to-r from-sky-600 to-cyan-600 font-semibold text-white shadow-md [&>svg]:text-white'
+                    }
+                    title={`Image motion: ${imageMotionEffectLabel}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Timer className="h-4 w-4" />
+                      <SelectValue placeholder="Motion" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {getImageMotionEffectLabel(value)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <div className="flex items-center gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-sky-900">
+                    <Clock className="h-4 w-4 text-sky-700" />
+                    <span>Speed</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={IMAGE_MOTION_SPEED_MIN}
+                    max={IMAGE_MOTION_SPEED_MAX}
+                    step={IMAGE_MOTION_SPEED_STEP}
+                    value={imageMotionSpeedValue}
+                    onChange={(e) => onImageMotionSpeedChange(Number(e.target.value))}
+                    className="h-2 flex-1 cursor-pointer accent-sky-600"
+                    title={`Motion speed ${imageMotionSpeedValue.toFixed(1)}x`}
+                  />
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={IMAGE_MOTION_SPEED_MIN}
+                      max={IMAGE_MOTION_SPEED_MAX}
+                      step={IMAGE_MOTION_SPEED_STEP}
+                      value={imageMotionSpeedValue.toFixed(1)}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value);
+                        onImageMotionSpeedChange(
+                          Number.isFinite(raw) ? raw : DEFAULT_IMAGE_MOTION_SPEED,
+                        );
+                      }}
+                      className="h-8 w-20 border-sky-200 bg-white pr-7 text-center text-sm font-semibold text-sky-900"
+                    />
+                    <span className="pointer-events-none absolute right-8.5 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wide text-sky-700">
+                      x
+                    </span>
+                  </div>
                 </div>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">None</SelectItem>
-                <SelectItem value="colorGrading">Color grading</SelectItem>
-                <SelectItem value="animatedLighting">Animated lighting</SelectItem>
-                <SelectItem value="glassSubtle">Glass (subtle)</SelectItem>
-                <SelectItem value="glassReflections">Glass (reflections)</SelectItem>
-                <SelectItem value="glassStrong">Glass (strong)</SelectItem>
-              </SelectContent>
-            </Select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1339,8 +1401,8 @@ export function SentenceEditorCard({
                       <ArrowDown
                         className={
                           isSoundEffectsOpen
-                            ? 'h-4 w-4 transition-transform duration-200'
-                            : 'h-4 w-4 rotate-180 transition-transform duration-200'
+                            ? 'h-4 w-4 transition-transform rotate-180 duration-200'
+                            : 'h-4 w-4 transition-transform duration-200'
                         }
                       />
                     </button>
@@ -1701,14 +1763,26 @@ export function SentenceEditorCard({
                           </div>
                           {startPreviewUrl ? (
                             <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                              <VisualEffectPreview effect={item.visualEffect}>
+                              <ImageEffectPreview
+                                visualEffect={item.visualEffect}
+                                imageMotionEffect={item.imageMotionEffect}
+                                imageMotionSpeed={item.imageMotionSpeed}
+                                enableMotion={shouldAnimateImagePreview}
+                              >
                                 <img
                                   src={startPreviewUrl}
                                   alt="Start frame"
-                                  className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                                  onClick={() => onPreviewImage(startPreviewUrl, item.visualEffect ?? null)}
+                                  className="h-48 w-full cursor-zoom-in object-cover"
+                                  onClick={() =>
+                                    onPreviewImage(
+                                      startPreviewUrl,
+                                      item.visualEffect ?? null,
+                                      item.imageMotionEffect ?? 'default',
+                                      item.imageMotionSpeed ?? 1,
+                                    )
+                                  }
                                 />
-                              </VisualEffectPreview>
+                              </ImageEffectPreview>
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1802,14 +1876,26 @@ export function SentenceEditorCard({
                           </div>
                           {endPreviewUrl ? (
                             <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                              <VisualEffectPreview effect={item.visualEffect}>
+                              <ImageEffectPreview
+                                visualEffect={item.visualEffect}
+                                imageMotionEffect={item.imageMotionEffect}
+                                imageMotionSpeed={item.imageMotionSpeed}
+                                enableMotion={shouldAnimateImagePreview}
+                              >
                                 <img
                                   src={endPreviewUrl}
                                   alt="End frame"
-                                  className="w-full h-58 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                                  onClick={() => onPreviewImage(endPreviewUrl, item.visualEffect ?? null)}
+                                  className="h-58 w-full cursor-zoom-in object-cover"
+                                  onClick={() =>
+                                    onPreviewImage(
+                                      endPreviewUrl,
+                                      item.visualEffect ?? null,
+                                      item.imageMotionEffect ?? 'default',
+                                      item.imageMotionSpeed ?? 1,
+                                    )
+                                  }
                                 />
-                              </VisualEffectPreview>
+                              </ImageEffectPreview>
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1968,12 +2054,26 @@ export function SentenceEditorCard({
 
                       {referencePreviewUrl ? (
                         <div className="relative group/frame rounded-2xl overflow-hidden shadow-lg border-2 border-gray-200">
-                          <img
-                            src={referencePreviewUrl}
-                            alt="Reference"
-                            className="w-full h-48 object-cover cursor-zoom-in transition-transform duration-300 group-hover/frame:scale-110"
-                            onClick={() => onPreviewImage(referencePreviewUrl, item.visualEffect ?? null)}
-                          />
+                          <ImageEffectPreview
+                            visualEffect={item.visualEffect}
+                            imageMotionEffect={item.imageMotionEffect}
+                            imageMotionSpeed={item.imageMotionSpeed}
+                            enableMotion={shouldAnimateImagePreview}
+                          >
+                            <img
+                              src={referencePreviewUrl}
+                              alt="Reference"
+                              className="h-48 w-full cursor-zoom-in object-cover"
+                              onClick={() =>
+                                onPreviewImage(
+                                  referencePreviewUrl,
+                                  item.visualEffect ?? null,
+                                  item.imageMotionEffect ?? 'default',
+                                  item.imageMotionSpeed ?? 1,
+                                )
+                              }
+                            />
+                          </ImageEffectPreview>
                           <button
                             type="button"
                             onClick={(e) => {
@@ -2108,13 +2208,17 @@ export function SentenceEditorCard({
                 {item.video || item.videoUrl ? (
                   <div className="space-y-3">
                     <div className="relative w-full rounded-2xl overflow-hidden shadow-xl">
-                      <VisualEffectPreview effect={item.visualEffect}>
+                      <ImageEffectPreview
+                        visualEffect={item.visualEffect}
+                        imageMotionEffect={item.imageMotionEffect}
+                        enableMotion={false}
+                      >
                         <video
                           src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
                           controls
                           className={generatedVideoClassName}
                         />
-                      </VisualEffectPreview>
+                      </ImageEffectPreview>
 
                       {item.videoUrl && item.videoUrl !== '/subscribe.mp4' ? (
                         <button
@@ -2378,27 +2482,38 @@ export function SentenceEditorCard({
                 <div className="space-y-3">
                   <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 bg-gray-100 shadow-lg group/preview">
                     {item.image || item.imageUrl ? (
-                      <VisualEffectPreview effect={item.visualEffect}>
+                      <ImageEffectPreview
+                        visualEffect={item.visualEffect}
+                        imageMotionEffect={item.imageMotionEffect}
+                        imageMotionSpeed={item.imageMotionSpeed}
+                        enableMotion={shouldAnimateImagePreview}
+                      >
                         <img
                           src={item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string)}
                           alt={`Scene ${index + 1}`}
-                          className="w-full h-58 object-cover transition-transform duration-200 group-hover/preview:scale-105 cursor-zoom-in"
+                          className="h-58 w-full cursor-zoom-in object-cover"
                           onClick={() =>
                             onPreviewImage(
                               item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string),
                               item.visualEffect ?? null,
+                              item.imageMotionEffect ?? 'default',
+                              item.imageMotionSpeed ?? 1,
                             )
                           }
                         />
-                      </VisualEffectPreview>
+                      </ImageEffectPreview>
                     ) : (
-                      <VisualEffectPreview effect={item.visualEffect}>
+                      <ImageEffectPreview
+                        visualEffect={item.visualEffect}
+                        imageMotionEffect={item.imageMotionEffect}
+                        enableMotion={false}
+                      >
                         <video
                           src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
                           controls
                           className={`block w-full max-w-65 mx-auto ${videoAspectClass} object-cover`}
                         />
-                      </VisualEffectPreview>
+                      </ImageEffectPreview>
                     )}
                     <button
                       type="button"

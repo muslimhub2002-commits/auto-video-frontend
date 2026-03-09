@@ -5,6 +5,13 @@ import type { SentenceItem } from '../_types/sentences';
 
 type TransitionType = NonNullable<SentenceItem['transitionToNext']>;
 type VisualEffectType = NonNullable<SentenceItem['visualEffect']>;
+type ImageMotionEffectType = NonNullable<SentenceItem['imageMotionEffect']>;
+
+function normalizeImageMotionSpeedValue(value: number | null | undefined) {
+  const numeric = Number(value ?? 1);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(2.5, Math.max(0.5, numeric));
+}
 
 function createClientId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -82,6 +89,40 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
             ? {
                 ...s,
                 visualEffect: value,
+              }
+            : s,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleSentenceImageMotionEffectChange = useCallback(
+    (index: number, value: ImageMotionEffectType | null) => {
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? {
+                ...s,
+                imageMotionEffect: value ?? 'default',
+              }
+            : s,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleSentenceImageMotionSpeedChange = useCallback(
+    (index: number, value: number) => {
+      const normalized = normalizeImageMotionSpeedValue(value);
+
+      setSentences((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? {
+                ...s,
+                imageMotionSpeed: normalized,
               }
             : s,
         ),
@@ -169,6 +210,8 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         forcedCharacterKeys: null,
         transitionToNext: null,
         visualEffect: null,
+        imageMotionEffect: 'default',
+        imageMotionSpeed: 1,
         image: null,
         imageUrl: null,
         imagePrompt: null,
@@ -233,6 +276,8 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
     handleSentenceForcedCharacterKeysChange,
     handleSentenceForcedEraKeyChange,
     handleSentenceVisualEffectChange,
+    handleSentenceImageMotionEffectChange,
+    handleSentenceImageMotionSpeedChange,
     handleTransitionToNextChange,
     handleSentenceTextChange,
     handleMergeSentenceIntoPrevious,
