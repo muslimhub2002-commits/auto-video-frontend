@@ -1,3 +1,5 @@
+import type { SoundEffectAudioSettings } from './sound-effect-audio';
+
 export type SentenceItem = {
   id: string;
   text: string;
@@ -31,6 +33,8 @@ export type SentenceItem = {
     volumePercent: number;
     timingMode?: 'withPrevious' | 'afterPreviousEnds';
     durationSeconds?: number | null;
+    audioSettings?: SoundEffectAudioSettings | null;
+    defaultAudioSettings?: SoundEffectAudioSettings | null;
   }>;
 
   transitionSoundEffects?: Array<{

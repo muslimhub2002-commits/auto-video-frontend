@@ -31,6 +31,11 @@ import { RenderSettingsSection } from './_components/RenderSettingsSection';
 import { GenerateModalsHost } from './_components/GenerateModalsHost';
 import type { SoundEffectDto } from './_components/SoundEffectsLibraryModal';
 import {
+  areSoundEffectAudioSettingsEqual,
+  cloneSoundEffectAudioSettings,
+  normalizeSoundEffectAudioSettings,
+} from './_types/sound-effect-audio';
+import {
   computeSentenceSoundEffectTiming,
 } from './_utils/soundEffectsTiming';
 import {
@@ -91,12 +96,14 @@ type BackendSentenceDto = {
     index: number;
     delay_seconds: number;
     volume_percent: number | null;
+    audio_settings_override?: Record<string, unknown> | null;
     timing_mode?: 'with_previous' | 'after_previous_ends' | null;
     sound_effect: {
       id: string;
       title: string;
       url: string;
       volume_percent?: number;
+      audio_settings?: Record<string, unknown> | null;
       duration_seconds?: number | null;
       is_merged?: boolean;
     };
@@ -3114,6 +3121,10 @@ export function GeneratePageInner() {
               0,
               Math.min(300, Number(resolvedVolumePercent ?? 100) || 100),
             ),
+            audioSettings: cloneSoundEffectAudioSettings(
+              row.audio_settings_override ?? lib?.audio_settings,
+            ),
+            defaultAudioSettings: cloneSoundEffectAudioSettings(lib?.audio_settings),
             timingMode: (
               row.timing_mode === 'after_previous_ends'
                 ? 'afterPreviousEnds'
@@ -4638,6 +4649,8 @@ export function GeneratePageInner() {
           url: it.url,
           delaySeconds: 0,
           volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
+          audioSettings: cloneSoundEffectAudioSettings(it.audio_settings),
+          defaultAudioSettings: cloneSoundEffectAudioSettings(it.audio_settings),
           timingMode: 'withPrevious' as const,
           durationSeconds:
             typeof it.duration_seconds === 'number' && Number.isFinite(it.duration_seconds)
@@ -4673,6 +4686,7 @@ export function GeneratePageInner() {
         name?: string;
         url: string;
         volume_percent?: number;
+        audio_settings?: Record<string, unknown> | null;
         duration_seconds?: number | null;
       }> = [];
 
@@ -4690,6 +4704,7 @@ export function GeneratePageInner() {
           name?: string;
           url: string;
           volume_percent?: number;
+          audio_settings?: Record<string, unknown> | null;
           duration_seconds?: number | null;
         }>('/sound-effects', form, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -4709,6 +4724,7 @@ export function GeneratePageInner() {
             name?: string;
             url: string;
             volume_percent?: number;
+            audio_settings?: Record<string, unknown> | null;
             duration_seconds?: number | null;
           }>;
         }>('/sound-effects/batch', form, {
@@ -4741,6 +4757,8 @@ export function GeneratePageInner() {
                     0,
                     Math.min(300, Number(created.volume_percent ?? 100) || 100),
                   ),
+                  audioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+                  defaultAudioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
                   timingMode: 'withPrevious' as const,
                   durationSeconds:
                     typeof created.duration_seconds === 'number' &&
@@ -4792,6 +4810,7 @@ export function GeneratePageInner() {
         title: string;
         url: string;
         volume_percent?: number;
+        audio_settings?: Record<string, unknown> | null;
         duration_seconds?: number | null;
       }>('/sound-effects/merge', {
         title,
@@ -4819,6 +4838,8 @@ export function GeneratePageInner() {
                     0,
                     Math.min(300, Number(merged.volume_percent ?? 100) || 100),
                   ),
+                  audioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
+                  defaultAudioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
                   timingMode: 'withPrevious',
                   durationSeconds:
                     typeof merged.duration_seconds === 'number' &&
@@ -5295,6 +5316,12 @@ export function GeneratePageInner() {
                       0,
                       Math.min(300, Number(e.volumePercent ?? 100) || 100),
                     ),
+                    audio_settings_override: areSoundEffectAudioSettingsEqual(
+                      e.audioSettings,
+                      e.defaultAudioSettings,
+                    )
+                      ? null
+                      : normalizeSoundEffectAudioSettings(e.audioSettings),
                     timing_mode:
                       e.timingMode === 'afterPreviousEnds'
                         ? 'after_previous_ends'

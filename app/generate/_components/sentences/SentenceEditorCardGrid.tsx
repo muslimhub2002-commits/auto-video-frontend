@@ -59,7 +59,7 @@ import {
 import { ForcedCharactersModal } from './ForcedCharactersModal';
 import { ForcedEraModal } from './ForcedEraModal';
 import type { ScriptEra } from './ErasModal';
-import { SoundEffectEditModal } from '../SoundEffectEditModal';
+import { SoundEffectEditModal, type SoundEffectEditValues } from '../SoundEffectEditModal';
 import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
@@ -78,6 +78,10 @@ import {
   type MotionEffectPresetDto,
 } from './ImageEffectPreview';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
+import {
+  cloneSoundEffectAudioSettings,
+  normalizeSoundEffectAudioSettings,
+} from '../../_types/sound-effect-audio';
 
 import type { SentenceItem } from '../../_types/sentences';
 
@@ -1498,9 +1502,92 @@ export function SentenceEditorCard({
                     initialVolumePercent={
                       Number(soundEffects[editingSoundEffectIndex ?? 0]?.volumePercent ?? 100) || 100
                     }
+                    initialAudioSettings={cloneSoundEffectAudioSettings(
+                      soundEffects[editingSoundEffectIndex ?? 0]?.audioSettings ??
+                      soundEffects[editingSoundEffectIndex ?? 0]?.defaultAudioSettings,
+                    )}
                     isSaving={isSavingSoundEffectEdit}
                     onClose={() => setEditingSoundEffectIndex(null)}
-                    onSave={async (values) => {
+                    onApply={async (values: SoundEffectEditValues) => {
+                      const idx = editingSoundEffectIndex;
+                      if (idx === null) return;
+                      const current = soundEffects[idx];
+                      if (!current) return;
+
+                      const nextTitle = String(values.name ?? '').trim() || String(current.title ?? '').trim();
+                      const nextVolumePercent = Math.max(0, Math.min(300, Number(values.volumePercent) || 0));
+                      const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
+
+                      commitSoundEffects(
+                        soundEffects.map((it, i) =>
+                          i === idx
+                            ? {
+                              ...it,
+                              title: nextTitle,
+                              volumePercent: nextVolumePercent,
+                              audioSettings: nextAudioSettings,
+                            }
+                            : it,
+                        ),
+                      );
+
+                      setEditingSoundEffectIndex(null);
+                    }}
+                    onSaveAsPreset={async (values: SoundEffectEditValues) => {
+                      const idx = editingSoundEffectIndex;
+                      if (idx === null) return;
+                      const current = soundEffects[idx];
+                      if (!current) return;
+
+                      const nextTitle = String(values.name ?? '').trim() || String(current.title ?? '').trim();
+                      const nextVolumePercent = Math.max(0, Math.min(300, Number(values.volumePercent) || 0));
+                      const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
+
+                      setIsSavingSoundEffectEdit(true);
+                      try {
+                        const response = await api.post<{
+                          id: string;
+                          title: string;
+                          name?: string;
+                          url: string;
+                          volume_percent?: number;
+                          audio_settings?: Record<string, unknown> | null;
+                          duration_seconds?: number | null;
+                        }>(`/sound-effects/${encodeURIComponent(current.id)}/presets`, {
+                          name: nextTitle,
+                          volumePercent: nextVolumePercent,
+                          audioSettings: nextAudioSettings,
+                        });
+
+                        const created = response.data;
+                        commitSoundEffects(
+                          soundEffects.map((it, i) =>
+                            i === idx
+                              ? {
+                                ...it,
+                                id: created.id,
+                                title: String(created.name ?? created.title ?? nextTitle).trim() || nextTitle,
+                                url: created.url,
+                                volumePercent: Math.max(0, Math.min(300, Number(created.volume_percent ?? nextVolumePercent) || nextVolumePercent)),
+                                audioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+                                defaultAudioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+                                durationSeconds:
+                                  typeof created.duration_seconds === 'number' && Number.isFinite(created.duration_seconds)
+                                    ? Math.max(0, created.duration_seconds)
+                                    : it.durationSeconds ?? null,
+                              }
+                              : it,
+                          ),
+                        );
+                        setEditingSoundEffectIndex(null);
+                      } catch (err) {
+                        // eslint-disable-next-line no-console
+                        console.error('Failed to save sound effect preset', err);
+                      } finally {
+                        setIsSavingSoundEffectEdit(false);
+                      }
+                    }}
+                    onSave={async (values: SoundEffectEditValues) => {
                       const idx = editingSoundEffectIndex;
                       if (idx === null) return;
                       const current = soundEffects[idx];
@@ -1511,6 +1598,7 @@ export function SentenceEditorCard({
                         0,
                         Math.min(300, Number(values.volumePercent) || 0),
                       );
+                      const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
 
                       // Optimistically update the sentence first.
                       commitSoundEffects(
@@ -1520,22 +1608,20 @@ export function SentenceEditorCard({
                               ...it,
                               title: nextTitle,
                               volumePercent: nextVolumePercent,
+                              audioSettings: nextAudioSettings,
+                              defaultAudioSettings: nextAudioSettings,
                             }
                             : it,
                         ),
                       );
 
-                      // Best-effort persist to the library so future inserts match.
                       setIsSavingSoundEffectEdit(true);
                       try {
-                        await Promise.all([
-                          api.patch(`/sound-effects/${encodeURIComponent(current.id)}`, {
-                            name: nextTitle,
-                          }),
-                          api.patch(`/sound-effects/volume/${encodeURIComponent(current.id)}`, {
-                            volumePercent: nextVolumePercent,
-                          }),
-                        ]);
+                        await api.patch(`/sound-effects/${encodeURIComponent(current.id)}`, {
+                          name: nextTitle,
+                          volumePercent: nextVolumePercent,
+                          audioSettings: nextAudioSettings,
+                        });
                         setEditingSoundEffectIndex(null);
                       } catch (err) {
                         // eslint-disable-next-line no-console

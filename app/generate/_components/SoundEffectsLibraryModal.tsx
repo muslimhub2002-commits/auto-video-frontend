@@ -6,7 +6,12 @@ import { Input } from '@/components/ui/input';
 import { X, Loader2, Check, Music2, Pencil, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Pagination } from './Pagination';
-import { SoundEffectEditModal } from './SoundEffectEditModal';
+import { SoundEffectEditModal, type SoundEffectEditValues } from './SoundEffectEditModal';
+import {
+  cloneSoundEffectAudioSettings,
+  normalizeSoundEffectAudioSettings,
+  type SoundEffectAudioSettings,
+} from '../_types/sound-effect-audio';
 
 export type SoundEffectDto = {
   id: string;
@@ -14,8 +19,11 @@ export type SoundEffectDto = {
   name?: string;
   url: string;
   volume_percent?: number;
+  audio_settings?: SoundEffectAudioSettings | null;
   duration_seconds?: number | null;
   is_merged?: boolean;
+  is_preset?: boolean;
+  source_sound_effect_id?: string | null;
   created_at?: string;
 };
 
@@ -69,7 +77,31 @@ export function SoundEffectsLibraryModal({
 
   const [editTarget, setEditTarget] = useState<SoundEffectDto | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isApplyingEdit, setIsApplyingEdit] = useState(false);
+  const [isSavingAsPreset, setIsSavingAsPreset] = useState(false);
   const [isDeletingById, setIsDeletingById] = useState<Record<string, boolean>>({});
+
+  const extractErrorMessage = (error: unknown, fallback: string) => {
+    const message = (error as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+    if (Array.isArray(message)) {
+      const joined = message.map((item) => String(item ?? '').trim()).filter(Boolean).join(' ');
+      return joined || fallback;
+    }
+    const single = String(message ?? '').trim();
+    return single || fallback;
+  };
+
+  const mergeItemIntoState = (item: SoundEffectDto) => {
+    setItems((prev) => {
+      const exists = prev.some((entry) => entry.id === item.id);
+      if (!exists) return [item, ...prev];
+      return prev.map((entry) => (entry.id === item.id ? { ...entry, ...item } : entry));
+    });
+    setSelectedById((prev) => {
+      if (!prev[item.id]) return prev;
+      return { ...prev, [item.id]: { ...prev[item.id], ...item } };
+    });
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -155,7 +187,12 @@ export function SoundEffectsLibraryModal({
     onClose();
   };
 
-  const saveEdits = async (params: { id: string; name: string; volumePercent: number }) => {
+  const saveEdits = async (params: {
+    id: string;
+    name: string;
+    volumePercent: number;
+    audioSettings: SoundEffectAudioSettings;
+  }) => {
     const id = String(params.id ?? '').trim();
     if (!id) return;
 
@@ -165,32 +202,85 @@ export function SoundEffectsLibraryModal({
     setIsSavingEdit(true);
     setError(null);
     try {
-      // Update both fields. We keep the existing endpoints for compatibility.
-      const [renamedRes, volumeRes] = await Promise.all([
-        api.patch<SoundEffectDto>(`/sound-effects/${id}`, { name: nextName }),
-        api.patch<SoundEffectDto>(`/sound-effects/volume/${id}`, {
-          volumePercent,
-        }),
-      ]);
+      const response = await api.patch<SoundEffectDto>(`/sound-effects/${id}`, {
+        name: nextName,
+        volumePercent,
+        audioSettings: normalizeSoundEffectAudioSettings(params.audioSettings),
+      });
 
-      const updated: SoundEffectDto = {
-        ...(renamedRes.data ?? ({} as any)),
-        ...(volumeRes.data ?? ({} as any)),
-      };
-
-      setItems((prev) => prev.map((x) => (x.id === id ? { ...x, ...updated } : x)));
-      setSelectedById((prev) => {
-        if (!prev[id]) return prev;
-        return { ...prev, [id]: { ...prev[id], ...updated } };
+      mergeItemIntoState({
+        ...response.data,
+        audio_settings: cloneSoundEffectAudioSettings(response.data?.audio_settings),
       });
 
       setEditTarget(null);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Failed to update sound effect', err);
-      setError('Failed to update sound effect');
+      setError(extractErrorMessage(err, 'Failed to update sound effect'));
     } finally {
       setIsSavingEdit(false);
+    }
+  };
+
+  const applyEditsLocally = async (params: {
+    id: string;
+    name: string;
+    volumePercent: number;
+    audioSettings: SoundEffectAudioSettings;
+  }) => {
+    const id = String(params.id ?? '').trim();
+    if (!id) return;
+
+    setIsApplyingEdit(true);
+    setError(null);
+    try {
+      const draft: SoundEffectDto = {
+        ...(editTarget ?? { id, title: params.name, url: '' }),
+        id,
+        title: params.name,
+        name: params.name,
+        volume_percent: params.volumePercent,
+        audio_settings: cloneSoundEffectAudioSettings(params.audioSettings),
+      };
+      mergeItemIntoState(draft);
+      setEditTarget(null);
+    } finally {
+      setIsApplyingEdit(false);
+    }
+  };
+
+  const saveAsNewPreset = async (params: {
+    id: string;
+    name: string;
+    volumePercent: number;
+    audioSettings: SoundEffectAudioSettings;
+  }) => {
+    const id = String(params.id ?? '').trim();
+    if (!id) return;
+
+    setIsSavingAsPreset(true);
+    setError(null);
+    try {
+      const response = await api.post<SoundEffectDto>(`/sound-effects/${id}/presets`, {
+        name: params.name,
+        volumePercent: params.volumePercent,
+        audioSettings: normalizeSoundEffectAudioSettings(params.audioSettings),
+      });
+
+      const created: SoundEffectDto = {
+        ...response.data,
+        audio_settings: cloneSoundEffectAudioSettings(response.data?.audio_settings),
+      };
+      mergeItemIntoState(created);
+      setSelectedById((prev) => ({ ...prev, [created.id]: created }));
+      setEditTarget(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to save sound effect preset', err);
+      setError(extractErrorMessage(err, 'Failed to save sound effect preset'));
+    } finally {
+      setIsSavingAsPreset(false);
     }
   };
 
@@ -234,9 +324,20 @@ export function SoundEffectsLibraryModal({
           audioUrl={editTarget?.url ?? null}
           initialName={String(editTarget?.name ?? editTarget?.title ?? '').trim()}
           initialVolumePercent={Number(editTarget?.volume_percent ?? 100) || 100}
+          initialAudioSettings={cloneSoundEffectAudioSettings(editTarget?.audio_settings)}
           isSaving={isSavingEdit}
+          isApplying={isApplyingEdit}
+          isSavingAsPreset={isSavingAsPreset}
           onClose={() => setEditTarget(null)}
-          onSave={(values) => {
+          onApply={(values: SoundEffectEditValues) => {
+            if (!editTarget) return;
+            return applyEditsLocally({ id: editTarget.id, ...values });
+          }}
+          onSaveAsPreset={(values: SoundEffectEditValues) => {
+            if (!editTarget) return;
+            return saveAsNewPreset({ id: editTarget.id, ...values });
+          }}
+          onSave={(values: SoundEffectEditValues) => {
             if (!editTarget) return;
             return saveEdits({ id: editTarget.id, ...values });
           }}
