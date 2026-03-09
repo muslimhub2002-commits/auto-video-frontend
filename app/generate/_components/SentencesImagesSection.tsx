@@ -39,6 +39,12 @@ import { GenerateTestVideoModal } from './sentences/GenerateTestVideoModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
 import { SceneEditorSection } from './sentences/SceneEditorSection';
 import type { TestVideoVoiceMode } from './sentences/test-video.types';
+import type {
+  ImageFilterPresetDto,
+  ImageFilterSettings,
+  ImageMotionSettings,
+  MotionEffectPresetDto,
+} from './sentences/ImageEffectPreview';
 
 type ScriptCharacter = {
   key: string;
@@ -87,6 +93,19 @@ type SentencesImagesSectionProps = {
   scriptEras: ScriptEra[];
   onScriptErasChange: (next: ScriptEra[]) => void;
   onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
+  imageFilterPresets: ImageFilterPresetDto[];
+  motionEffectPresets: MotionEffectPresetDto[];
+  isLoadingImageFilterPresets?: boolean;
+  isLoadingMotionEffectPresets?: boolean;
+  onSentencePatch: (index: number, patch: Partial<SentenceItem>) => void;
+  onSaveImageFilterPreset: (
+    title: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onSaveMotionEffectPreset: (
+    title: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
   onSentenceVisualEffectChange: (
     index: number,
     value:
@@ -223,6 +242,13 @@ export function SentencesImagesSection({
   scriptEras,
   onScriptErasChange,
   onSentenceForcedEraKeyChange,
+  imageFilterPresets,
+  motionEffectPresets,
+  isLoadingImageFilterPresets = false,
+  isLoadingMotionEffectPresets = false,
+  onSentencePatch,
+  onSaveImageFilterPreset,
+  onSaveMotionEffectPreset,
   onSentenceVisualEffectChange,
   onSentenceImageMotionEffectChange,
   onSentenceImageMotionSpeedChange,
@@ -307,6 +333,8 @@ export function SentencesImagesSection({
   const [previewVisualEffect, setPreviewVisualEffect] = useState<SentenceItem['visualEffect'] | null>(null);
   const [previewImageMotionEffect, setPreviewImageMotionEffect] = useState<SentenceItem['imageMotionEffect'] | null>(null);
   const [previewImageMotionSpeed, setPreviewImageMotionSpeed] = useState<number | null>(null);
+  const [previewImageFilterSettings, setPreviewImageFilterSettings] = useState<Record<string, unknown> | null>(null);
+  const [previewImageMotionSettings, setPreviewImageMotionSettings] = useState<Record<string, unknown> | null>(null);
   const [isPreviewClosing, setIsPreviewClosing] = useState(false);
 
   const {
@@ -576,6 +604,13 @@ export function SentencesImagesSection({
               scriptEras={scriptEras}
               onScriptErasChange={onScriptErasChange}
               onSentenceForcedEraKeyChange={onSentenceForcedEraKeyChange}
+              imageFilterPresets={imageFilterPresets}
+              motionEffectPresets={motionEffectPresets}
+              isLoadingImageFilterPresets={isLoadingImageFilterPresets}
+              isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+              onSentencePatch={onSentencePatch}
+              onSaveImageFilterPreset={onSaveImageFilterPreset}
+              onSaveMotionEffectPreset={onSaveMotionEffectPreset}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}
               onSentenceImageMotionEffectChange={onSentenceImageMotionEffectChange}
               onSentenceImageMotionSpeedChange={onSentenceImageMotionSpeedChange}
@@ -627,12 +662,21 @@ export function SentencesImagesSection({
               onSelectFromLibrary={onSelectFromLibrary}
               onRemoveSentenceImage={onRemoveSentenceImage}
               onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
-              onPreviewImage={(url, effect, imageMotionEffect, imageMotionSpeed) => {
+              onPreviewImage={(
+                url,
+                effect,
+                imageMotionEffect,
+                imageMotionSpeed,
+                imageFilterSettings,
+                imageMotionSettings,
+              ) => {
                 setIsPreviewClosing(false);
                 setPreviewImageUrl(url);
                 setPreviewVisualEffect(effect ?? null);
                 setPreviewImageMotionEffect(imageMotionEffect ?? 'default');
                 setPreviewImageMotionSpeed(imageMotionSpeed ?? 1);
+                setPreviewImageFilterSettings(imageFilterSettings ?? null);
+                setPreviewImageMotionSettings(imageMotionSettings ?? null);
               }}
             />
           ) : (
@@ -644,6 +688,8 @@ export function SentencesImagesSection({
               visualEffect={previewVisualEffect}
               imageMotionEffect={previewImageMotionEffect}
               imageMotionSpeed={previewImageMotionSpeed}
+              imageFilterSettings={previewImageFilterSettings}
+              imageMotionSettings={previewImageMotionSettings}
               isPreviewClosing={isPreviewClosing}
               onRequestClose={() => {
                 setIsPreviewClosing(true);
@@ -652,6 +698,8 @@ export function SentencesImagesSection({
                   setPreviewVisualEffect(null);
                   setPreviewImageMotionEffect(null);
                   setPreviewImageMotionSpeed(null);
+                  setPreviewImageFilterSettings(null);
+                  setPreviewImageMotionSettings(null);
                 }, 200);
               }}
             />

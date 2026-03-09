@@ -3,6 +3,7 @@ export type SentenceItem = {
   text: string;
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video';
+  imageEffectsMode?: 'quick' | 'detailed';
   alignSoundEffectsToSceneEnd?: boolean;
   imageMotionEffect?:
     | 'default'
@@ -16,6 +17,10 @@ export type SentenceItem = {
     | 'splitMotion'
     | 'rotationDrift'
     | null;
+  customImageFilterId?: string | null;
+  imageFilterSettings?: Record<string, unknown> | null;
+  customMotionEffectId?: string | null;
+  imageMotionSettings?: Record<string, unknown> | null;
   imageMotionSpeed?: number | null;
 
   soundEffects?: Array<{

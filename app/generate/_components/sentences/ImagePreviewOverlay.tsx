@@ -3,13 +3,19 @@
 import { X } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
-import { ImageEffectPreview } from './ImageEffectPreview';
+import {
+  ImageEffectPreview,
+  type ImageFilterSettings,
+  type ImageMotionSettings,
+} from './ImageEffectPreview';
 
 type ImagePreviewOverlayProps = {
   previewImageUrl: string;
   visualEffect: SentenceItem['visualEffect'] | null;
   imageMotionEffect: SentenceItem['imageMotionEffect'] | null;
   imageMotionSpeed: number | null;
+  imageFilterSettings: Record<string, unknown> | ImageFilterSettings | null;
+  imageMotionSettings: Record<string, unknown> | ImageMotionSettings | null;
   isPreviewClosing: boolean;
   onRequestClose: () => void;
 };
@@ -19,6 +25,8 @@ export function ImagePreviewOverlay({
   visualEffect,
   imageMotionEffect,
   imageMotionSpeed,
+  imageFilterSettings,
+  imageMotionSettings,
   isPreviewClosing,
   onRequestClose,
 }: ImagePreviewOverlayProps) {
@@ -51,6 +59,8 @@ export function ImagePreviewOverlay({
             visualEffect={visualEffect}
             imageMotionEffect={imageMotionEffect}
             imageMotionSpeed={imageMotionSpeed}
+            imageFilterSettings={imageFilterSettings}
+            imageMotionSettings={imageMotionSettings}
           >
             <img
               src={previewImageUrl}

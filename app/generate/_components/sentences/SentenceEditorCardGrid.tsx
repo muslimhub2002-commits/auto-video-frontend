@@ -53,6 +53,7 @@ import {
   Repeat2,
   Clock,
   Timer,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 import { ForcedCharactersModal } from './ForcedCharactersModal';
@@ -60,17 +61,23 @@ import { ForcedEraModal } from './ForcedEraModal';
 import type { ScriptEra } from './ErasModal';
 import { SoundEffectEditModal } from '../SoundEffectEditModal';
 import {
-  DEFAULT_IMAGE_MOTION_SPEED,
+  getDefaultImageFilterSettings,
+  getDefaultImageMotionSettings,
   getImageMotionEffectLabel,
-  IMAGE_MOTION_SPEED_MAX,
-  IMAGE_MOTION_SPEED_MIN,
-  IMAGE_MOTION_SPEED_STEP,
   getVisualEffectLabel,
   ImageEffectPreview,
   IMAGE_MOTION_EFFECT_SELECT_VALUES,
+  normalizeImageFilterSettings,
   isImageMotionEffectSelectValue,
-  normalizeImageMotionSpeed,
+  normalizeImageMotionSettings,
+  resolveMotionEffectFromSettings,
+  resolveVisualEffectFromSettings,
+  type ImageFilterPresetDto,
+  type ImageFilterSettings,
+  type ImageMotionSettings,
+  type MotionEffectPresetDto,
 } from './ImageEffectPreview';
+import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
 
 import type { SentenceItem } from '../../_types/sentences';
 
@@ -359,6 +366,19 @@ type SentenceEditorCardProps = {
 
   scriptEras: ScriptEra[];
   onForcedEraKeyChange: (next: string | null) => void;
+  imageFilterPresets: ImageFilterPresetDto[];
+  motionEffectPresets: MotionEffectPresetDto[];
+  isLoadingImageFilterPresets: boolean;
+  isLoadingMotionEffectPresets: boolean;
+  onSentencePatch: (patch: Partial<SentenceItem>) => void;
+  onSaveImageFilterPreset: (
+    title: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onSaveMotionEffectPreset: (
+    title: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
 
   onVisualEffectChange: (
     value: NonNullable<SentenceItem['visualEffect']> | null,
@@ -415,6 +435,8 @@ type SentenceEditorCardProps = {
     visualEffect: SentenceItem['visualEffect'] | null,
     imageMotionEffect: SentenceItem['imageMotionEffect'] | null,
     imageMotionSpeed: number | null,
+    imageFilterSettings: Record<string, unknown> | null,
+    imageMotionSettings: Record<string, unknown> | null,
   ) => void;
 };
 
@@ -443,6 +465,13 @@ export function SentenceEditorCard({
 
   scriptEras,
   onForcedEraKeyChange,
+  imageFilterPresets,
+  motionEffectPresets,
+  isLoadingImageFilterPresets,
+  isLoadingMotionEffectPresets,
+  onSentencePatch,
+  onSaveImageFilterPreset,
+  onSaveMotionEffectPreset,
 
   onVisualEffectChange,
   onImageMotionEffectChange,
@@ -767,8 +796,10 @@ export function SentenceEditorCard({
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
   const [isForcedEraOpen, setIsForcedEraOpen] = useState(false);
   const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion'>('visual');
+  const [isImageEffectsDetailModalOpen, setIsImageEffectsDetailModalOpen] = useState(false);
   const isImageSceneTab = mediaMode === 'single';
-  const shouldAnimateImagePreview = isImageSceneTab && imageEffectsTab === 'motion';
+  const imageEffectsMode = item.imageEffectsMode ?? 'quick';
+  const shouldAnimateImagePreview = isImageSceneTab;
 
   useEffect(() => {
     if (isImageSceneTab) return;
@@ -809,13 +840,30 @@ export function SentenceEditorCard({
 
   const imageMotionEffectValue = item.imageMotionEffect ?? 'default';
   const imageMotionEffectLabel = getImageMotionEffectLabel(imageMotionEffectValue);
-  const imageMotionSpeedValue = normalizeImageMotionSpeed(item.imageMotionSpeed);
+  const resolvedImageFilterSettings = normalizeImageFilterSettings(
+    item.imageFilterSettings,
+    item.visualEffect ?? null,
+  );
+  const resolvedImageMotionSettings = normalizeImageMotionSettings(
+    item.imageMotionSettings,
+    item.imageMotionEffect ?? 'default',
+    item.imageMotionSpeed,
+  );
+  const quickLookSelectValue = item.customImageFilterId
+    ? `custom:${item.customImageFilterId}`
+    : `builtin:${resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ?? 'none'}`;
+  const quickMotionSelectValue = item.customMotionEffectId
+    ? `custom:${item.customMotionEffectId}`
+    : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`;
 
   const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
   const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
   const referencePreviewUrl = item.referenceImage
     ? URL.createObjectURL(item.referenceImage)
     : item.referenceImageUrl;
+  const detailPreviewUrl = item.image
+    ? URL.createObjectURL(item.image)
+    : item.imageUrl ?? startPreviewUrl ?? referencePreviewUrl ?? endPreviewUrl ?? null;
   const hasStart = Boolean(startPreviewUrl);
   const hasEnd = Boolean(endPreviewUrl);
   const canGenerateVideo =
@@ -837,6 +885,68 @@ export function SentenceEditorCard({
   const [isVideoModeMenuMounted, setIsVideoModeMenuMounted] = useState(false);
   const [isVideoModeMenuShown, setIsVideoModeMenuShown] = useState(false);
   const videoModeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const handleLookPresetSelect = (value: string) => {
+    if (value.startsWith('custom:')) {
+      const presetId = value.slice('custom:'.length);
+      const preset = imageFilterPresets.find((item) => item.id === presetId);
+      if (!preset) return;
+
+      const nextSettings = normalizeImageFilterSettings(preset.settings, item.visualEffect ?? null);
+      onSentencePatch({
+        visualEffect: resolveVisualEffectFromSettings(nextSettings, item.visualEffect ?? null),
+        customImageFilterId: preset.id,
+        imageFilterSettings: { ...nextSettings, presetKey: 'custom' },
+      });
+      return;
+    }
+
+    const effect = value.slice('builtin:'.length) as SentenceItem['visualEffect'];
+    const normalizedEffect = effect === 'none' ? null : effect;
+    onSentencePatch({
+      visualEffect: normalizedEffect,
+      customImageFilterId: null,
+      imageFilterSettings: getDefaultImageFilterSettings(normalizedEffect),
+    });
+  };
+
+  const handleMotionPresetSelect = (value: string) => {
+    if (value.startsWith('custom:')) {
+      const presetId = value.slice('custom:'.length);
+      const preset = motionEffectPresets.find((item) => item.id === presetId);
+      if (!preset) return;
+
+      const nextSettings = normalizeImageMotionSettings(
+        preset.settings,
+        item.imageMotionEffect ?? 'default',
+        item.imageMotionSpeed,
+      );
+      onSentencePatch({
+        imageMotionEffect: resolveMotionEffectFromSettings(
+          nextSettings,
+          item.imageMotionEffect ?? 'default',
+        ),
+        customMotionEffectId: preset.id,
+        imageMotionSettings: { ...nextSettings, presetKey: 'custom' },
+        imageMotionSpeed: nextSettings.speed ?? 1,
+      });
+      return;
+    }
+
+    const effect = value.slice('builtin:'.length) as NonNullable<SentenceItem['imageMotionEffect']>;
+    const nextSettings = getDefaultImageMotionSettings(effect, item.imageMotionSpeed);
+    onSentencePatch({
+      imageMotionEffect: effect,
+      customMotionEffectId: null,
+      imageMotionSettings: nextSettings,
+      imageMotionSpeed: nextSettings.speed ?? 1,
+    });
+  };
+
+  const openImageEffectsModal = (tab: 'visual' | 'motion') => {
+    setImageEffectsTab(tab);
+    setIsImageEffectsDetailModalOpen(true);
+  };
 
   const openVideoModeMenu = () => {
     setIsVideoModeMenuMounted(true);
@@ -918,149 +1028,114 @@ export function SentenceEditorCard({
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={() => setImageEffectsTab('visual')}
+                onClick={() => onSentencePatch({ imageEffectsMode: 'quick' })}
                 className={
-                  imageEffectsTab === 'visual'
+                  imageEffectsMode === 'quick'
                     ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
                     : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                 }
-                title={`Visual effect: ${visualEffectLabel}`}
+                title="Use quick image effect presets"
               >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Look
+                Quick
               </Button>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={() => {
-                  if (!isImageSceneTab) return;
-                  setImageEffectsTab('motion');
-                }}
-                disabled={!isImageSceneTab}
+                onClick={() => onSentencePatch({ imageEffectsMode: 'detailed' })}
                 className={
-                  imageEffectsTab === 'motion'
+                  imageEffectsMode === 'detailed'
                     ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-sky-600 to-cyan-600 text-white hover:from-sky-700 hover:to-cyan-700'
-                    : !isImageSceneTab
-                      ? 'h-8 px-3 rounded-lg text-gray-500 hover:text-gray-500 cursor-not-allowed'
-                      : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                 }
-                title={
-                  isImageSceneTab
-                    ? `Motion effect: ${imageMotionEffectLabel}`
-                    : 'Motion effects are only available on the Image tab'
-                }
+                title="Open detailed image effect controls"
               >
-                <Timer className="mr-2 h-4 w-4" />
-                Motion
+                Detailed
               </Button>
             </div>
 
-            {imageEffectsTab === 'visual' ? (
-              <Select
-                value={visualEffectValue}
-                onValueChange={(v) => {
-                  if (v === '__none__') {
-                    onVisualEffectChange(null);
-                    return;
-                  }
-                  if (isVisualEffectSelectValue(v)) {
-                    onVisualEffectChange(v);
-                    return;
-                  }
+            {imageEffectsMode === 'quick' ? (
+              <div className="grid min-w-88 grid-cols-1 gap-2 md:grid-cols-2">
+                <Select value={quickLookSelectValue} onValueChange={handleLookPresetSelect}>
+                  <SelectTrigger
+                    className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
+                    title={`Look preset: ${visualEffectLabel}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      <SelectValue placeholder="Look" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent className="max-h-80">
+                    <SelectItem value="builtin:none">None</SelectItem>
+                    {VISUAL_EFFECT_SELECT_VALUES.map((value) => (
+                      <SelectItem key={value} value={`builtin:${value}`}>
+                        {getVisualEffectLabel(value)}
+                      </SelectItem>
+                    ))}
+                    {imageFilterPresets.map((preset) => (
+                      <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                        {preset.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
-                  onVisualEffectChange(null);
-                }}
-              >
-                <SelectTrigger
-                  className={
-                    visualEffectValue === '__none__'
-                      ? 'h-9 w-48 border-gray-200 bg-white text-gray-600 shadow-sm [&>svg]:text-gray-600'
-                      : 'h-9 w-48 border-transparent bg-linear-to-r from-indigo-600 to-purple-600 font-semibold text-white shadow-md [&>svg]:text-white'
-                  }
-                  title={`Visual effect: ${visualEffectLabel}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4" />
-                    <SelectValue placeholder="Effect" />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  <SelectItem value="colorGrading">Color grading</SelectItem>
-                  <SelectItem value="animatedLighting">Animated lighting</SelectItem>
-                  <SelectItem value="glassSubtle">Glass (subtle)</SelectItem>
-                  <SelectItem value="glassReflections">Glass (reflections)</SelectItem>
-                  <SelectItem value="glassStrong">Glass (strong)</SelectItem>
-                </SelectContent>
-              </Select>
-            ) : (
-              <div className="flex flex-col gap-2">
                 <Select
-                  value={imageMotionEffectValue}
-                  onValueChange={(value) => {
-                    if (isImageMotionEffectSelectValue(value)) {
-                      onImageMotionEffectChange(value);
-                    }
-                  }}
+                  value={quickMotionSelectValue}
+                  onValueChange={handleMotionPresetSelect}
+                  disabled={!isImageSceneTab}
                 >
                   <SelectTrigger
-                    className={
-                      imageMotionEffectValue === 'default'
-                        ? 'h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm [&>svg]:text-gray-700'
-                        : 'h-9 w-full border-transparent bg-linear-to-r from-sky-600 to-cyan-600 font-semibold text-white shadow-md [&>svg]:text-white'
+                    className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
+                    title={
+                      isImageSceneTab
+                        ? `Motion preset: ${imageMotionEffectLabel}`
+                        : 'Motion presets are available on image scenes only'
                     }
-                    title={`Image motion: ${imageMotionEffectLabel}`}
                   >
                     <div className="flex items-center gap-2">
                       <Timer className="h-4 w-4" />
                       <SelectValue placeholder="Motion" />
                     </div>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-80">
                     {IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => (
-                      <SelectItem key={value} value={value}>
+                      <SelectItem key={value} value={`builtin:${value}`}>
                         {getImageMotionEffectLabel(value)}
+                      </SelectItem>
+                    ))}
+                    {motionEffectPresets.map((preset) => (
+                      <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                        {preset.title}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-
-                <div className="flex items-center gap-3 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2 shadow-sm">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-sky-900">
-                    <Clock className="h-4 w-4 text-sky-700" />
-                    <span>Speed</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={IMAGE_MOTION_SPEED_MIN}
-                    max={IMAGE_MOTION_SPEED_MAX}
-                    step={IMAGE_MOTION_SPEED_STEP}
-                    value={imageMotionSpeedValue}
-                    onChange={(e) => onImageMotionSpeedChange(Number(e.target.value))}
-                    className="h-2 flex-1 cursor-pointer accent-sky-600"
-                    title={`Motion speed ${imageMotionSpeedValue.toFixed(1)}x`}
-                  />
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min={IMAGE_MOTION_SPEED_MIN}
-                      max={IMAGE_MOTION_SPEED_MAX}
-                      step={IMAGE_MOTION_SPEED_STEP}
-                      value={imageMotionSpeedValue.toFixed(1)}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value);
-                        onImageMotionSpeedChange(
-                          Number.isFinite(raw) ? raw : DEFAULT_IMAGE_MOTION_SPEED,
-                        );
-                      }}
-                      className="h-8 w-20 border-sky-200 bg-white pr-7 text-center text-sm font-semibold text-sky-900"
-                    />
-                    <span className="pointer-events-none absolute right-8.5 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wide text-sky-700">
-                      x
-                    </span>
-                  </div>
-                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openImageEffectsModal('visual')}
+                  className="h-9 rounded-xl border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Edit look
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openImageEffectsModal('motion')}
+                  disabled={!isImageSceneTab}
+                  className="h-9 rounded-xl border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <SlidersHorizontal className="mr-2 h-4 w-4" />
+                  Edit motion
+                </Button>
               </div>
             )}
           </div>
@@ -1767,6 +1842,8 @@ export function SentenceEditorCard({
                                 visualEffect={item.visualEffect}
                                 imageMotionEffect={item.imageMotionEffect}
                                 imageMotionSpeed={item.imageMotionSpeed}
+                                imageFilterSettings={resolvedImageFilterSettings}
+                                imageMotionSettings={resolvedImageMotionSettings}
                                 enableMotion={shouldAnimateImagePreview}
                               >
                                 <img
@@ -1779,6 +1856,8 @@ export function SentenceEditorCard({
                                       item.visualEffect ?? null,
                                       item.imageMotionEffect ?? 'default',
                                       item.imageMotionSpeed ?? 1,
+                                      item.imageFilterSettings ?? null,
+                                      item.imageMotionSettings ?? null,
                                     )
                                   }
                                 />
@@ -1880,6 +1959,8 @@ export function SentenceEditorCard({
                                 visualEffect={item.visualEffect}
                                 imageMotionEffect={item.imageMotionEffect}
                                 imageMotionSpeed={item.imageMotionSpeed}
+                                imageFilterSettings={resolvedImageFilterSettings}
+                                imageMotionSettings={resolvedImageMotionSettings}
                                 enableMotion={shouldAnimateImagePreview}
                               >
                                 <img
@@ -1892,6 +1973,8 @@ export function SentenceEditorCard({
                                       item.visualEffect ?? null,
                                       item.imageMotionEffect ?? 'default',
                                       item.imageMotionSpeed ?? 1,
+                                      item.imageFilterSettings ?? null,
+                                      item.imageMotionSettings ?? null,
                                     )
                                   }
                                 />
@@ -2058,6 +2141,8 @@ export function SentenceEditorCard({
                             visualEffect={item.visualEffect}
                             imageMotionEffect={item.imageMotionEffect}
                             imageMotionSpeed={item.imageMotionSpeed}
+                            imageFilterSettings={resolvedImageFilterSettings}
+                            imageMotionSettings={resolvedImageMotionSettings}
                             enableMotion={shouldAnimateImagePreview}
                           >
                             <img
@@ -2070,6 +2155,8 @@ export function SentenceEditorCard({
                                   item.visualEffect ?? null,
                                   item.imageMotionEffect ?? 'default',
                                   item.imageMotionSpeed ?? 1,
+                                  item.imageFilterSettings ?? null,
+                                  item.imageMotionSettings ?? null,
                                 )
                               }
                             />
@@ -2211,6 +2298,8 @@ export function SentenceEditorCard({
                       <ImageEffectPreview
                         visualEffect={item.visualEffect}
                         imageMotionEffect={item.imageMotionEffect}
+                        imageFilterSettings={resolvedImageFilterSettings}
+                        imageMotionSettings={resolvedImageMotionSettings}
                         enableMotion={false}
                       >
                         <video
@@ -2486,6 +2575,8 @@ export function SentenceEditorCard({
                         visualEffect={item.visualEffect}
                         imageMotionEffect={item.imageMotionEffect}
                         imageMotionSpeed={item.imageMotionSpeed}
+                        imageFilterSettings={resolvedImageFilterSettings}
+                        imageMotionSettings={resolvedImageMotionSettings}
                         enableMotion={shouldAnimateImagePreview}
                       >
                         <img
@@ -2498,6 +2589,8 @@ export function SentenceEditorCard({
                               item.visualEffect ?? null,
                               item.imageMotionEffect ?? 'default',
                               item.imageMotionSpeed ?? 1,
+                              item.imageFilterSettings ?? null,
+                              item.imageMotionSettings ?? null,
                             )
                           }
                         />
@@ -2506,6 +2599,8 @@ export function SentenceEditorCard({
                       <ImageEffectPreview
                         visualEffect={item.visualEffect}
                         imageMotionEffect={item.imageMotionEffect}
+                        imageFilterSettings={resolvedImageFilterSettings}
+                        imageMotionSettings={resolvedImageMotionSettings}
                         enableMotion={false}
                       >
                         <video
@@ -2607,6 +2702,43 @@ export function SentenceEditorCard({
             )}
           </div>
         </div>
+
+        <ImageEffectsDetailModal
+          isOpen={isImageEffectsDetailModalOpen}
+          activeTab={imageEffectsTab}
+          previewImageUrl={detailPreviewUrl}
+          visualEffect={item.visualEffect}
+          imageMotionEffect={item.imageMotionEffect}
+          imageMotionSpeed={item.imageMotionSpeed}
+          customImageFilterId={item.customImageFilterId ?? null}
+          customMotionEffectId={item.customMotionEffectId ?? null}
+          imageFilterSettings={item.imageFilterSettings ?? null}
+          imageMotionSettings={item.imageMotionSettings ?? null}
+          imageFilterPresets={imageFilterPresets}
+          motionEffectPresets={motionEffectPresets}
+          onClose={() => setIsImageEffectsDetailModalOpen(false)}
+          onApply={({
+            visualEffect,
+            customImageFilterId,
+            imageFilterSettings,
+            imageMotionEffect,
+            customMotionEffectId,
+            imageMotionSettings,
+            imageMotionSpeed,
+          }) => {
+            onSentencePatch({
+              visualEffect,
+              customImageFilterId,
+              imageFilterSettings,
+              imageMotionEffect,
+              customMotionEffectId,
+              imageMotionSettings,
+              imageMotionSpeed,
+            });
+          }}
+          onSaveImageFilterPreset={onSaveImageFilterPreset}
+          onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+        />
       </div>
     </div>
   );

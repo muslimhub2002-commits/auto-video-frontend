@@ -48,6 +48,12 @@ import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import type { SentenceItem } from './_types/sentences';
 import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
+import type {
+  ImageFilterPresetDto,
+  ImageFilterSettings,
+  ImageMotionSettings,
+  MotionEffectPresetDto,
+} from './_components/sentences/ImageEffectPreview';
 
 type ScriptCharacter = {
   key: string;
@@ -69,6 +75,11 @@ type BackendSentenceDto = {
   text: string;
   index: number;
   align_sound_effects_to_scene_end?: boolean | null;
+  image_effects_mode?: 'quick' | 'detailed' | null;
+  image_filter_id?: string | null;
+  image_filter_settings?: Record<string, unknown> | null;
+  motion_effect_id?: string | null;
+  image_motion_settings?: Record<string, unknown> | null;
   image?: { id: string; image: string; prompt?: string | null } | null;
   startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
@@ -107,10 +118,24 @@ type BackendSentenceDto = {
   image_motion_speed?: number | null;
 };
 
+type PresetLibraryResponse<TPreset> = {
+  items?: TPreset[] | null;
+  total?: number;
+  page?: number;
+  limit?: number;
+};
+
 function normalizeImageMotionSpeedValue(value: number | null | undefined) {
   const numeric = Number(value ?? 1);
   if (!Number.isFinite(numeric)) return 1;
   return Math.min(2.5, Math.max(0.5, numeric));
+}
+
+function normalizeSettingsObject(
+  value: Record<string, unknown> | null | undefined,
+) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value;
 }
 
 type ScriptDraftDto = {
@@ -460,6 +485,10 @@ export function GeneratePageInner() {
     '__default__',
   );
   const [backgroundSoundtrackVolumePercent, setBackgroundSoundtrackVolumePercent] = useState<number>(100);
+  const [imageFilterPresets, setImageFilterPresets] = useState<ImageFilterPresetDto[]>([]);
+  const [motionEffectPresets, setMotionEffectPresets] = useState<MotionEffectPresetDto[]>([]);
+  const [isLoadingImageFilterPresets, setIsLoadingImageFilterPresets] = useState(false);
+  const [isLoadingMotionEffectPresets, setIsLoadingMotionEffectPresets] = useState(false);
   const [oneOffBackgroundSoundtrackUrl, setOneOffBackgroundSoundtrackUrl] = useState<string | null>(null);
   const [isUploadingBackgroundSoundtrack, setIsUploadingBackgroundSoundtrack] = useState(false);
   const [isSettingFavoriteBackgroundSoundtrack, setIsSettingFavoriteBackgroundSoundtrack] = useState(false);
@@ -476,6 +505,7 @@ export function GeneratePageInner() {
   const {
     sentences,
     setSentences,
+    handleSentencePatch,
     handleSentenceForcedCharacterKeysChange,
     handleSentenceForcedEraKeyChange,
     handleSentenceVisualEffectChange,
@@ -1076,9 +1106,20 @@ export function GeneratePageInner() {
         text,
         isSuspense: Boolean(s.isSuspense),
         mediaType: 'image' as const,
+        imageEffectsMode: s.imageEffectsMode ?? 'quick',
         ...(transitionToNext ? { transitionToNext } : {}),
         ...(visualEffect ? { visualEffect } : {}),
+        ...(s.customImageFilterId ? { imageFilterId: s.customImageFilterId } : {}),
+        ...(s.imageFilterSettings
+          ? { imageFilterSettings: normalizeSettingsObject(s.imageFilterSettings) }
+          : {}),
         imageMotionEffect: s.imageMotionEffect ?? 'default',
+        ...(s.customMotionEffectId
+          ? { motionEffectId: s.customMotionEffectId }
+          : {}),
+        ...(s.imageMotionSettings
+          ? { imageMotionSettings: normalizeSettingsObject(s.imageMotionSettings) }
+          : {}),
         imageMotionSpeed: normalizeImageMotionSpeedValue(s.imageMotionSpeed),
         ...soundEffectsPatch,
         ...soundEffectsAlignPatch,
@@ -1573,6 +1614,144 @@ export function GeneratePageInner() {
     }
   };
 
+  const fetchImageFilterPresets = async () => {
+    if (!user) {
+      setImageFilterPresets([]);
+      return;
+    }
+
+    setIsLoadingImageFilterPresets(true);
+    try {
+      const res = await api.get<PresetLibraryResponse<ImageFilterPresetDto>>(
+        '/image-filters',
+        { params: { page: 1, limit: 100 } },
+      );
+
+      const items = Array.isArray(res.data?.items)
+        ? res.data.items.map((item) => ({
+            id: String(item.id ?? '').trim(),
+            title: String(item.title ?? '').trim() || 'Untitled look',
+            settings: normalizeSettingsObject(item.settings),
+          }))
+        : [];
+
+      setImageFilterPresets(items.filter((item) => item.id));
+    } catch (error) {
+      console.error('Failed to load image filter presets', error);
+      showToast('Failed to load look presets.', 'error');
+    } finally {
+      setIsLoadingImageFilterPresets(false);
+    }
+  };
+
+  const fetchMotionEffectPresets = async () => {
+    if (!user) {
+      setMotionEffectPresets([]);
+      return;
+    }
+
+    setIsLoadingMotionEffectPresets(true);
+    try {
+      const res = await api.get<PresetLibraryResponse<MotionEffectPresetDto>>(
+        '/motion-effects',
+        { params: { page: 1, limit: 100 } },
+      );
+
+      const items = Array.isArray(res.data?.items)
+        ? res.data.items.map((item) => ({
+            id: String(item.id ?? '').trim(),
+            title: String(item.title ?? '').trim() || 'Untitled motion',
+            settings: normalizeSettingsObject(item.settings),
+          }))
+        : [];
+
+      setMotionEffectPresets(items.filter((item) => item.id));
+    } catch (error) {
+      console.error('Failed to load motion effect presets', error);
+      showToast('Failed to load motion presets.', 'error');
+    } finally {
+      setIsLoadingMotionEffectPresets(false);
+    }
+  };
+
+  const handleSaveImageFilterPreset = async (
+    title: string,
+    settings: ImageFilterSettings,
+  ): Promise<ImageFilterPresetDto | null> => {
+    if (!user) {
+      showAlert('You must be logged in to save a look preset.', { type: 'warning' });
+      return null;
+    }
+
+    const trimmedTitle = String(title ?? '').trim();
+    if (!trimmedTitle) return null;
+
+    try {
+      const res = await api.post<ImageFilterPresetDto>('/image-filters', {
+        title: trimmedTitle,
+        settings,
+      });
+
+      const saved: ImageFilterPresetDto = {
+        id: String(res.data?.id ?? '').trim(),
+        title: String(res.data?.title ?? trimmedTitle).trim() || trimmedTitle,
+        settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+      };
+
+      if (!saved.id) {
+        showToast('Look preset could not be saved.', 'error');
+        return null;
+      }
+
+      setImageFilterPresets((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      showToast('Look preset saved.', 'success');
+      return saved;
+    } catch (error) {
+      console.error('Failed to save image filter preset', error);
+      showToast('Failed to save look preset.', 'error');
+      return null;
+    }
+  };
+
+  const handleSaveMotionEffectPreset = async (
+    title: string,
+    settings: ImageMotionSettings,
+  ): Promise<MotionEffectPresetDto | null> => {
+    if (!user) {
+      showAlert('You must be logged in to save a motion preset.', { type: 'warning' });
+      return null;
+    }
+
+    const trimmedTitle = String(title ?? '').trim();
+    if (!trimmedTitle) return null;
+
+    try {
+      const res = await api.post<MotionEffectPresetDto>('/motion-effects', {
+        title: trimmedTitle,
+        settings,
+      });
+
+      const saved: MotionEffectPresetDto = {
+        id: String(res.data?.id ?? '').trim(),
+        title: String(res.data?.title ?? trimmedTitle).trim() || trimmedTitle,
+        settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+      };
+
+      if (!saved.id) {
+        showToast('Motion preset could not be saved.', 'error');
+        return null;
+      }
+
+      setMotionEffectPresets((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      showToast('Motion preset saved.', 'success');
+      return saved;
+    } catch (error) {
+      console.error('Failed to save motion effect preset', error);
+      showToast('Failed to save motion preset.', 'error');
+      return null;
+    }
+  };
+
   useEffect(() => {
     const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
     if (!value.startsWith('lib:')) return;
@@ -1875,6 +2054,19 @@ export function GeneratePageInner() {
   useEffect(() => {
     if (!user) return;
     fetchBackgroundSoundtracks();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setImageFilterPresets([]);
+      setMotionEffectPresets([]);
+      return;
+    }
+
+    void Promise.all([
+      fetchImageFilterPresets(),
+      fetchMotionEffectPresets(),
+    ]);
   }, [user]);
 
   const stopVoicePreview = () => {
@@ -2958,8 +3150,13 @@ export function GeneratePageInner() {
         sceneTab: subscribeLike ? 'video' : s.video ? 'video' : 'image',
         forcedCharacterKeys: resolvedForcedCharacterKeys,
         transitionToNext: s.transition_to_next ?? null,
+        imageEffectsMode: s.image_effects_mode === 'detailed' ? 'detailed' : 'quick',
         visualEffect: s.visual_effect ?? null,
+        customImageFilterId: s.image_filter_id ?? null,
+        imageFilterSettings: normalizeSettingsObject(s.image_filter_settings),
         imageMotionEffect: s.image_motion_effect ?? 'default',
+        customMotionEffectId: s.motion_effect_id ?? null,
+        imageMotionSettings: normalizeSettingsObject(s.image_motion_settings),
         imageMotionSpeed: normalizeImageMotionSpeedValue(s.image_motion_speed),
         image: null,
         imageUrl: subscribeLike ? null : s.image?.image ?? null,
@@ -5002,8 +5199,13 @@ export function GeneratePageInner() {
           forced_character_keys?: string[];
           align_sound_effects_to_scene_end?: boolean;
           transition_to_next?: SentenceItem['transitionToNext'] | null;
+          image_effects_mode?: 'quick' | 'detailed' | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+          image_filter_id?: string | null;
+          image_filter_settings?: Record<string, unknown> | null;
           image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
+          motion_effect_id?: string | null;
+          image_motion_settings?: Record<string, unknown> | null;
           image_motion_speed?: number | null;
           sound_effects?: Array<{
             sound_effect_id: string;
@@ -5068,6 +5270,7 @@ export function GeneratePageInner() {
               : undefined,
             align_sound_effects_to_scene_end: s.alignSoundEffectsToSceneEnd === true,
             transition_to_next: s.transitionToNext ?? null,
+            image_effects_mode: s.imageEffectsMode ?? 'quick',
             visual_effect:
               s.visualEffect === 'colorGrading' ||
               s.visualEffect === 'animatedLighting' ||
@@ -5076,7 +5279,11 @@ export function GeneratePageInner() {
               s.visualEffect === 'glassStrong'
                 ? s.visualEffect
                 : null,
+            image_filter_id: s.customImageFilterId ?? null,
+            image_filter_settings: normalizeSettingsObject(s.imageFilterSettings),
             image_motion_effect: s.imageMotionEffect ?? 'default',
+            motion_effect_id: s.customMotionEffectId ?? null,
+            image_motion_settings: normalizeSettingsObject(s.imageMotionSettings),
             image_motion_speed: normalizeImageMotionSpeedValue(s.imageMotionSpeed),
             sound_effects: Array.isArray(s.soundEffects)
               ? s.soundEffects
@@ -5360,8 +5567,13 @@ export function GeneratePageInner() {
           isSuspense?: boolean;
           forced_character_keys?: string[];
           transition_to_next?: SentenceItem['transitionToNext'] | null;
+          image_effects_mode?: 'quick' | 'detailed' | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+          image_filter_id?: string | null;
+          image_filter_settings?: Record<string, unknown> | null;
           image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
+          motion_effect_id?: string | null;
+          image_motion_settings?: Record<string, unknown> | null;
           image_motion_speed?: number | null;
         }[];
         subject?: string;
@@ -6109,6 +6321,13 @@ export function GeneratePageInner() {
                   scriptEras={scriptEras}
                   onScriptErasChange={handleScriptErasChange}
                   onSentenceForcedEraKeyChange={handleSentenceForcedEraKeyChange}
+                  imageFilterPresets={imageFilterPresets}
+                  motionEffectPresets={motionEffectPresets}
+                  isLoadingImageFilterPresets={isLoadingImageFilterPresets}
+                  isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+                  onSentencePatch={handleSentencePatch}
+                  onSaveImageFilterPreset={handleSaveImageFilterPreset}
+                  onSaveMotionEffectPreset={handleSaveMotionEffectPreset}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
                   onSentenceImageMotionEffectChange={
                     handleSentenceImageMotionEffectChange

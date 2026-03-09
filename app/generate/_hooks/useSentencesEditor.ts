@@ -30,6 +30,22 @@ function mergeSentenceText(targetText: string, sourceText: string) {
 export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
   const [sentences, setSentences] = useState<SentenceItem[]>(initialSentences);
 
+  const handleSentencePatch = useCallback(
+    (index: number, patch: Partial<SentenceItem>) => {
+      setSentences((prev) =>
+        prev.map((sentence, sentenceIndex) =>
+          sentenceIndex === index
+            ? {
+                ...sentence,
+                ...patch,
+              }
+            : sentence,
+        ),
+      );
+    },
+    [],
+  );
+
   const handleTransitionToNextChange = useCallback(
     (index: number, value: TransitionType | null) => {
       setSentences((prev) =>
@@ -209,8 +225,13 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         isGeneratingReferenceImage: false,
         forcedCharacterKeys: null,
         transitionToNext: null,
+        imageEffectsMode: 'quick',
         visualEffect: null,
+        customImageFilterId: null,
+        imageFilterSettings: null,
         imageMotionEffect: 'default',
+        customMotionEffectId: null,
+        imageMotionSettings: null,
         imageMotionSpeed: 1,
         image: null,
         imageUrl: null,
@@ -273,6 +294,7 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
   return {
     sentences,
     setSentences,
+    handleSentencePatch,
     handleSentenceForcedCharacterKeysChange,
     handleSentenceForcedEraKeyChange,
     handleSentenceVisualEffectChange,

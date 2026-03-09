@@ -15,6 +15,12 @@ import type { SentenceItem } from '../../_types/sentences';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
 import { CharactersModal } from './CharactersModal';
 import { ErasModal, type ScriptEra } from './ErasModal';
+import type {
+  ImageFilterPresetDto,
+  ImageFilterSettings,
+  ImageMotionSettings,
+  MotionEffectPresetDto,
+} from './ImageEffectPreview';
 
 type ScriptCharacter = {
   key: string;
@@ -57,6 +63,19 @@ type SceneEditorSectionProps = {
   scriptEras: ScriptEra[];
   onScriptErasChange: (next: ScriptEra[]) => void;
   onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
+  imageFilterPresets: ImageFilterPresetDto[];
+  motionEffectPresets: MotionEffectPresetDto[];
+  isLoadingImageFilterPresets?: boolean;
+  isLoadingMotionEffectPresets?: boolean;
+  onSentencePatch: (index: number, patch: Partial<SentenceItem>) => void;
+  onSaveImageFilterPreset: (
+    title: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onSaveMotionEffectPreset: (
+    title: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
 
   onSentenceVisualEffectChange: (
     index: number,
@@ -147,6 +166,8 @@ type SceneEditorSectionProps = {
     visualEffect: SentenceItem['visualEffect'] | null,
     imageMotionEffect: SentenceItem['imageMotionEffect'] | null,
     imageMotionSpeed: number | null,
+    imageFilterSettings: Record<string, unknown> | null,
+    imageMotionSettings: Record<string, unknown> | null,
   ) => void;
 };
 
@@ -176,6 +197,13 @@ export function SceneEditorSection({
   scriptEras,
   onScriptErasChange,
   onSentenceForcedEraKeyChange,
+  imageFilterPresets,
+  motionEffectPresets,
+  isLoadingImageFilterPresets = false,
+  isLoadingMotionEffectPresets = false,
+  onSentencePatch,
+  onSaveImageFilterPreset,
+  onSaveMotionEffectPreset,
   onSentenceVisualEffectChange,
   onSentenceImageMotionEffectChange,
   onSentenceImageMotionSpeedChange,
@@ -413,6 +441,13 @@ export function SceneEditorSection({
 
                   scriptEras={scriptEras}
                   onForcedEraKeyChange={(next) => onSentenceForcedEraKeyChange(index, next)}
+                  imageFilterPresets={imageFilterPresets}
+                  motionEffectPresets={motionEffectPresets}
+                  isLoadingImageFilterPresets={isLoadingImageFilterPresets}
+                  isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+                  onSentencePatch={(patch) => onSentencePatch(index, patch)}
+                  onSaveImageFilterPreset={onSaveImageFilterPreset}
+                  onSaveMotionEffectPreset={onSaveMotionEffectPreset}
 
                   onVisualEffectChange={(value) =>
                     onSentenceVisualEffectChange(index, value)
