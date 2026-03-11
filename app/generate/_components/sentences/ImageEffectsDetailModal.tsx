@@ -22,6 +22,7 @@ import {
   IMAGE_MOTION_SPEED_MAX,
   IMAGE_MOTION_SPEED_MIN,
   IMAGE_MOTION_SPEED_STEP,
+  DEFAULT_IMAGE_MOTION_SPEED,
   ImageEffectPreview,
   type ImageFilterPresetDto,
   type ImageFilterSettings,
@@ -43,6 +44,17 @@ const LOOK_EFFECT_VALUES = [
 ] as const;
 
 type DetailTab = 'visual' | 'motion';
+
+type DebouncedPreviewState = {
+  visualEffect: SentenceItem['visualEffect'] | null;
+  imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+  imageMotionSpeed: number;
+  imageFilterSettings: ImageFilterSettings;
+  imageMotionSettings: ImageMotionSettings;
+  resetKey: number;
+};
+
+const PREVIEW_RESTART_DEBOUNCE_MS = 140;
 
 type ImageEffectsDetailModalProps = {
   isOpen: boolean;
@@ -84,9 +96,10 @@ function RangeField(props: {
   max: number;
   step: number;
   onChange: (value: number) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="space-y-2">
+    <label className={`space-y-2 ${props.disabled ? 'opacity-45' : ''}`}>
       <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
         <span>{props.label}</span>
         <span>{props.value.toFixed(props.step < 1 ? 2 : 0)}</span>
@@ -98,10 +111,74 @@ function RangeField(props: {
         step={props.step}
         value={props.value}
         onChange={(e) => props.onChange(Number(e.target.value))}
-        className="h-2 w-full cursor-pointer accent-indigo-600"
+        disabled={props.disabled}
+        className={`h-2 w-full accent-indigo-600 ${props.disabled ? 'cursor-not-allowed accent-slate-300' : 'cursor-pointer'}`}
       />
     </label>
   );
+}
+
+function EndValueModeField(props: {
+  label: string;
+  value: 'loop' | 'continue';
+  disabled?: boolean;
+  name: string;
+  onChange: (value: 'loop' | 'continue') => void;
+}) {
+  return (
+    <div
+      className={`space-y-2 mt-2 rounded-xl border px-3 py-3 ${
+        props.disabled
+          ? 'border-slate-200 bg-slate-50 text-slate-400'
+          : 'border-sky-200 bg-sky-50 text-sky-900'
+      }`}
+    >
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+        {props.label}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <label
+          className={`flex items-center gap-2 text-xs font-medium ${
+            props.disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+          }`}
+        >
+          <input
+            type="radio"
+            name={props.name}
+            checked={props.value === 'loop'}
+            disabled={props.disabled}
+            onChange={() => props.onChange('loop')}
+            className="h-4 w-4 border-slate-300 text-sky-600 focus:ring-sky-500"
+          />
+          <span>Loop between start and end</span>
+        </label>
+        <label
+          className={`flex items-center gap-2 text-xs font-medium ${
+            props.disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+          }`}
+        >
+          <input
+            type="radio"
+            name={props.name}
+            checked={props.value === 'continue'}
+            disabled={props.disabled}
+            onChange={() => props.onChange('continue')}
+            className="h-4 w-4 border-slate-300 text-sky-600 focus:ring-sky-500"
+          />
+          <span>Continue past the end value</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function getUnifiedEndValueMode(settings: ImageMotionSettings): 'loop' | 'continue' {
+  return settings.scaleEndNoLimit ||
+    settings.translateXEndNoLimit ||
+    settings.translateYEndNoLimit ||
+    settings.rotateEndNoLimit
+    ? 'continue'
+    : 'loop';
 }
 
 export function ImageEffectsDetailModal({
@@ -136,7 +213,7 @@ export function ImageEffectsDetailModal({
     NonNullable<SentenceItem['imageMotionEffect']>
   >(imageMotionEffect ?? 'default');
   const [draftImageMotionSpeed, setDraftImageMotionSpeed] = useState<number>(
-    imageMotionSpeed ?? 1,
+    imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
   );
   const [draftCustomImageFilterId, setDraftCustomImageFilterId] = useState<string | null>(
     customImageFilterId ?? null,
@@ -169,6 +246,18 @@ export function ImageEffectsDetailModal({
       ),
     [draftImageMotionEffect, draftImageMotionSettings, draftImageMotionSpeed],
   );
+  const [debouncedPreview, setDebouncedPreview] = useState<DebouncedPreviewState>(() => ({
+    visualEffect: visualEffect ?? null,
+    imageMotionEffect: imageMotionEffect ?? 'default',
+    imageMotionSpeed: imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+    imageFilterSettings: normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
+    imageMotionSettings: normalizeImageMotionSettings(
+      imageMotionSettings,
+      imageMotionEffect ?? 'default',
+      imageMotionSpeed,
+    ),
+    resetKey: 0,
+  }));
 
   useEffect(() => {
     if (isOpen) {
@@ -187,7 +276,7 @@ export function ImageEffectsDetailModal({
     setCurrentTab(activeTab);
     setDraftVisualEffect(visualEffect ?? null);
     setDraftImageMotionEffect(imageMotionEffect ?? 'default');
-    setDraftImageMotionSpeed(imageMotionSpeed ?? 1);
+    setDraftImageMotionSpeed(imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED);
     setDraftCustomImageFilterId(customImageFilterId ?? null);
     setDraftCustomMotionEffectId(customMotionEffectId ?? null);
     setDraftImageFilterSettings(
@@ -202,6 +291,18 @@ export function ImageEffectsDetailModal({
     );
     setLookSaveTitle('');
     setMotionSaveTitle('');
+    setDebouncedPreview((prev) => ({
+      visualEffect: visualEffect ?? null,
+      imageMotionEffect: imageMotionEffect ?? 'default',
+      imageMotionSpeed: imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+      imageFilterSettings: normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
+      imageMotionSettings: normalizeImageMotionSettings(
+        imageMotionSettings,
+        imageMotionEffect ?? 'default',
+        imageMotionSpeed,
+      ),
+      resetKey: prev.resetKey + 1,
+    }));
   }, [
     activeTab,
     customImageFilterId,
@@ -212,6 +313,32 @@ export function ImageEffectsDetailModal({
     imageMotionSpeed,
     isOpen,
     visualEffect,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedPreview((prev) => ({
+        visualEffect: draftVisualEffect,
+        imageMotionEffect: draftImageMotionEffect,
+        imageMotionSpeed: draftImageMotionSpeed,
+        imageFilterSettings: resolvedLook,
+        imageMotionSettings: resolvedMotion,
+        resetKey: prev.resetKey + 1,
+      }));
+    }, PREVIEW_RESTART_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    draftImageMotionEffect,
+    draftImageMotionSpeed,
+    draftVisualEffect,
+    isOpen,
+    resolvedLook,
+    resolvedMotion,
   ]);
 
   if (!isRendered) return null;
@@ -234,6 +361,13 @@ export function ImageEffectsDetailModal({
   const motionSelectValue = draftCustomMotionEffectId
     ? `custom:${draftCustomMotionEffectId}`
     : `builtin:${resolveMotionEffectFromSettings(draftImageMotionSettings, draftImageMotionEffect ?? 'default')}`;
+  const isBuiltinDefaultScaleMotion =
+    !draftCustomMotionEffectId &&
+    resolveMotionEffectFromSettings(
+      draftImageMotionSettings,
+      draftImageMotionEffect ?? 'default',
+    ) === 'default';
+  const unifiedEndValueMode = getUnifiedEndValueMode(resolvedMotion);
 
   const handleLookPresetChange = (value: string) => {
     if (value.startsWith('custom:')) {
@@ -269,7 +403,7 @@ export function ImageEffectsDetailModal({
       );
       setDraftCustomMotionEffectId(preset.id);
       setDraftImageMotionSettings({ ...settings, presetKey: 'custom' });
-      setDraftImageMotionSpeed(settings.speed ?? 1);
+      setDraftImageMotionSpeed(settings.speed ?? DEFAULT_IMAGE_MOTION_SPEED);
       return;
     }
 
@@ -278,7 +412,7 @@ export function ImageEffectsDetailModal({
     setDraftImageMotionEffect(effect);
     setDraftCustomMotionEffectId(null);
     setDraftImageMotionSettings(settings);
-    setDraftImageMotionSpeed(settings.speed ?? 1);
+    setDraftImageMotionSpeed(settings.speed ?? DEFAULT_IMAGE_MOTION_SPEED);
   };
 
   const updateLookSettings = (patch: Partial<ImageFilterSettings>) => {
@@ -305,7 +439,17 @@ export function ImageEffectsDetailModal({
     );
     setDraftCustomMotionEffectId(null);
     setDraftImageMotionSettings(nextSettings);
-    setDraftImageMotionSpeed(nextSettings.speed ?? 1);
+    setDraftImageMotionSpeed(nextSettings.speed ?? DEFAULT_IMAGE_MOTION_SPEED);
+  };
+
+  const updateAllEndValueModes = (value: 'loop' | 'continue') => {
+    const isContinue = value === 'continue';
+    updateMotionSettings({
+      scaleEndNoLimit: isContinue,
+      translateXEndNoLimit: isContinue,
+      translateYEndNoLimit: isContinue,
+      rotateEndNoLimit: isContinue,
+    });
   };
 
   const handleSaveLookPreset = async () => {
@@ -342,7 +486,8 @@ export function ImageEffectsDetailModal({
       imageMotionEffect: draftImageMotionEffect,
       customMotionEffectId: draftCustomMotionEffectId,
       imageMotionSettings: resolvedMotion,
-      imageMotionSpeed: resolvedMotion.speed ?? draftImageMotionSpeed ?? 1,
+      imageMotionSpeed:
+        resolvedMotion.speed ?? draftImageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
     });
     handleRequestClose();
   };
@@ -410,13 +555,14 @@ export function ImageEffectsDetailModal({
           <div className="mt-6 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/30 p-4">
             {previewImageUrl ? (
               <ImageEffectPreview
-                visualEffect={draftVisualEffect}
-                imageMotionEffect={draftImageMotionEffect}
-                imageMotionSpeed={draftImageMotionSpeed}
-                imageFilterSettings={resolvedLook}
-                imageMotionSettings={resolvedMotion}
+                visualEffect={debouncedPreview.visualEffect}
+                imageMotionEffect={debouncedPreview.imageMotionEffect}
+                imageMotionSpeed={debouncedPreview.imageMotionSpeed}
+                imageFilterSettings={debouncedPreview.imageFilterSettings}
+                imageMotionSettings={debouncedPreview.imageMotionSettings}
                 enableMotion={currentTab === 'motion'}
                 className="flex max-h-full max-w-full items-center justify-center"
+                motionResetKey={debouncedPreview.resetKey}
               >
                 <img
                   src={previewImageUrl}
@@ -550,17 +696,26 @@ export function ImageEffectsDetailModal({
                     <Clock3 className="h-4 w-4 text-sky-600" />
                     Motion tuning
                   </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    No-limit end values affect the final video only. Editor previews stay bounded.
+                  </div>
                   <RangeField label="Speed" value={resolvedMotion.speed ?? 1} min={IMAGE_MOTION_SPEED_MIN} max={IMAGE_MOTION_SPEED_MAX} step={IMAGE_MOTION_SPEED_STEP} onChange={(value) => updateMotionSettings({ speed: value })} />
-                  <RangeField label="Initial zoom" value={resolvedMotion.startScale ?? 1} min={0.5} max={2} step={0.01} onChange={(value) => updateMotionSettings({ startScale: value })} />
-                  <RangeField label="Target scale" value={resolvedMotion.endScale ?? 1.055} min={0.5} max={2} step={0.01} onChange={(value) => updateMotionSettings({ endScale: value })} />
-                  <RangeField label="X start" value={resolvedMotion.translateXStart ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateXStart: value })} />
-                  <RangeField label="X end" value={resolvedMotion.translateXEnd ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateXEnd: value })} />
-                  <RangeField label="Y start" value={resolvedMotion.translateYStart ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateYStart: value })} />
-                  <RangeField label="Y end" value={resolvedMotion.translateYEnd ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateYEnd: value })} />
-                  <RangeField label="Rotate start" value={resolvedMotion.rotateStart ?? 0} min={-10} max={10} step={0.1} onChange={(value) => updateMotionSettings({ rotateStart: value })} />
-                  <RangeField label="Rotate end" value={resolvedMotion.rotateEnd ?? 0} min={-10} max={10} step={0.1} onChange={(value) => updateMotionSettings({ rotateEnd: value })} />
-                  <RangeField label="Origin X" value={resolvedMotion.originX ?? 50} min={0} max={100} step={1} onChange={(value) => updateMotionSettings({ originX: value })} />
-                  <RangeField label="Origin Y" value={resolvedMotion.originY ?? 50} min={0} max={100} step={1} onChange={(value) => updateMotionSettings({ originY: value })} />
+                  {isBuiltinDefaultScaleMotion ? (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 mt-2 text-xs text-sky-800">
+                      Default scale is automatic and keeps zooming for the full scene duration. Only speed is adjustable for this preset.
+                    </div>
+                  ) : null}
+                  <EndValueModeField label="End value behavior" name="motion-end-value-behavior" value={unifiedEndValueMode} onChange={updateAllEndValueModes} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Initial zoom" value={resolvedMotion.startScale ?? 1} min={0.5} max={2} step={0.01} onChange={(value) => updateMotionSettings({ startScale: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Target scale" value={resolvedMotion.endScale ?? 1.055} min={0.5} max={2} step={0.01} onChange={(value) => updateMotionSettings({ endScale: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="X start" value={resolvedMotion.translateXStart ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateXStart: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="X end" value={resolvedMotion.translateXEnd ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateXEnd: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Y start" value={resolvedMotion.translateYStart ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateYStart: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Y end" value={resolvedMotion.translateYEnd ?? 0} min={-20} max={20} step={0.1} onChange={(value) => updateMotionSettings({ translateYEnd: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Rotate start" value={resolvedMotion.rotateStart ?? 0} min={-10} max={10} step={0.1} onChange={(value) => updateMotionSettings({ rotateStart: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Rotate end" value={resolvedMotion.rotateEnd ?? 0} min={-10} max={10} step={0.1} onChange={(value) => updateMotionSettings({ rotateEnd: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Origin X" value={resolvedMotion.originX ?? 50} min={0} max={100} step={1} onChange={(value) => updateMotionSettings({ originX: value })} disabled={isBuiltinDefaultScaleMotion} />
+                  <RangeField label="Origin Y" value={resolvedMotion.originY ?? 50} min={0} max={100} step={1} onChange={(value) => updateMotionSettings({ originY: value })} disabled={isBuiltinDefaultScaleMotion} />
                 </div>
 
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/accordion';
 import {
   Loader2,
+  Mic,
   Music2,
   Pause,
   Play,
@@ -40,12 +41,17 @@ type SoundEffectEditModalProps = {
   isOpen: boolean;
   title?: string;
   audioUrl?: string | null;
+  companionAudioUrl?: string | null;
+  companionAudioLabel?: string;
+  companionAudioDefaultEnabled?: boolean;
+  companionPreviewIcon?: 'mic' | 'music';
   initialName: string;
   initialVolumePercent: number;
   initialAudioSettings?: SoundEffectAudioSettings | null;
   isSaving?: boolean;
   isApplying?: boolean;
   isSavingAsPreset?: boolean;
+  showSaveAsPreset?: boolean;
   canApply?: boolean;
   onClose: () => void;
   onApply?: (values: SoundEffectEditValues) => void | Promise<void>;
@@ -153,18 +159,24 @@ export function SoundEffectEditModal({
   isOpen,
   title,
   audioUrl,
+  companionAudioUrl,
+  companionAudioLabel = 'voice-over',
+  companionAudioDefaultEnabled = false,
+  companionPreviewIcon = 'mic',
   initialName,
   initialVolumePercent,
   initialAudioSettings,
   isSaving,
   isApplying,
   isSavingAsPreset,
+  showSaveAsPreset = true,
   canApply = true,
   onClose,
   onApply,
   onSave,
   onSaveAsPreset,
 }: SoundEffectEditModalProps) {
+  const CompanionPreviewIcon = companionPreviewIcon === 'music' ? Music2 : Mic;
   const [name, setName] = useState('');
   const [volumePercent, setVolumePercent] = useState(100);
   const [audioSettings, setAudioSettings] = useState<SoundEffectAudioSettings>(
@@ -172,10 +184,12 @@ export function SoundEffectEditModal({
   );
   const [previewStatus, setPreviewStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [isPreviewLoopEnabled, setIsPreviewLoopEnabled] = useState(false);
+  const [isCompanionPreviewEnabled, setIsCompanionPreviewEnabled] = useState(false);
   const [audioDurationSeconds, setAudioDurationSeconds] = useState<number | null>(null);
   const [waveformSamples, setWaveformSamples] = useState<number[]>([]);
   const editSessionKeyRef = useRef<string | null>(null);
   const previewLoopEnabledRef = useRef(false);
+  const companionPreviewEnabledRef = useRef(false);
   const previewStartRef = useRef(0);
   const previewEndRef = useRef<number | null>(null);
   const trimWaveformRef = useRef<HTMLDivElement | null>(null);
@@ -184,8 +198,11 @@ export function SoundEffectEditModal({
   const playheadIndicatorRef = useRef<HTMLDivElement | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const companionAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const companionSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const companionGainRef = useRef<GainNode | null>(null);
   const lowFilterRef = useRef<BiquadFilterNode | null>(null);
   const midFilterRef = useRef<BiquadFilterNode | null>(null);
   const highFilterRef = useRef<BiquadFilterNode | null>(null);
@@ -379,7 +396,16 @@ export function SoundEffectEditModal({
 
   const stopPreview = () => {
     const audio = audioRef.current;
+    const companionAudio = companionAudioRef.current;
     if (!audio) {
+      if (companionAudio) {
+        try {
+          companionAudio.pause();
+          companionAudio.currentTime = 0;
+        } catch {
+          // ignore preview shutdown errors
+        }
+      }
       setPreviewStatus('idle');
       updatePlayheadIndicator(null);
       return;
@@ -391,6 +417,15 @@ export function SoundEffectEditModal({
       updatePlayheadIndicator(previewStartRef.current);
     } catch {
       // ignore preview shutdown errors
+    }
+
+    if (companionAudio) {
+      try {
+        companionAudio.pause();
+        companionAudio.currentTime = 0;
+      } catch {
+        // ignore preview shutdown errors
+      }
     }
 
     stopPlayheadAnimation();
@@ -409,8 +444,18 @@ export function SoundEffectEditModal({
     }
     audioRef.current = null;
 
+    const companionAudio = companionAudioRef.current;
+    if (companionAudio) {
+      companionAudio.onended = null;
+      companionAudio.onerror = null;
+      companionAudio.src = '';
+    }
+    companionAudioRef.current = null;
+
     try {
       sourceNodeRef.current?.disconnect();
+      companionSourceNodeRef.current?.disconnect();
+      companionGainRef.current?.disconnect();
       lowFilterRef.current?.disconnect();
       midFilterRef.current?.disconnect();
       highFilterRef.current?.disconnect();
@@ -429,6 +474,8 @@ export function SoundEffectEditModal({
     }
 
     sourceNodeRef.current = null;
+  companionSourceNodeRef.current = null;
+  companionGainRef.current = null;
     lowFilterRef.current = null;
     midFilterRef.current = null;
     highFilterRef.current = null;
@@ -541,8 +588,9 @@ export function SoundEffectEditModal({
     setAudioDurationSeconds(null);
     setWaveformSamples([]);
     setIsPreviewLoopEnabled(false);
+    setIsCompanionPreviewEnabled(Boolean(companionAudioDefaultEnabled && String(companionAudioUrl ?? '').trim()));
     updatePlayheadIndicator(null);
-  }, [isOpen, audioUrl, initialName, initialVolumePercent, initialAudioSettings]);
+  }, [isOpen, audioUrl, companionAudioDefaultEnabled, companionAudioUrl, initialName, initialVolumePercent, initialAudioSettings]);
 
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined') return;
@@ -617,6 +665,7 @@ export function SoundEffectEditModal({
     if (!isOpen) return;
 
     const url = String(audioUrl ?? '').trim();
+    const companionUrl = String(companionAudioUrl ?? '').trim();
     if (!url || typeof window === 'undefined') {
       void teardownAudio();
       return;
@@ -673,17 +722,36 @@ export function SoundEffectEditModal({
         setPreviewStatus('idle');
       };
 
+      const companionAudio = companionUrl ? new Audio(companionUrl) : null;
+      if (companionAudio) {
+        companionAudio.crossOrigin = 'anonymous';
+        companionAudio.preload = 'auto';
+        companionAudio.onended = () => {
+          if (!companionPreviewEnabledRef.current) return;
+          stopPlayheadAnimation();
+          stopPreview();
+        };
+        companionAudio.onerror = () => {
+          if (!companionPreviewEnabledRef.current) return;
+          stopPlayheadAnimation();
+          stopPreview();
+        };
+      }
+
       const AudioContextCtor = window.AudioContext || (window as typeof window & {
         webkitAudioContext?: typeof AudioContext;
       }).webkitAudioContext;
 
       if (!AudioContextCtor) {
         audioRef.current = audio;
+        companionAudioRef.current = companionAudio;
         return;
       }
 
       const context = new AudioContextCtor();
       const sourceNode = context.createMediaElementSource(audio);
+      const companionSourceNode = companionAudio ? context.createMediaElementSource(companionAudio) : null;
+      const companionGain = companionAudio ? context.createGain() : null;
       const lowFilter = context.createBiquadFilter();
       const midFilter = context.createBiquadFilter();
       const highFilter = context.createBiquadFilter();
@@ -724,11 +792,20 @@ export function SoundEffectEditModal({
       convolver.connect(reverbWetGain);
       reverbWetGain.connect(masterGain);
 
+      if (companionSourceNode && companionGain) {
+        companionSourceNode.connect(companionGain);
+        companionGain.gain.value = 1;
+        companionGain.connect(context.destination);
+      }
+
       masterGain.connect(context.destination);
 
       audioRef.current = audio;
+      companionAudioRef.current = companionAudio;
       audioContextRef.current = context;
       sourceNodeRef.current = sourceNode;
+      companionSourceNodeRef.current = companionSourceNode;
+      companionGainRef.current = companionGain;
       lowFilterRef.current = lowFilter;
       midFilterRef.current = midFilter;
       highFilterRef.current = highFilter;
@@ -753,7 +830,7 @@ export function SoundEffectEditModal({
       void teardownAudio();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, audioUrl]);
+  }, [isOpen, audioUrl, companionAudioUrl]);
 
   useEffect(() => {
     const settings = normalizeSoundEffectAudioSettings(audioSettings);
@@ -766,6 +843,10 @@ export function SoundEffectEditModal({
     if (!audioRef.current) return;
     audioRef.current.loop = false;
   }, [isPreviewLoopEnabled]);
+
+  useEffect(() => {
+    companionPreviewEnabledRef.current = isCompanionPreviewEnabled;
+  }, [isCompanionPreviewEnabled]);
 
   useEffect(() => {
     if (previewStatus !== 'playing') {
@@ -784,6 +865,11 @@ export function SoundEffectEditModal({
     const value = String(title ?? '').trim();
     return value || 'Advanced sound effect editor';
   }, [title]);
+  const hasCompanionAudio = Boolean(String(companionAudioUrl ?? '').trim());
+  const resolvedCompanionAudioLabel = useMemo(() => {
+    const value = String(companionAudioLabel ?? '').trim();
+    return value || 'voice-over';
+  }, [companionAudioLabel]);
 
   const resolvedTrimWindow = useMemo(
     () => resolveTrimWindow(normalizeSoundEffectAudioSettings(audioSettings)),
@@ -859,29 +945,6 @@ export function SoundEffectEditModal({
                 <div className="flex items-center gap-2 self-end">
                   <Button
                     type="button"
-                    size="icon"
-                    variant="outline"
-                    className={`h-11 w-11 border-white/15 bg-white/5 text-white hover:bg-white/10 ${
-                      isPreviewLoopEnabled ? 'ring-2 ring-cyan-300/70 ring-offset-0' : ''
-                    }`}
-                    disabled={!audioRef.current || isBusy}
-                    onClick={() => {
-                      setIsPreviewLoopEnabled((current) => {
-                        const next = !current;
-                        if (audioRef.current) {
-                          audioRef.current.loop = next;
-                        }
-                        return next;
-                      });
-                    }}
-                    aria-pressed={isPreviewLoopEnabled}
-                    aria-label={isPreviewLoopEnabled ? 'Disable preview loop' : 'Enable preview loop'}
-                    title={isPreviewLoopEnabled ? 'Disable preview loop' : 'Enable preview loop'}
-                  >
-                    <Repeat className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
                     size="sm"
                     variant="outline"
                     className="h-11 w-11 border-white/15 bg-white/5 text-white hover:bg-white/10"
@@ -908,14 +971,32 @@ export function SoundEffectEditModal({
                         );
                         audio.currentTime = previewStartRef.current;
                         updatePlayheadIndicator(previewStartRef.current);
+                        const companionAudio = hasCompanionAudio && isCompanionPreviewEnabled
+                          ? companionAudioRef.current
+                          : null;
+                        const companionPromise = companionAudio
+                          ? (() => {
+                              companionAudio.currentTime = 0;
+                              return companionAudio.play();
+                            })()
+                          : null;
                         const promise = audio.play();
                         if (!promise || typeof (promise as Promise<void>).then !== 'function') {
+                          if (companionPromise && typeof (companionPromise as Promise<void>).catch === 'function') {
+                            void (companionPromise as Promise<void>).catch(() => undefined);
+                          }
                           setPreviewStatus('playing');
                           return;
                         }
-                        await promise;
+                        await Promise.all([
+                          promise,
+                          companionPromise && typeof (companionPromise as Promise<void>).then === 'function'
+                            ? companionPromise
+                            : Promise.resolve(),
+                        ]);
                         setPreviewStatus('playing');
                       } catch {
+                        stopPreview();
                         setPreviewStatus('idle');
                       }
                     }}
@@ -928,6 +1009,54 @@ export function SoundEffectEditModal({
                       <Play className="h-4 w-4" />
                     )}
                     
+                  </Button>
+                  {hasCompanionAudio ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className={`h-11 w-11 border-white/15 bg-white/5 text-white hover:bg-white/10 ${
+                        isCompanionPreviewEnabled ? 'ring-2 ring-cyan-300/70 ring-offset-0' : ''
+                      }`}
+                      disabled={!audioRef.current || isBusy}
+                      onClick={() => {
+                        setIsCompanionPreviewEnabled((current) => {
+                          const next = !current;
+                          if (previewStatus === 'playing') {
+                            stopPreview();
+                          }
+                          return next;
+                        });
+                      }}
+                      aria-pressed={isCompanionPreviewEnabled}
+                      aria-label={isCompanionPreviewEnabled ? `Disable ${resolvedCompanionAudioLabel} preview` : `Enable ${resolvedCompanionAudioLabel} preview`}
+                      title={isCompanionPreviewEnabled ? `Disable ${resolvedCompanionAudioLabel} preview` : `Enable ${resolvedCompanionAudioLabel} preview`}
+                    >
+                      <CompanionPreviewIcon className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    className={`h-11 w-11 border-white/15 bg-white/5 text-white hover:bg-white/10 ${
+                      isPreviewLoopEnabled ? 'ring-2 ring-cyan-300/70 ring-offset-0' : ''
+                    }`}
+                    disabled={!audioRef.current || isBusy}
+                    onClick={() => {
+                      setIsPreviewLoopEnabled((current) => {
+                        const next = !current;
+                        if (audioRef.current) {
+                          audioRef.current.loop = next;
+                        }
+                        return next;
+                      });
+                    }}
+                    aria-pressed={isPreviewLoopEnabled}
+                    aria-label={isPreviewLoopEnabled ? 'Disable preview loop' : 'Enable preview loop'}
+                    title={isPreviewLoopEnabled ? 'Disable preview loop' : 'Enable preview loop'}
+                  >
+                    <Repeat className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -1193,8 +1322,9 @@ export function SoundEffectEditModal({
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">How actions behave</p>
                 <div className="mt-3 space-y-2 text-sm text-slate-200">
                   <p><span className="font-semibold text-white">Apply</span> updates only this current use.</p>
-                  <p><span className="font-semibold text-white">Save as new Preset</span> creates a new library sound effect.</p>
+                  {showSaveAsPreset ? <p><span className="font-semibold text-white">Save as new Preset</span> creates a new library sound effect.</p> : null}
                   <p><span className="font-semibold text-white">Save</span> overwrites the current sound effect entity.</p>
+                  {hasCompanionAudio ? <p><span className="font-semibold text-white">With voice-over</span> previews the soundtrack against the current narration in realtime.</p> : null}
                 </div>
               </div>
 
@@ -1209,7 +1339,9 @@ export function SoundEffectEditModal({
           <div className="border-b border-slate-200 px-6 py-5">
             <h4 className="text-lg font-semibold text-slate-900">Output actions</h4>
             <p className="mt-1 text-sm text-slate-500">
-              Choose whether these edits stay local, create a new preset, or replace the saved sound effect.
+              {showSaveAsPreset
+                ? 'Choose whether these edits stay local, create a new preset, or replace the saved sound effect.'
+                : 'Choose whether these edits stay local or replace the current saved audio for this draft.'}
             </p>
           </div>
 
@@ -1227,6 +1359,7 @@ export function SoundEffectEditModal({
                 <p>Reverb: <span className="font-semibold text-slate-900">{audioSettings.reverb.enabled ? 'On' : 'Off'}</span></p>
                 <p>Echo: <span className="font-semibold text-slate-900">{audioSettings.echo.enabled ? 'On' : 'Off'}</span></p>
                 <p>Saturation: <span className="font-semibold text-slate-900">{audioSettings.saturation.enabled ? 'On' : 'Off'}</span></p>
+                {hasCompanionAudio ? <p>Context preview: <span className="font-semibold text-slate-900">{isCompanionPreviewEnabled ? `With ${resolvedCompanionAudioLabel}` : 'Soundtrack only'}</span></p> : null}
               </div>
             </div>
           </div>
@@ -1247,20 +1380,22 @@ export function SoundEffectEditModal({
                 {isApplying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                 Apply
               </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  const next = currentValues();
-                  if (!next.name || !onSaveAsPreset) return;
-                  void Promise.resolve(onSaveAsPreset(next));
-                }}
-                disabled={!canSubmit || isBusy || !onSaveAsPreset}
-                variant="outline"
-                className="h-11 rounded-xl border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-              >
-                {isSavingAsPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                Save as new Preset
-              </Button>
+              {showSaveAsPreset ? (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const next = currentValues();
+                    if (!next.name || !onSaveAsPreset) return;
+                    void Promise.resolve(onSaveAsPreset(next));
+                  }}
+                  disabled={!canSubmit || isBusy || !onSaveAsPreset}
+                  variant="outline"
+                  className="h-11 rounded-xl border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                >
+                  {isSavingAsPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  Save as new Preset
+                </Button>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <Button
                   type="button"

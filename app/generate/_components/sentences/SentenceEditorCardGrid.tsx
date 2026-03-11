@@ -63,6 +63,7 @@ import { SoundEffectEditModal, type SoundEffectEditValues } from '../SoundEffect
 import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
+  DEFAULT_IMAGE_MOTION_SPEED,
   getImageMotionEffectLabel,
   getVisualEffectLabel,
   ImageEffectPreview,
@@ -80,7 +81,9 @@ import {
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
 import {
   cloneSoundEffectAudioSettings,
+  getSoundEffectPlaybackDurationSeconds,
   normalizeSoundEffectAudioSettings,
+  resolveSoundEffectTrimWindow,
 } from '../../_types/sound-effect-audio';
 
 import type { SentenceItem } from '../../_types/sentences';
@@ -137,6 +140,11 @@ function SortableSentenceSoundEffectCard({
   onVolumeChange,
   onNextTimingModeChange,
 }: SortableSentenceSoundEffectCardProps) {
+  const playbackDurationSeconds = getSoundEffectPlaybackDurationSeconds({
+    durationSeconds: sfx.durationSeconds,
+    audioSettings: sfx.audioSettings,
+  });
+
   const sortableId = getSentenceSoundEffectSortableId(sfx, sfxIndex);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sortableId,
@@ -180,9 +188,9 @@ function SortableSentenceSoundEffectCard({
               <p className="truncate text-xs text-gray-500" title={sfx.url}>
                 {sfx.url}
               </p>
-              {typeof sfx.durationSeconds === 'number' && Number.isFinite(sfx.durationSeconds) ? (
+              {typeof playbackDurationSeconds === 'number' ? (
                 <p className="mt-1 text-[11px] font-medium text-indigo-600">
-                  Duration {sfx.durationSeconds.toFixed(2)}s
+                  Duration {playbackDurationSeconds.toFixed(2)}s
                 </p>
               ) : null}
             </div>
@@ -637,31 +645,87 @@ export function SentenceEditorCard({
     url: string;
     delaySeconds: number;
     volumePercent: number;
+    trimStartSeconds?: number;
+    trimDurationSeconds?: number | null;
     onPlaying?: () => void;
     onEnded?: () => void;
     onError?: () => void;
   }) => {
     const audio = new Audio(params.url);
+    audio.preload = 'auto';
     audio.volume = Math.max(0, Math.min(1, (Number(params.volumePercent) || 0) / 100));
-    if (params.onEnded) audio.onended = params.onEnded;
-    if (params.onError) audio.onerror = params.onError;
+
+    let isFinalized = false;
+    const finalizeEnded = () => {
+      if (isFinalized) return;
+      isFinalized = true;
+      params.onEnded?.();
+    };
+    const finalizeError = () => {
+      if (isFinalized) return;
+      isFinalized = true;
+      params.onError?.();
+    };
+
+    audio.onended = finalizeEnded;
+    audio.onerror = finalizeError;
     soundEffectsPreviewRef.current.audios.push(audio);
 
     const delayMs = Math.max(0, Number(params.delaySeconds) || 0) * 1000;
     const timeoutId = window.setTimeout(() => {
-      const playPromise = audio.play();
-      if (!playPromise || typeof (playPromise as any).then !== 'function') {
-        params.onPlaying?.();
+      const startPlayback = () => {
+        const trimStartSeconds = Math.max(0, Number(params.trimStartSeconds ?? 0) || 0);
+        const trimDurationSeconds =
+          typeof params.trimDurationSeconds === 'number' && Number.isFinite(params.trimDurationSeconds)
+            ? Math.max(0, params.trimDurationSeconds)
+            : null;
+
+        if (trimStartSeconds > 0) {
+          try {
+            audio.currentTime = trimStartSeconds;
+          } catch {
+            // ignore seek errors before playback
+          }
+        }
+
+        const playPromise = audio.play();
+        if (!playPromise || typeof (playPromise as Promise<void>).then !== 'function') {
+          params.onPlaying?.();
+        } else {
+          void (playPromise as Promise<void>)
+            .then(() => {
+              params.onPlaying?.();
+            })
+            .catch(() => {
+              finalizeError();
+            });
+        }
+
+        if (trimDurationSeconds && trimDurationSeconds > 0) {
+          const stopTimeoutId = window.setTimeout(() => {
+            try {
+              audio.pause();
+              audio.currentTime = 0;
+            } catch {
+              // ignore
+            }
+            finalizeEnded();
+          }, trimDurationSeconds * 1000);
+          soundEffectsPreviewRef.current.timeouts.push(stopTimeoutId);
+        }
+      };
+
+      if (audio.readyState >= 1) {
+        startPlayback();
         return;
       }
 
-      (playPromise as Promise<void>)
-        .then(() => {
-          params.onPlaying?.();
-        })
-        .catch(() => {
-          params.onError?.();
-        });
+      const handleLoadedMetadata = () => {
+        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        startPlayback();
+      };
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+      audio.load();
     }, delayMs);
 
     soundEffectsPreviewRef.current.timeouts.push(timeoutId);
@@ -691,6 +755,8 @@ export function SentenceEditorCard({
         url: sfx.url,
         delaySeconds: sfx.absoluteDelaySeconds,
         volumePercent: sfx.volumePercent,
+        trimStartSeconds: sfx.trimStartSeconds,
+        trimDurationSeconds: sfx.durationSeconds,
         onPlaying: () => {
           soundEffectsEverStartedRef.current.add(key);
           setMixStatus('playing');
@@ -718,12 +784,19 @@ export function SentenceEditorCard({
     stopAllScheduledAudio();
     setSingleStatusByIndex({ [sfxIndex]: shouldShowLoading ? 'loading' : 'playing' });
 
+    const trimWindow = resolveSoundEffectTrimWindow(
+      sfx.audioSettings,
+      sfx.durationSeconds ?? null,
+    );
+
     scheduleAudio({
       url: sfx.url,
       delaySeconds: isAlignSoundEffectsToSceneEndEnabled
         ? 0
         : Math.max(0, Number(sfx.delaySeconds ?? 0) || 0),
       volumePercent: sfx.volumePercent,
+      trimStartSeconds: trimWindow.startSeconds,
+      trimDurationSeconds: trimWindow.effectiveDurationSeconds,
       onPlaying: () => {
         soundEffectsEverStartedRef.current.add(key);
         setSingleStatusByIndex({ [sfxIndex]: 'playing' });
@@ -932,7 +1005,7 @@ export function SentenceEditorCard({
         ),
         customMotionEffectId: preset.id,
         imageMotionSettings: { ...nextSettings, presetKey: 'custom' },
-        imageMotionSpeed: nextSettings.speed ?? 1,
+        imageMotionSpeed: nextSettings.speed ?? DEFAULT_IMAGE_MOTION_SPEED,
       });
       return;
     }
@@ -943,7 +1016,7 @@ export function SentenceEditorCard({
       imageMotionEffect: effect,
       customMotionEffectId: null,
       imageMotionSettings: nextSettings,
-      imageMotionSpeed: nextSettings.speed ?? 1,
+      imageMotionSpeed: nextSettings.speed ?? DEFAULT_IMAGE_MOTION_SPEED,
     });
   };
 
@@ -1941,7 +2014,7 @@ export function SentenceEditorCard({
                                       startPreviewUrl,
                                       item.visualEffect ?? null,
                                       item.imageMotionEffect ?? 'default',
-                                      item.imageMotionSpeed ?? 1,
+                                      item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
                                       item.imageFilterSettings ?? null,
                                       item.imageMotionSettings ?? null,
                                     )
@@ -2058,7 +2131,7 @@ export function SentenceEditorCard({
                                       endPreviewUrl,
                                       item.visualEffect ?? null,
                                       item.imageMotionEffect ?? 'default',
-                                      item.imageMotionSpeed ?? 1,
+                                      item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
                                       item.imageFilterSettings ?? null,
                                       item.imageMotionSettings ?? null,
                                     )
@@ -2240,7 +2313,7 @@ export function SentenceEditorCard({
                                   referencePreviewUrl,
                                   item.visualEffect ?? null,
                                   item.imageMotionEffect ?? 'default',
-                                  item.imageMotionSpeed ?? 1,
+                                  item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
                                   item.imageFilterSettings ?? null,
                                   item.imageMotionSettings ?? null,
                                 )
@@ -2674,7 +2747,7 @@ export function SentenceEditorCard({
                               item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string),
                               item.visualEffect ?? null,
                               item.imageMotionEffect ?? 'default',
-                              item.imageMotionSpeed ?? 1,
+                              item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
                               item.imageFilterSettings ?? null,
                               item.imageMotionSettings ?? null,
                             )

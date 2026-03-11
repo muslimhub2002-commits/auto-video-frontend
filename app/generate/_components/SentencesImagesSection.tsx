@@ -38,6 +38,7 @@ import { AddSuspenseSceneModal } from './sentences/AddSuspenseSceneModal';
 import { GenerateTestVideoModal } from './sentences/GenerateTestVideoModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
 import { SceneEditorSection } from './sentences/SceneEditorSection';
+import { DEFAULT_IMAGE_MOTION_SPEED } from './sentences/ImageEffectPreview';
 import type { TestVideoVoiceMode } from './sentences/test-video.types';
 import type {
   ImageFilterPresetDto,
@@ -674,7 +675,9 @@ export function SentencesImagesSection({
                 setPreviewImageUrl(url);
                 setPreviewVisualEffect(effect ?? null);
                 setPreviewImageMotionEffect(imageMotionEffect ?? 'default');
-                setPreviewImageMotionSpeed(imageMotionSpeed ?? 1);
+                setPreviewImageMotionSpeed(
+                  imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+                );
                 setPreviewImageFilterSettings(imageFilterSettings ?? null);
                 setPreviewImageMotionSettings(imageMotionSettings ?? null);
               }}

@@ -8,7 +8,7 @@ const PREVIEW_MOTION_DURATION_MS = 6200;
 export const IMAGE_MOTION_SPEED_MIN = 0.5;
 export const IMAGE_MOTION_SPEED_MAX = 2.5;
 export const IMAGE_MOTION_SPEED_STEP = 0.1;
-export const DEFAULT_IMAGE_MOTION_SPEED = 1;
+export const DEFAULT_IMAGE_MOTION_SPEED = 1.2;
 
 export type ImageFilterSettings = {
   presetKey?: Exclude<SentenceItem['visualEffect'], null | undefined> | 'custom';
@@ -28,12 +28,16 @@ export type ImageMotionSettings = {
   speed?: number;
   startScale?: number;
   endScale?: number;
+  scaleEndNoLimit?: boolean;
   translateXStart?: number;
   translateXEnd?: number;
+  translateXEndNoLimit?: boolean;
   translateYStart?: number;
   translateYEnd?: number;
+  translateYEndNoLimit?: boolean;
   rotateStart?: number;
   rotateEnd?: number;
+  rotateEndNoLimit?: boolean;
   originX?: number;
   originY?: number;
 };
@@ -63,6 +67,11 @@ function getNumeric(value: unknown, fallback: number, min?: number, max?: number
   if (typeof min === 'number') return Math.max(min, numeric);
   if (typeof max === 'number') return Math.min(max, numeric);
   return numeric;
+}
+
+function getBoolean(value: unknown, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  return fallback;
 }
 
 export function normalizeImageMotionSpeed(value: number | null | undefined) {
@@ -291,6 +300,10 @@ export function getDefaultImageMotionSettings(
     speed: normalizedSpeed,
     originX: 50,
     originY: 50,
+    scaleEndNoLimit: true,
+    translateXEndNoLimit: true,
+    translateYEndNoLimit: true,
+    rotateEndNoLimit: true,
   };
 
   if (effect === 'slowZoomIn') {
@@ -339,12 +352,22 @@ export function normalizeImageMotionSettings(
     ),
     startScale: getNumeric(settings?.startScale, defaults.startScale ?? 1, 0.5, 2),
     endScale: getNumeric(settings?.endScale, defaults.endScale ?? 1.055, 0.5, 2),
+    scaleEndNoLimit: getBoolean(settings?.scaleEndNoLimit, defaults.scaleEndNoLimit ?? false),
     translateXStart: getNumeric(settings?.translateXStart, defaults.translateXStart ?? 0, -20, 20),
     translateXEnd: getNumeric(settings?.translateXEnd, defaults.translateXEnd ?? 0, -20, 20),
+    translateXEndNoLimit: getBoolean(
+      settings?.translateXEndNoLimit,
+      defaults.translateXEndNoLimit ?? false,
+    ),
     translateYStart: getNumeric(settings?.translateYStart, defaults.translateYStart ?? 0, -20, 20),
     translateYEnd: getNumeric(settings?.translateYEnd, defaults.translateYEnd ?? 0, -20, 20),
+    translateYEndNoLimit: getBoolean(
+      settings?.translateYEndNoLimit,
+      defaults.translateYEndNoLimit ?? false,
+    ),
     rotateStart: getNumeric(settings?.rotateStart, defaults.rotateStart ?? 0, -10, 10),
     rotateEnd: getNumeric(settings?.rotateEnd, defaults.rotateEnd ?? 0, -10, 10),
+    rotateEndNoLimit: getBoolean(settings?.rotateEndNoLimit, defaults.rotateEndNoLimit ?? false),
     originX: getNumeric(settings?.originX, defaults.originX ?? 50, 0, 100),
     originY: getNumeric(settings?.originY, defaults.originY ?? 50, 0, 100),
   };
@@ -383,6 +406,7 @@ type ImageEffectPreviewProps = {
   className?: string;
   motionClassName?: string;
   motionStyle?: CSSProperties;
+  motionResetKey?: string | number;
 };
 
 export function ImageEffectPreview({
@@ -396,6 +420,7 @@ export function ImageEffectPreview({
   className,
   motionClassName,
   motionStyle,
+  motionResetKey,
 }: ImageEffectPreviewProps) {
   const resolvedFilterSettings = normalizeImageFilterSettings(
     imageFilterSettings,
@@ -446,8 +471,8 @@ export function ImageEffectPreview({
   const hasCustomMotionSettings = Boolean(imageMotionSettings);
   const motionAnimation = enableMotion
     ? hasCustomMotionSettings
-      ? `av-motion-detailed ${motionDurationMs}ms ease-in-out infinite alternate`
-      : `${getMotionAnimationName(imageMotionEffect)} ${motionDurationMs}ms ease-in-out infinite alternate`
+      ? `av-motion-detailed ${motionDurationMs}ms ease-in-out infinite`
+      : `${getMotionAnimationName(imageMotionEffect)} ${motionDurationMs}ms ease-in-out infinite`
     : undefined;
   const transformOrigin = hasCustomMotionSettings
     ? `${(resolvedMotionSettings.originX ?? 50).toFixed(1)}% ${(resolvedMotionSettings.originY ?? 50).toFixed(1)}%`
@@ -541,6 +566,7 @@ export function ImageEffectPreview({
       `}</style>
 
       <div
+        key={motionResetKey == null ? undefined : String(motionResetKey)}
         className={motionClassName}
         style={{
           animation: motionAnimation,

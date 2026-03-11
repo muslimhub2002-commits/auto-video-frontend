@@ -1,9 +1,14 @@
 import type { SentenceItem } from '../_types/sentences';
+import {
+  getSoundEffectPlaybackDurationSeconds,
+  resolveSoundEffectTrimWindow,
+} from '../_types/sound-effect-audio';
 
 export type SentenceSoundEffectItem = NonNullable<SentenceItem['soundEffects']>[number];
 
 export type ComputedSentenceSoundEffectItem = SentenceSoundEffectItem & {
   absoluteDelaySeconds: number;
+  trimStartSeconds: number;
 };
 
 type ComputeSentenceSoundEffectTimingOptions = {
@@ -35,7 +40,18 @@ export const computeSentenceSoundEffectTiming = (
 
   return items.map((item, index) => {
     const delaySeconds = ignoreOffsets ? 0 : clampDelay(item?.delaySeconds);
-    const durationSeconds = clampDuration(item?.durationSeconds);
+    const sourceDurationSeconds = clampDuration(item?.durationSeconds);
+    const trimWindow = resolveSoundEffectTrimWindow(
+      item?.audioSettings,
+      sourceDurationSeconds > 0 ? sourceDurationSeconds : null,
+    );
+    const durationSeconds = clampDuration(
+      trimWindow.effectiveDurationSeconds ??
+        getSoundEffectPlaybackDurationSeconds({
+          durationSeconds: item?.durationSeconds,
+          audioSettings: item?.audioSettings,
+        }),
+    );
 
     if (index > 0 && normalizeTimingMode(item?.timingMode) === 'afterPreviousEnds') {
       currentGroupStart = currentGroupEnd;
@@ -51,6 +67,7 @@ export const computeSentenceSoundEffectTiming = (
       ...item,
       delaySeconds,
       durationSeconds,
+      trimStartSeconds: trimWindow.startSeconds,
       timingMode: normalizeTimingMode(item?.timingMode),
       absoluteDelaySeconds,
     };

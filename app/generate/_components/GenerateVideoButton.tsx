@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Pause, Play, Save, Sparkles, Star, Trash2, Upload, Video } from 'lucide-react';
+import { Loader2, Pause, Play, Save, SlidersHorizontal, Sparkles, Star, Trash2, Upload, Video } from 'lucide-react';
 
 type BackgroundSoundtrackItem = {
   id: string;
@@ -54,6 +54,7 @@ interface GenerateVideoButtonProps {
   isSavingBackgroundSoundtrackVolume?: boolean;
   onDeleteBackgroundSoundtrack?: (soundtrackId: string) => Promise<void> | void;
   isDeletingBackgroundSoundtrack?: boolean;
+  onOpenBackgroundSoundtrackEditor?: (soundtrackId: string) => void;
   onUploadBackgroundSoundtrackUseOnce: (file: File) => Promise<void> | void;
   onUploadBackgroundSoundtrackAddToLibrary: (params: {
     file: File;
@@ -85,6 +86,7 @@ export function GenerateVideoButton({
   isSavingBackgroundSoundtrackVolume,
   onDeleteBackgroundSoundtrack,
   isDeletingBackgroundSoundtrack,
+  onOpenBackgroundSoundtrackEditor,
   onUploadBackgroundSoundtrackUseOnce,
   onUploadBackgroundSoundtrackAddToLibrary,
   isUploadingBackgroundSoundtrack,
@@ -501,6 +503,16 @@ export function GenerateVideoButton({
     setDeleteSoundtrackDialogOpen(true);
   };
 
+  const handleOpenSelectedSoundtrackEditor = () => {
+    const id = String(selectedLibrarySoundtrack?.id ?? '').trim();
+    if (!id) {
+      onToast?.('Select a library soundtrack to edit.', 'warning');
+      return;
+    }
+
+    onOpenBackgroundSoundtrackEditor?.(id);
+  };
+
   const onSelectSoundTrack = (selectedBackgroundSoundtrackValue:string) => {
     stopSoundtrackPreview();
     void stopMixPreview();
@@ -595,7 +607,19 @@ export function GenerateVideoButton({
                   <Button
                     type="button"
                     variant="outline"
-                    className="border-gray-300 hover:bg-gray-50 h-10 shrink-0 w-32"
+                    className="border-gray-300 hover:bg-gray-50 h-10 shrink-0"
+                    onClick={handleOpenSelectedSoundtrackEditor}
+                    disabled={!selectedLibrarySoundtrack?.id || !onOpenBackgroundSoundtrackEditor || soundtrackUploadDisabled}
+                    aria-label="Edit soundtrack"
+                    title="Edit soundtrack"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 text-gray-700" />
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-gray-300 hover:bg-gray-50 h-10 shrink-0"
                     onClick={() => void handlePreviewSelectedSoundtrack()}
                     disabled={
                       isSoundtrackPreviewLoading ||
@@ -604,18 +628,15 @@ export function GenerateVideoButton({
                   >
                     {isSoundtrackPreviewLoading && previewKind !== 'file' ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Loading...
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       </>
                     ) : isSoundtrackPreviewPlaying && previewKind === 'selected' ? (
                       <>
-                        <Pause className="mr-2 h-4 w-4" />
-                        Stop Preview
+                        <Pause className="h-4 w-4" />
                       </>
                     ) : (
                       <>
-                        <Play className="mr-2 h-4 w-4" />
-                        Preview
+                        <Play className="h-4 w-4" />
                       </>
                     )}
                   </Button>

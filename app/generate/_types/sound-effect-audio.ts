@@ -52,6 +52,12 @@ export type SoundEffectAudioSettings = {
   trim: SoundEffectTrimSettings;
 };
 
+export type ResolvedSoundEffectTrimWindow = {
+  startSeconds: number;
+  endSeconds: number | null;
+  effectiveDurationSeconds: number | null;
+};
+
 const clamp = (value: unknown, min: number, max: number, fallback: number) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -62,6 +68,8 @@ const clampBoolean = (value: unknown, fallback: boolean) => {
   if (typeof value === 'boolean') return value;
   return fallback;
 };
+
+const MIN_TRIM_GAP_SECONDS = 0.05;
 
 export const DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS: SoundEffectAudioSettings = {
   version: 1,
@@ -183,6 +191,74 @@ export const normalizeSoundEffectAudioSettings = (
 export const cloneSoundEffectAudioSettings = (
   value: unknown,
 ): SoundEffectAudioSettings => normalizeSoundEffectAudioSettings(value);
+
+export const resolveSoundEffectTrimWindow = (
+  settings: unknown,
+  sourceDurationSeconds?: number | null,
+): ResolvedSoundEffectTrimWindow => {
+  const normalizedSettings = normalizeSoundEffectAudioSettings(settings);
+  const hasSourceDuration =
+    typeof sourceDurationSeconds === 'number' &&
+    Number.isFinite(sourceDurationSeconds) &&
+    sourceDurationSeconds > 0;
+  const safeSourceDuration = hasSourceDuration ? Number(sourceDurationSeconds) : null;
+  const maxStart =
+    safeSourceDuration === null
+      ? 600
+      : Math.max(0, safeSourceDuration - MIN_TRIM_GAP_SECONDS);
+  const startSeconds = clamp(
+    normalizedSettings.trim.startSeconds,
+    0,
+    maxStart,
+    DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS.trim.startSeconds,
+  );
+  const requestedDuration = clamp(
+    normalizedSettings.trim.durationSeconds,
+    0,
+    600,
+    DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS.trim.durationSeconds,
+  );
+  const remainingDuration =
+    safeSourceDuration === null
+      ? null
+      : Math.max(MIN_TRIM_GAP_SECONDS, safeSourceDuration - startSeconds);
+
+  if (requestedDuration <= 0) {
+    return {
+      startSeconds,
+      endSeconds: remainingDuration === null ? null : startSeconds + remainingDuration,
+      effectiveDurationSeconds: remainingDuration,
+    };
+  }
+
+  const effectiveDurationSeconds =
+    remainingDuration === null
+      ? requestedDuration
+      : Math.min(requestedDuration, remainingDuration);
+
+  return {
+    startSeconds,
+    endSeconds: startSeconds + effectiveDurationSeconds,
+    effectiveDurationSeconds,
+  };
+};
+
+export const getSoundEffectPlaybackDurationSeconds = (params: {
+  durationSeconds?: number | null;
+  audioSettings?: unknown;
+}) => {
+  const fallbackDuration =
+    typeof params.durationSeconds === 'number' && Number.isFinite(params.durationSeconds)
+      ? Math.max(0, params.durationSeconds)
+      : null;
+  const trimWindow = resolveSoundEffectTrimWindow(params.audioSettings, fallbackDuration);
+
+  if (trimWindow.effectiveDurationSeconds !== null) {
+    return trimWindow.effectiveDurationSeconds;
+  }
+
+  return fallbackDuration;
+};
 
 export const areSoundEffectAudioSettingsEqual = (left: unknown, right: unknown) =>
   JSON.stringify(normalizeSoundEffectAudioSettings(left)) ===

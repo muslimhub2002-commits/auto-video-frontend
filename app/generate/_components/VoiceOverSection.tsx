@@ -17,7 +17,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion';
-import { Mic, Upload, X, Sparkles, Loader2, Play, Library, Star } from 'lucide-react';
+import { Mic, Upload, X, Sparkles, Loader2, Play, Library, SlidersHorizontal, Star } from 'lucide-react';
 
 interface VoiceOverSectionProps {
   script: string;
@@ -53,6 +53,7 @@ interface VoiceOverSectionProps {
   onRemoveVoice: () => void;
   onOpenLibrary: () => void;
   onSaveVoice: () => void;
+  onOpenVoiceEditor?: () => void;
 }
 
 export function VoiceOverSection({
@@ -82,6 +83,7 @@ export function VoiceOverSection({
   onRemoveVoice,
   onOpenLibrary,
   onSaveVoice,
+  onOpenVoiceEditor,
 }: VoiceOverSectionProps) {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const styleAbortRef = useRef<AbortController | null>(null);
@@ -747,6 +749,17 @@ export function VoiceOverSection({
 
                 {/* Save / Replace / Regenerate Options */}
                 <div className="mt-4 pt-4 border-t border-purple-100 flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={onOpenVoiceEditor}
+                    disabled={!onOpenVoiceEditor}
+                    className="flex-1 gap-1.5 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
+                  >
+                    <SlidersHorizontal className="h-3 w-3" />
+                    Edit
+                  </Button>
                   <Button
                     type="button"
                     size="sm"
