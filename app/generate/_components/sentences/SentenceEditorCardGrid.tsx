@@ -80,10 +80,12 @@ import {
 } from './ImageEffectPreview';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
 import {
+  DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
   cloneSoundEffectAudioSettings,
   getSoundEffectPlaybackDurationSeconds,
   normalizeSoundEffectAudioSettings,
   resolveSoundEffectTrimWindow,
+  type SoundEffectAudioSettings,
 } from '../../_types/sound-effect-audio';
 
 import type { SentenceItem } from '../../_types/sentences';
@@ -103,6 +105,18 @@ type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
 function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
   return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
 }
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+  if (Array.isArray(message)) {
+    const firstMessage = message.find((item) => typeof item === 'string' && item.trim().length > 0);
+    if (typeof firstMessage === 'string') return firstMessage.trim();
+  }
+  if (typeof message === 'string' && message.trim().length > 0) {
+    return message.trim();
+  }
+  return fallback;
+};
 
 const getSentenceSoundEffectSortableId = (
   sfx: NonNullable<SentenceItem['soundEffects']>[number],
@@ -600,6 +614,21 @@ export function SentenceEditorCard({
 
   const [editingSoundEffectIndex, setEditingSoundEffectIndex] = useState<number | null>(null);
   const [isSavingSoundEffectEdit, setIsSavingSoundEffectEdit] = useState(false);
+  const [soundEffectEditError, setSoundEffectEditError] = useState<string | null>(null);
+  const [mixEditDraft, setMixEditDraft] = useState<{
+    audioUrl: string;
+    name: string;
+    volumePercent: number;
+    audioSettings: SoundEffectAudioSettings;
+  } | null>(null);
+  const [isLoadingSoundEffectMixEditor, setIsLoadingSoundEffectMixEditor] = useState(false);
+  const [isApplyingSoundEffectMixEdit, setIsApplyingSoundEffectMixEdit] = useState(false);
+  const [isSavingSoundEffectMixPreset, setIsSavingSoundEffectMixPreset] = useState(false);
+  const [soundEffectMixError, setSoundEffectMixError] = useState<string | null>(null);
+  const [soundEffectMixNotice, setSoundEffectMixNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const soundEffectsPreviewRef = useRef<{
     timeouts: number[];
@@ -618,6 +647,105 @@ export function SentenceEditorCard({
     const id = (sfx as any)?.id;
     if (typeof id === 'string' && id.trim().length > 0) return `id:${id}`;
     return `url:${String(sfx.url ?? '')}`;
+  };
+
+  const getSharedSoundEffectVolume = () => {
+    if (soundEffects.length === 0) return 100;
+    const normalizedVolumes = soundEffects.map((effect) =>
+      Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
+    );
+    const firstVolume = normalizedVolumes[0] ?? 100;
+    return normalizedVolumes.every((volume) => Math.abs(volume - firstVolume) < 0.0001)
+      ? firstVolume
+      : 100;
+  };
+
+  const getSharedSoundEffectAudioSettings = () => {
+    if (soundEffects.length === 0) {
+      return cloneSoundEffectAudioSettings(DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS);
+    }
+
+    const normalized = soundEffects.map((effect) =>
+      normalizeSoundEffectAudioSettings(
+        effect.audioSettings ?? effect.defaultAudioSettings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+      ),
+    );
+    const baseline = JSON.stringify(normalized[0] ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS);
+
+    return cloneSoundEffectAudioSettings(
+      normalized.every((settings) => JSON.stringify(settings) === baseline)
+        ? normalized[0] ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS
+        : DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+    );
+  };
+
+  const mergeSoundEffectSettingsPreservingTrim = (
+    baseSettings: SoundEffectAudioSettings,
+    currentSettings: unknown,
+  ): SoundEffectAudioSettings => {
+    const currentNormalized = normalizeSoundEffectAudioSettings(
+      currentSettings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+    );
+
+    return {
+      ...baseSettings,
+      trim: {
+        startSeconds: currentNormalized.trim.startSeconds,
+        durationSeconds: currentNormalized.trim.durationSeconds,
+      },
+    };
+  };
+
+  const buildSentenceSoundEffectMergeItems = () => {
+    const timedSoundEffects = computeSentenceSoundEffectTiming(soundEffects, {
+      ignoreOffsets: isAlignSoundEffectsToSceneEndEnabled,
+    });
+
+    return timedSoundEffects.map((effect) => ({
+      sound_effect_id: effect.id,
+      delay_seconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
+      volume_percent: Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
+      trim_start_seconds: Math.max(0, Number(effect.trimStartSeconds ?? 0) || 0),
+      duration_seconds:
+        typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
+          ? Math.max(0, effect.durationSeconds)
+          : null,
+    }));
+  };
+
+  const handleOpenSoundEffectMixEditor = async () => {
+    if (soundEffects.length < 2) return;
+
+    stopAllScheduledAudio();
+    setSoundEffectMixNotice(null);
+    setSoundEffectMixError(null);
+    setIsLoadingSoundEffectMixEditor(true);
+
+    const fallbackTitle = `Sentence ${index + 1} SFX mix`;
+
+    try {
+      const response = await api.post<{
+        title?: string;
+        url: string;
+      }>('/sound-effects/merge-preview', {
+        title: fallbackTitle,
+        items: buildSentenceSoundEffectMergeItems(),
+      });
+
+      setMixEditDraft({
+        audioUrl: response.data.url,
+        name: String(response.data.title ?? fallbackTitle).trim() || fallbackTitle,
+        volumePercent: getSharedSoundEffectVolume(),
+        audioSettings: getSharedSoundEffectAudioSettings(),
+      });
+    } catch (error) {
+      setSoundEffectMixNotice({
+        type: 'error',
+        message: getApiErrorMessage(error, 'Failed to open the mix editor. Try again.'),
+      });
+    } finally {
+      setIsLoadingSoundEffectMixEditor(false);
+    }
   };
 
   const stopAllScheduledAudio = () => {
@@ -1479,6 +1607,34 @@ export function SentenceEditorCard({
                       size="sm"
                       variant="outline"
                       onClick={() => {
+                        void handleOpenSoundEffectMixEditor();
+                      }}
+                      disabled={soundEffects.length < 2 || isLoadingSoundEffectMixEditor}
+                      className="gap-2 h-8 border-amber-200 text-amber-700 hover:bg-amber-50"
+                      title={
+                        soundEffects.length < 2
+                          ? 'Add at least 2 sound effects to edit a merged mix'
+                          : 'Open a merged preview and edit the whole sentence stack at once'
+                      }
+                    >
+                      {isLoadingSoundEffectMixEditor ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-xs font-semibold">Edit Mix</span>
+                        </>
+                      ) : (
+                        <>
+                          <SlidersHorizontal className="h-4 w-4" />
+                          <span className="text-xs font-semibold">Edit Mix</span>
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
                         if (mixStatus === 'playing' || mixStatus === 'loading') {
                           stopAllScheduledAudio();
                           return;
@@ -1564,6 +1720,103 @@ export function SentenceEditorCard({
 
               {isSoundEffectsOpen ? (
                 <div className="px-4 py-4 fade-in animate-in duration-500">
+                  {soundEffectMixNotice ? (
+                    <div
+                      className={
+                        soundEffectMixNotice.type === 'success'
+                          ? 'mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700'
+                          : 'mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700'
+                      }
+                    >
+                      {soundEffectMixNotice.message}
+                    </div>
+                  ) : null}
+
+                  <SoundEffectEditModal
+                    isOpen={Boolean(mixEditDraft)}
+                    title="Edit sound effects mix"
+                    audioUrl={mixEditDraft?.audioUrl ?? null}
+                    initialName={mixEditDraft?.name ?? `Sentence ${index + 1} SFX mix`}
+                    initialVolumePercent={mixEditDraft?.volumePercent ?? 100}
+                    initialAudioSettings={
+                      mixEditDraft?.audioSettings ??
+                      cloneSoundEffectAudioSettings(DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS)
+                    }
+                    isApplying={isApplyingSoundEffectMixEdit}
+                    isSavingAsPreset={isSavingSoundEffectMixPreset}
+                    showSaveButton={false}
+                    actionError={soundEffectMixError}
+                    onClose={() => {
+                      setMixEditDraft(null);
+                      setSoundEffectMixError(null);
+                    }}
+                    onApply={async (values: SoundEffectEditValues) => {
+                      const nextVolumePercent = Math.max(
+                        0,
+                        Math.min(300, Number(values.volumePercent) || 0),
+                      );
+                      const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
+
+                      setIsApplyingSoundEffectMixEdit(true);
+                      setSoundEffectMixError(null);
+                      try {
+                        commitSoundEffects(
+                          soundEffects.map((effect) => ({
+                            ...effect,
+                            volumePercent: nextVolumePercent,
+                            audioSettings: mergeSoundEffectSettingsPreservingTrim(
+                              nextAudioSettings,
+                              effect.audioSettings ?? effect.defaultAudioSettings,
+                            ),
+                          })),
+                        );
+                        setMixEditDraft(null);
+                        setSoundEffectMixNotice({
+                          type: 'success',
+                          message: 'Mix edits applied to every sound effect in this sentence.',
+                        });
+                      } finally {
+                        setIsApplyingSoundEffectMixEdit(false);
+                      }
+                    }}
+                    onSave={async () => undefined}
+                    onSaveAsPreset={async (values: SoundEffectEditValues) => {
+                      const nextTitle = String(values.name ?? '').trim() || `Sentence ${index + 1} SFX mix`;
+                      const nextVolumePercent = Math.max(
+                        0,
+                        Math.min(300, Number(values.volumePercent) || 0),
+                      );
+                      const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
+
+                      setIsSavingSoundEffectMixPreset(true);
+                      setSoundEffectMixError(null);
+                      try {
+                        await api.post('/sound-effects/merge', {
+                          title: nextTitle,
+                          volumePercent: nextVolumePercent,
+                          audioSettings: nextAudioSettings,
+                          isPreset: true,
+                          requireUniqueTitle: true,
+                          items: buildSentenceSoundEffectMergeItems(),
+                        });
+                        setMixEditDraft(null);
+                        setSoundEffectMixNotice({
+                          type: 'success',
+                          message: 'Mix preset saved to your sound effects library.',
+                        });
+                      } catch (error) {
+                        setSoundEffectMixError(
+                          getApiErrorMessage(
+                            error,
+                            'Failed to save the mix preset. Enter a unique title and try again.',
+                          ),
+                        );
+                      } finally {
+                        setIsSavingSoundEffectMixPreset(false);
+                      }
+                    }}
+                  />
+
                   <SoundEffectEditModal
                     isOpen={
                       editingSoundEffectIndex !== null &&
@@ -1580,7 +1833,11 @@ export function SentenceEditorCard({
                       soundEffects[editingSoundEffectIndex ?? 0]?.defaultAudioSettings,
                     )}
                     isSaving={isSavingSoundEffectEdit}
-                    onClose={() => setEditingSoundEffectIndex(null)}
+                    actionError={soundEffectEditError}
+                    onClose={() => {
+                      setEditingSoundEffectIndex(null);
+                      setSoundEffectEditError(null);
+                    }}
                     onApply={async (values: SoundEffectEditValues) => {
                       const idx = editingSoundEffectIndex;
                       if (idx === null) return;
@@ -1604,6 +1861,7 @@ export function SentenceEditorCard({
                         ),
                       );
 
+                      setSoundEffectEditError(null);
                       setEditingSoundEffectIndex(null);
                     }}
                     onSaveAsPreset={async (values: SoundEffectEditValues) => {
@@ -1617,6 +1875,7 @@ export function SentenceEditorCard({
                       const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
 
                       setIsSavingSoundEffectEdit(true);
+                      setSoundEffectEditError(null);
                       try {
                         const response = await api.post<{
                           id: string;
@@ -1653,9 +1912,15 @@ export function SentenceEditorCard({
                           ),
                         );
                         setEditingSoundEffectIndex(null);
-                      } catch (err) {
+                      } catch (error) {
                         // eslint-disable-next-line no-console
-                        console.error('Failed to save sound effect preset', err);
+                        console.error('Failed to save sound effect preset', error);
+                        setSoundEffectEditError(
+                          getApiErrorMessage(
+                            error,
+                            'Failed to save the preset. Enter a unique title and try again.',
+                          ),
+                        );
                       } finally {
                         setIsSavingSoundEffectEdit(false);
                       }
@@ -1689,6 +1954,7 @@ export function SentenceEditorCard({
                       );
 
                       setIsSavingSoundEffectEdit(true);
+                      setSoundEffectEditError(null);
                       try {
                         await api.patch(`/sound-effects/${encodeURIComponent(current.id)}`, {
                           name: nextTitle,
@@ -1696,10 +1962,12 @@ export function SentenceEditorCard({
                           audioSettings: nextAudioSettings,
                         });
                         setEditingSoundEffectIndex(null);
-                      } catch (err) {
+                      } catch (error) {
                         // eslint-disable-next-line no-console
-                        console.error('Failed to update sound effect', err);
-                        setEditingSoundEffectIndex(null);
+                        console.error('Failed to update sound effect', error);
+                        setSoundEffectEditError(
+                          getApiErrorMessage(error, 'Failed to update this sound effect. Try again.'),
+                        );
                       } finally {
                         setIsSavingSoundEffectEdit(false);
                       }
@@ -1867,7 +2135,10 @@ export function SentenceEditorCard({
                                 }
                                 playSingle(sfxIndex);
                               }}
-                              onEdit={() => setEditingSoundEffectIndex(sfxIndex)}
+                              onEdit={() => {
+                                setSoundEffectEditError(null);
+                                setEditingSoundEffectIndex(sfxIndex);
+                              }}
                               onRemove={() => {
                                 const next = soundEffects.filter((_, i) => i !== sfxIndex);
                                 commitSoundEffects(next);

@@ -61,6 +61,7 @@ export function YouTubeUploadModal({
   >('public');
   const [categoryId, setCategoryId] = useState<string>('24');
   const [selfDeclaredMadeForKids, setSelfDeclaredMadeForKids] = useState<boolean>(false);
+  const [publicStatsViewable, setPublicStatsViewable] = useState<boolean>(true);
   const [isUploadingToYouTube, setIsUploadingToYouTube] = useState(false);
   const [cloudinaryStage, setCloudinaryStage] = useState<
     'idle' | 'downloading' | 'uploading'
@@ -723,6 +724,7 @@ export function YouTubeUploadModal({
           privacyStatus: enableScheduling ? 'private' : privacyStatus,
           categoryId,
           selfDeclaredMadeForKids,
+          publicStatsViewable,
           scriptId: scriptId || undefined,
           scriptText: (script || '').trim() || undefined,
           ...(publishAt ? { publishAt } : {}),
@@ -1294,6 +1296,22 @@ export function YouTubeUploadModal({
               </label>
               <p className="mt-2 text-sm text-gray-500">
                 Only enable this if your content is made specifically for children.
+              </p>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-red-600"
+                  checked={publicStatsViewable}
+                  onChange={(e) => setPublicStatsViewable(e.target.checked)}
+                  disabled={isBusy}
+                />
+                Show extended public stats on YouTube
+              </label>
+              <p className="mt-2 text-sm text-gray-500">
+                This maps to YouTube&apos;s public stats visibility setting. Even when turned off, YouTube may still show basic counts such as views or ratings on the watch page.
               </p>
             </div>
           </div>

@@ -52,7 +52,9 @@ type SoundEffectEditModalProps = {
   isApplying?: boolean;
   isSavingAsPreset?: boolean;
   showSaveAsPreset?: boolean;
+  showSaveButton?: boolean;
   canApply?: boolean;
+  actionError?: string | null;
   onClose: () => void;
   onApply?: (values: SoundEffectEditValues) => void | Promise<void>;
   onSave: (values: SoundEffectEditValues) => void | Promise<void>;
@@ -170,7 +172,9 @@ export function SoundEffectEditModal({
   isApplying,
   isSavingAsPreset,
   showSaveAsPreset = true,
+  showSaveButton = true,
   canApply = true,
+  actionError = null,
   onClose,
   onApply,
   onSave,
@@ -1323,7 +1327,7 @@ export function SoundEffectEditModal({
                 <div className="mt-3 space-y-2 text-sm text-slate-200">
                   <p><span className="font-semibold text-white">Apply</span> updates only this current use.</p>
                   {showSaveAsPreset ? <p><span className="font-semibold text-white">Save as new Preset</span> creates a new library sound effect.</p> : null}
-                  <p><span className="font-semibold text-white">Save</span> overwrites the current sound effect entity.</p>
+                  {showSaveButton ? <p><span className="font-semibold text-white">Save</span> overwrites the current sound effect entity.</p> : null}
                   {hasCompanionAudio ? <p><span className="font-semibold text-white">With voice-over</span> previews the soundtrack against the current narration in realtime.</p> : null}
                 </div>
               </div>
@@ -1339,8 +1343,10 @@ export function SoundEffectEditModal({
           <div className="border-b border-slate-200 px-6 py-5">
             <h4 className="text-lg font-semibold text-slate-900">Output actions</h4>
             <p className="mt-1 text-sm text-slate-500">
-              {showSaveAsPreset
+              {showSaveAsPreset && showSaveButton
                 ? 'Choose whether these edits stay local, create a new preset, or replace the saved sound effect.'
+                : showSaveAsPreset
+                  ? 'Choose whether these edits stay local or create a new preset.'
                 : 'Choose whether these edits stay local or replace the current saved audio for this draft.'}
             </p>
           </div>
@@ -1362,6 +1368,11 @@ export function SoundEffectEditModal({
                 {hasCompanionAudio ? <p>Context preview: <span className="font-semibold text-slate-900">{isCompanionPreviewEnabled ? `With ${resolvedCompanionAudioLabel}` : 'Soundtrack only'}</span></p> : null}
               </div>
             </div>
+            {actionError ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {actionError}
+              </div>
+            ) : null}
           </div>
 
           <div className="border-t border-slate-200 px-6 py-5">
@@ -1406,19 +1417,21 @@ export function SoundEffectEditModal({
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    const next = currentValues();
-                    if (!next.name) return;
-                    void Promise.resolve(onSave(next));
-                  }}
-                  disabled={!canSubmit || isBusy}
-                  className="h-11 rounded-xl bg-linear-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700"
-                >
-                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Save
-                </Button>
+                {showSaveButton ? (
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      const next = currentValues();
+                      if (!next.name) return;
+                      void Promise.resolve(onSave(next));
+                    }}
+                    disabled={!canSubmit || isBusy}
+                    className="h-11 rounded-xl bg-linear-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700"
+                  >
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>

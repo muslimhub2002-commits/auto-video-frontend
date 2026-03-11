@@ -5316,6 +5316,11 @@ export function GeneratePageInner() {
           sound_effect_id: e.id,
           delay_seconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
           volume_percent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+          trim_start_seconds: Math.max(0, Number(e.trimStartSeconds ?? 0) || 0),
+          duration_seconds:
+            typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
+              ? Math.max(0, e.durationSeconds)
+              : null,
         })),
       });
 
