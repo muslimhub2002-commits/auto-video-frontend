@@ -115,7 +115,7 @@ export function RenderSettingsSection({
                                 Text overlay
                             </span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">Show sentence text at the bottom of each scene</p>
+                        <p className="text-xs text-gray-500 mt-1">Reveal subtitle words progressively at the bottom of each scene</p>
                     </div>
                 </label>
                 {/* Lower FPS Option */}
