@@ -57,6 +57,8 @@ export function LlmModelSelect({
         <SelectItem value="gpt-5">GPT-5</SelectItem>
         <SelectItem value="gpt-5.1">GPT-5.1</SelectItem>
         <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
+        <SelectItem value="gpt-5.3">GPT-5.3</SelectItem>
+        <SelectItem value="gpt-5.4">GPT-5.4</SelectItem>
       </SelectContent>
     </Select>
   );
