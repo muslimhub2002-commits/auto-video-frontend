@@ -27,9 +27,11 @@ type AlertState = {
 type GenerateModalsHostProps = {
   isImageLibraryOpen: boolean;
   libraryTarget: LibraryTarget;
+  videoLibraryTargetIndex: number | null;
+  scriptContext: string;
   sentences: SentenceItem[];
   onCloseImageLibrary: () => void;
-  onSelectImage: (imageUrl: string, id: string, prompt?: string | null) => void;
+  onSelectImage: (imageUrl: string, id: string | null, prompt?: string | null) => void;
 
   isVoiceLibraryOpen: boolean;
   selectedVoiceUrl: string | null;
@@ -39,7 +41,7 @@ type GenerateModalsHostProps = {
   isVideoLibraryOpen: boolean;
   selectedVideoUrl: string | null;
   onCloseVideoLibrary: () => void;
-  onSelectVideo: (videoUrl: string, id: string) => void;
+  onSelectVideo: (videoUrl: string, id: string | null) => void;
 
   isScriptLibraryOpen: boolean;
   onCloseScriptLibrary: () => void;
@@ -78,9 +80,27 @@ function selectedImageUrlFromTarget(sentences: SentenceItem[], libraryTarget: Li
   return sentence.referenceImageUrl ?? null;
 }
 
+function selectedSentenceTextFromImageTarget(
+  sentences: SentenceItem[],
+  libraryTarget: LibraryTarget,
+): string | null {
+  if (!libraryTarget) return null;
+  return sentences[libraryTarget.index]?.text ?? null;
+}
+
+function selectedSentenceTextFromVideoTarget(
+  sentences: SentenceItem[],
+  videoLibraryTargetIndex: number | null,
+): string | null {
+  if (videoLibraryTargetIndex === null) return null;
+  return sentences[videoLibraryTargetIndex]?.text ?? null;
+}
+
 export function GenerateModalsHost({
   isImageLibraryOpen,
   libraryTarget,
+  videoLibraryTargetIndex,
+  scriptContext,
   sentences,
   onCloseImageLibrary,
   onSelectImage,
@@ -116,12 +136,19 @@ export function GenerateModalsHost({
   onCloseAlert,
 }: GenerateModalsHostProps) {
   const selectedImageUrl = selectedImageUrlFromTarget(sentences, libraryTarget);
+  const currentImageSentenceText = selectedSentenceTextFromImageTarget(sentences, libraryTarget);
+  const currentVideoSentenceText = selectedSentenceTextFromVideoTarget(
+    sentences,
+    videoLibraryTargetIndex,
+  );
 
   return (
     <>
       <ImageLibraryModal
         isOpen={isImageLibraryOpen}
         selectedImageUrl={selectedImageUrl}
+        scriptContext={scriptContext}
+        currentSentenceText={currentImageSentenceText}
         onClose={onCloseImageLibrary}
         onSelectImage={onSelectImage}
       />
@@ -136,6 +163,8 @@ export function GenerateModalsHost({
       <VideoLibraryModal
         isOpen={isVideoLibraryOpen}
         selectedVideoUrl={selectedVideoUrl}
+        scriptContext={scriptContext}
+        currentSentenceText={currentVideoSentenceText}
         onClose={onCloseVideoLibrary}
         onSelectVideo={onSelectVideo}
       />

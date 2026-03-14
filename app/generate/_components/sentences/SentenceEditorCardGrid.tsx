@@ -1188,6 +1188,13 @@ export function SentenceEditorCard({
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [isVideoModeMenuOpen]);
 
+  useEffect(() => {
+    if (!item.videoUrl || item.videoUrl === '/subscribe.mp4') return;
+    setIsVideoModeMenuShown(false);
+    setIsVideoModeMenuOpen(false);
+    setIsVideoModeMenuMounted(false);
+  }, [item.videoUrl]);
+
   return (
     <div
       className="group relative bg-white rounded-2xl border border-gray-200 hover:border-indigo-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden"

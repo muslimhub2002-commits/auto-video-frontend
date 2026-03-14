@@ -5053,7 +5053,7 @@ export function GeneratePageInner() {
     setIsVideoLibraryOpen(true);
   };
 
-  const handleLibraryVideoSelect = (videoUrl: string, id: string) => {
+  const handleLibraryVideoSelect = (videoUrl: string, id: string | null) => {
     if (videoLibraryTargetIndex === null) return;
 
     const index = videoLibraryTargetIndex;
@@ -5061,13 +5061,31 @@ export function GeneratePageInner() {
     setSentences((prev) =>
       prev.map((item, i) =>
         i === index
-          ? {
-            ...item,
-            sceneTab: 'video',
-            video: null,
-            videoUrl,
-            savedVideoId: id,
-          }
+          ? (() => {
+              const mode = (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
+                SentenceItem['videoGenerationMode']
+              >;
+              const next: SentenceItem = {
+                ...item,
+                sceneTab: 'video',
+                video: null,
+                videoUrl,
+                savedVideoId: id,
+              };
+
+              if (mode === 'frames') {
+                next.framesVideoUrl = videoUrl;
+                next.framesSavedVideoId = id;
+              } else if (mode === 'text') {
+                next.textVideoUrl = videoUrl;
+                next.textSavedVideoId = id;
+              } else {
+                next.referenceVideoUrl = videoUrl;
+                next.referenceSavedVideoId = id;
+              }
+
+              return next;
+            })()
           : item,
       ),
     );
@@ -5077,7 +5095,7 @@ export function GeneratePageInner() {
 
   const handleLibraryImageSelect = (
     imageUrl: string,
-    id: string,
+    id: string | null,
     prompt?: string | null,
   ) => {
     if (!libraryTarget) return;
@@ -7107,6 +7125,8 @@ export function GeneratePageInner() {
       <GenerateModalsHost
         isImageLibraryOpen={isLibraryModalOpen}
         libraryTarget={libraryTarget}
+        videoLibraryTargetIndex={videoLibraryTargetIndex}
+        scriptContext={script}
         sentences={sentences}
         onCloseImageLibrary={() => {
           setIsLibraryModalOpen(false);
