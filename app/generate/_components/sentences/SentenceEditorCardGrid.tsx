@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   DndContext,
   PointerSensor,
@@ -59,6 +59,7 @@ import {
 import { ForcedCharactersModal } from './ForcedCharactersModal';
 import { ForcedEraModal } from './ForcedEraModal';
 import type { ScriptEra } from './ErasModal';
+import { SentenceTextEditor } from './SentenceTextEditor';
 import { SoundEffectEditModal, type SoundEffectEditValues } from '../SoundEffectEditModal';
 import {
   getDefaultImageFilterSettings,
@@ -87,6 +88,7 @@ import {
   resolveSoundEffectTrimWindow,
   type SoundEffectAudioSettings,
 } from '../../_types/sound-effect-audio';
+import { useManagedObjectUrl } from './useManagedObjectUrl';
 
 import type { SentenceItem } from '../../_types/sentences';
 
@@ -466,7 +468,7 @@ type SentenceEditorCardProps = {
   ) => void;
 };
 
-export function SentenceEditorCard({
+function SentenceEditorCardComponent({
   item,
   index,
   isShortVideo,
@@ -554,7 +556,10 @@ export function SentenceEditorCard({
   const hasAnyImage = Boolean(item.image || item.imageUrl);
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
 
-  const soundEffects = Array.isArray(item.soundEffects) ? item.soundEffects : [];
+  const soundEffects = useMemo(
+    () => (Array.isArray(item.soundEffects) ? item.soundEffects : []),
+    [item.soundEffects],
+  );
   const soundEffectsStackDuration = getSentenceSoundEffectsStackDuration(soundEffects, {
     ignoreOffsets: true,
   });
@@ -941,53 +946,6 @@ export function SentenceEditorCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const sentenceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const sentenceDraftTextRef = useRef<string>(String(item.text ?? ''));
-  const sentenceCommitTimeoutRef = useRef<number | null>(null);
-  const sentenceIsComposingRef = useRef(false);
-
-  const commitSentenceText = (next: string) => {
-    onSentenceTextChange(next);
-  };
-
-  const scheduleCommitSentenceText = (next: string) => {
-    sentenceDraftTextRef.current = next;
-
-    if (sentenceCommitTimeoutRef.current !== null) {
-      window.clearTimeout(sentenceCommitTimeoutRef.current);
-    }
-
-    // Debounce to avoid re-rendering the whole scene editor on every keystroke.
-    sentenceCommitTimeoutRef.current = window.setTimeout(() => {
-      sentenceCommitTimeoutRef.current = null;
-      commitSentenceText(sentenceDraftTextRef.current);
-    }, 200);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (sentenceCommitTimeoutRef.current !== null) {
-        window.clearTimeout(sentenceCommitTimeoutRef.current);
-        sentenceCommitTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    // Keep the uncontrolled textarea in sync with external changes (AI edits, merges, etc.),
-    // but never clobber the user's active typing.
-    const next = String(item.text ?? '');
-    sentenceDraftTextRef.current = next;
-
-    const el = sentenceTextareaRef.current;
-    if (!el) return;
-
-    const isFocused = typeof document !== 'undefined' && document.activeElement === el;
-    if (isFocused) return;
-    if (el.value === next) return;
-    el.value = next;
-  }, [item.id, item.text]);
-
   const videoGenerationMode =
     (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
       SentenceItem['videoGenerationMode']
@@ -1035,40 +993,68 @@ export function SentenceEditorCard({
   const canPickForcedEra = Array.isArray(scriptEras) && scriptEras.length > 0;
   const forcedEraKey = String(item.forcedEraKey ?? '').trim() || null;
 
-  const visualEffectValue =
-    item.visualEffect && item.visualEffect !== 'none'
-      ? item.visualEffect
-      : '__none__';
+  const visualEffectValue = useMemo(
+    () =>
+      item.visualEffect && item.visualEffect !== 'none'
+        ? item.visualEffect
+        : '__none__',
+    [item.visualEffect],
+  );
 
-  const visualEffectLabel =
-    visualEffectValue === '__none__' ? 'None' : getVisualEffectLabel(visualEffectValue);
+  const visualEffectLabel = useMemo(
+    () =>
+      visualEffectValue === '__none__' ? 'None' : getVisualEffectLabel(visualEffectValue),
+    [visualEffectValue],
+  );
 
   const imageMotionEffectValue = item.imageMotionEffect ?? 'default';
-  const imageMotionEffectLabel = getImageMotionEffectLabel(imageMotionEffectValue);
-  const resolvedImageFilterSettings = normalizeImageFilterSettings(
-    item.imageFilterSettings,
-    item.visualEffect ?? null,
+  const imageMotionEffectLabel = useMemo(
+    () => getImageMotionEffectLabel(imageMotionEffectValue),
+    [imageMotionEffectValue],
   );
-  const resolvedImageMotionSettings = normalizeImageMotionSettings(
-    item.imageMotionSettings,
-    item.imageMotionEffect ?? 'default',
-    item.imageMotionSpeed,
+  const resolvedImageFilterSettings = useMemo(
+    () => normalizeImageFilterSettings(item.imageFilterSettings, item.visualEffect ?? null),
+    [item.imageFilterSettings, item.visualEffect],
   );
-  const quickLookSelectValue = item.customImageFilterId
-    ? `custom:${item.customImageFilterId}`
-    : `builtin:${resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ?? 'none'}`;
-  const quickMotionSelectValue = item.customMotionEffectId
-    ? `custom:${item.customMotionEffectId}`
-    : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`;
+  const resolvedImageMotionSettings = useMemo(
+    () =>
+      normalizeImageMotionSettings(
+        item.imageMotionSettings,
+        item.imageMotionEffect ?? 'default',
+        item.imageMotionSpeed,
+      ),
+    [item.imageMotionEffect, item.imageMotionSettings, item.imageMotionSpeed],
+  );
+  const quickLookSelectValue = useMemo(
+    () =>
+      item.customImageFilterId
+        ? `custom:${item.customImageFilterId}`
+        : `builtin:${resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ?? 'none'}`,
+    [item.customImageFilterId, item.imageFilterSettings, item.visualEffect],
+  );
+  const quickMotionSelectValue = useMemo(
+    () =>
+      item.customMotionEffectId
+        ? `custom:${item.customMotionEffectId}`
+        : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`,
+    [item.customMotionEffectId, item.imageMotionEffect, item.imageMotionSettings],
+  );
 
-  const startPreviewUrl = item.startImage ? URL.createObjectURL(item.startImage) : item.startImageUrl;
-  const endPreviewUrl = item.endImage ? URL.createObjectURL(item.endImage) : item.endImageUrl;
-  const referencePreviewUrl = item.referenceImage
-    ? URL.createObjectURL(item.referenceImage)
-    : item.referenceImageUrl;
-  const detailPreviewUrl = item.image
-    ? URL.createObjectURL(item.image)
-    : item.imageUrl ?? startPreviewUrl ?? referencePreviewUrl ?? endPreviewUrl ?? null;
+  const imagePreviewObjectUrl = useManagedObjectUrl(item.image);
+  const startPreviewObjectUrl = useManagedObjectUrl(item.startImage);
+  const endPreviewObjectUrl = useManagedObjectUrl(item.endImage);
+  const referencePreviewObjectUrl = useManagedObjectUrl(item.referenceImage);
+
+  const startPreviewUrl = startPreviewObjectUrl ?? item.startImageUrl ?? null;
+  const endPreviewUrl = endPreviewObjectUrl ?? item.endImageUrl ?? null;
+  const referencePreviewUrl = referencePreviewObjectUrl ?? item.referenceImageUrl ?? null;
+  const detailPreviewUrl =
+    imagePreviewObjectUrl ??
+    item.imageUrl ??
+    startPreviewUrl ??
+    referencePreviewUrl ??
+    endPreviewUrl ??
+    null;
   const hasStart = Boolean(startPreviewUrl);
   const hasEnd = Boolean(endPreviewUrl);
   const canGenerateVideo =
@@ -1373,29 +1359,9 @@ export function SentenceEditorCard({
                 <div className="absolute top-3 left-3 z-10 p-1.5 bg-indigo-50 rounded-lg">
                   <FileText className="h-4 w-4 text-indigo-600" />
                 </div>
-                <textarea
-                  ref={sentenceTextareaRef}
-                  defaultValue={item.text}
-                  onCompositionStart={() => {
-                    sentenceIsComposingRef.current = true;
-                  }}
-                  onCompositionEnd={(e) => {
-                    sentenceIsComposingRef.current = false;
-                    scheduleCommitSentenceText(e.currentTarget.value);
-                  }}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    sentenceDraftTextRef.current = next;
-                    if (sentenceIsComposingRef.current) return;
-                    scheduleCommitSentenceText(next);
-                  }}
-                  onBlur={(e) => {
-                    if (sentenceCommitTimeoutRef.current !== null) {
-                      window.clearTimeout(sentenceCommitTimeoutRef.current);
-                      sentenceCommitTimeoutRef.current = null;
-                    }
-                    commitSentenceText(e.currentTarget.value);
-                  }}
+                <SentenceTextEditor
+                  text={item.text}
+                  onCommit={onSentenceTextChange}
                   className="w-full pl-12 pr-4 py-3 text-sm text-gray-800 leading-relaxed bg-gray-50/50 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none transition-all duration-200 hover:border-gray-300 hover:bg-gray-50"
                   rows={3}
                   placeholder="Enter your sentence text here..."
@@ -3180,3 +3146,37 @@ export function SentenceEditorCard({
     </div>
   );
 }
+
+function areSentenceEditorCardPropsEqual(
+  prev: SentenceEditorCardProps,
+  next: SentenceEditorCardProps,
+) {
+  return (
+    prev.item === next.item &&
+    prev.index === next.index &&
+    prev.isShortVideo === next.isShortVideo &&
+    prev.sceneDurationSeconds === next.sceneDurationSeconds &&
+    prev.isFirst === next.isFirst &&
+    prev.isLast === next.isLast &&
+    prev.videoModel === next.videoModel &&
+    prev.scriptCharacters === next.scriptCharacters &&
+    prev.scriptEras === next.scriptEras &&
+    prev.imageFilterPresets === next.imageFilterPresets &&
+    prev.motionEffectPresets === next.motionEffectPresets &&
+    prev.isLoadingImageFilterPresets === next.isLoadingImageFilterPresets &&
+    prev.isLoadingMotionEffectPresets === next.isLoadingMotionEffectPresets &&
+    prev.enhanceError === next.enhanceError &&
+    prev.isEnhancing === next.isEnhancing &&
+    prev.isApplyingPrompt === next.isApplyingPrompt &&
+    prev.isEnhanceMenuOpen === next.isEnhanceMenuOpen &&
+    prev.isApplyingImagePrompt === next.isApplyingImagePrompt &&
+    prev.imagePromptError === next.imagePromptError &&
+    prev.isGeneratingVideo === next.isGeneratingVideo &&
+    prev.isGeneratingVideoPrompt === next.isGeneratingVideoPrompt
+  );
+}
+
+export const SentenceEditorCard = memo(
+  SentenceEditorCardComponent,
+  areSentenceEditorCardPropsEqual,
+);

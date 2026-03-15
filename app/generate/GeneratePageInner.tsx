@@ -49,7 +49,7 @@ import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useSentencesEditor } from './_hooks/useSentencesEditor';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
-import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { mapWithConcurrency, uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -1494,6 +1494,67 @@ export function GeneratePageInner() {
     return imageUploads;
   };
 
+  const resolveRenderAudioUrl = async () => {
+    const persistedUrl = String(voiceLibraryUrl ?? '').trim();
+    if (persistedUrl) {
+      return persistedUrl;
+    }
+
+    const previewUrl = String(voiceOverPreviewUrl ?? '').trim();
+    if (/^https?:\/\//i.test(previewUrl)) {
+      return previewUrl;
+    }
+
+    if (!voiceOver) {
+      throw new Error('Please provide a voice-over.');
+    }
+
+    const uploadedUrl = await uploadToCloudinaryUnsigned(voiceOver, {
+      resourceType: 'video',
+      folder: 'auto-video-generator/render-voiceovers',
+    });
+
+    setVoiceLibraryUrl(uploadedUrl);
+    return uploadedUrl;
+  };
+
+  const buildRenderImageUrls = async (sourceSentences: SentenceItem[]) => {
+    return await mapWithConcurrency(sourceSentences, 4, async (sentence, index) => {
+      const text = String(sentence?.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) {
+        return null;
+      }
+
+      const tab = sentence.sceneTab ?? (sentence.mediaMode === 'frames' ? 'video' : 'image');
+      if (tab !== 'image') {
+        return null;
+      }
+
+      const currentUrl = String(sentence.imageUrl ?? '').trim();
+      if (currentUrl && !currentUrl.startsWith('data:')) {
+        return currentUrl;
+      }
+
+      let fileToUpload = sentence.image ?? null;
+      if (!fileToUpload && currentUrl.startsWith('data:')) {
+        fileToUpload = dataUrlToFile(currentUrl, `sentence-${index + 1}.png`);
+      }
+
+      if (!fileToUpload) {
+        throw new Error(
+          `Missing image for sentence ${index + 1}. Please provide an image for every sentence on the Image tab.`,
+        );
+      }
+
+      const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
+        resourceType: 'image',
+        folder: 'auto-video-generator/render-images',
+      });
+
+      return uploadedUrl;
+    });
+  };
+
   const generateVoiceFileForSentences = async (sentenceTexts: string[], voiceId: string) => {
     const normalizedSentences = sentenceTexts
       .map((sentence) => String(sentence ?? '').trim())
@@ -1641,9 +1702,6 @@ export function GeneratePageInner() {
       }
 
       const backgroundMusicSrc = resolveBackgroundMusicSrcForRender();
-      if (backgroundMusicSrc) {
-        form.append('backgroundMusicSrc', backgroundMusicSrc);
-      }
 
       const normalizedBackgroundMusicVolume = Math.max(
         0,
@@ -3018,7 +3076,7 @@ export function GeneratePageInner() {
       showAlert('Please provide a script', { type: 'warning' });
       return;
     }
-    if (!voiceOver) {
+    if (!voiceOver && !voiceOverPreviewUrl) {
       showAlert('Please provide a voice-over', { type: 'warning' });
       return;
     }
@@ -3067,9 +3125,6 @@ export function GeneratePageInner() {
 
     setIsGenerating(true);
     try {
-      const form = new FormData();
-      form.append('voiceOver', voiceOver);
-
       const resolveBackgroundMusicSrcForRender = (): string | undefined => {
         const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
         if (value === '__none__') return '__none__';
@@ -3093,103 +3148,89 @@ export function GeneratePageInner() {
       };
 
       const backgroundMusicSrc = resolveBackgroundMusicSrcForRender();
-      if (backgroundMusicSrc) {
-        form.append('backgroundMusicSrc', backgroundMusicSrc);
-      }
 
       const normalizedBackgroundMusicVolume = Math.max(
         0,
         Math.min(1, (backgroundSoundtrackVolumePercent ?? 100) / 100),
       );
-      // Only send when it deviates from default (keeps payload minimal).
-      if (normalizedBackgroundMusicVolume !== 1) {
-        form.append(
-          'backgroundMusicVolume',
-          String(normalizedBackgroundMusicVolume),
-        );
-      }
 
       const sentencePayload = buildRenderSentencePayload(sentences);
-      form.append('sentences', JSON.stringify(sentencePayload));
-      form.append('scriptLength', scriptLength);
-      form.append('language', scriptLanguage);
-      if (voiceDuration && voiceDuration > 0) {
-        form.append('audioDurationSeconds', String(voiceDuration));
-      }
+      const audioUrl = await resolveRenderAudioUrl();
+      const imageUrls = await buildRenderImageUrls(sentences);
 
-      // Render configuration flags
-      form.append('isShort', effectiveIsShort ? 'true' : 'false');
-      form.append('useLowerFps', useLowerFps ? 'true' : 'false');
-      form.append(
-        'useLowerResolution',
-        useLowerResolution ? 'true' : 'false',
-      );
-      form.append('addSubtitles', addSubtitles ? 'true' : 'false');
-      form.append(
-        'enableGlitchTransitions',
-        enableGlitchTransitions ? 'true' : 'false',
-      );
-      form.append(
-        'enableZoomRotateTransitions',
-        enableZoomRotateTransitions ? 'true' : 'false',
-      );
-
-      // Prepare image files only for sentences on the Image tab (excluding the subscribe sentence).
-      // The backend will align these uploads to image-tab sentences in sentence order.
-      const imageUploads: File[] = [];
-
-      // eslint-disable-next-line no-restricted-syntax
-      for (let index = 0; index < sentences.length; index += 1) {
-        const s = sentences[index];
-        const text = String(s?.text ?? '').trim();
-        if (isSubscribeLikeSentence(text)) continue;
-
-        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
-        if (tab !== 'image') continue;
-
-        if (s.image) {
-          imageUploads.push(s.image);
-          continue;
-        }
-
-        if (s.imageUrl?.startsWith('data:')) {
-          imageUploads.push(dataUrlToFile(s.imageUrl, `sentence-${index + 1}.png`));
-          continue;
-        }
-
-        if (s.imageUrl) {
-          try {
-            const res = await fetch(s.imageUrl);
-            if (!res.ok) {
-              throw new Error('Failed to fetch image URL');
-            }
-            const blob = await res.blob();
-            imageUploads.push(
-              new File([blob], `sentence-${index + 1}.png`, {
-                type: blob.type || 'image/png',
-              }),
-            );
-            continue;
-          } catch (error) {
-            console.error('Failed to prepare image upload', error);
-            showAlert(
-              `Failed to prepare image for sentence ${index + 1}. Please try re-selecting the image.`,
-              { type: 'error' },
-            );
-            return;
-          }
-        }
-      }
-
-      imageUploads.forEach((file) => form.append('images', file));
-
-      const res = await fetch(`${API_URL}/videos`, {
+      let res = await fetch(`${API_URL}/videos/url`, {
         method: 'POST',
-        body: form,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          audioUrl,
+          sentences: sentencePayload,
+          imageUrls,
+          scriptLength,
+          language: scriptLanguage,
+          ...(voiceDuration && voiceDuration > 0
+            ? { audioDurationSeconds: voiceDuration }
+            : {}),
+          isShort: effectiveIsShort,
+          useLowerFps,
+          useLowerResolution,
+          addSubtitles,
+          enableGlitchTransitions,
+          enableZoomRotateTransitions,
+          ...(backgroundMusicSrc ? { backgroundMusicSrc } : {}),
+          ...(normalizedBackgroundMusicVolume !== 1
+            ? { backgroundMusicVolume: normalizedBackgroundMusicVolume }
+            : {}),
+        }),
       });
 
+      if (!res.ok && voiceOver) {
+        const fallbackForm = new FormData();
+        fallbackForm.append('voiceOver', voiceOver);
+        fallbackForm.append('sentences', JSON.stringify(sentencePayload));
+        fallbackForm.append('scriptLength', scriptLength);
+        fallbackForm.append('language', scriptLanguage);
+        if (voiceDuration && voiceDuration > 0) {
+          fallbackForm.append('audioDurationSeconds', String(voiceDuration));
+        }
+        fallbackForm.append('isShort', effectiveIsShort ? 'true' : 'false');
+        fallbackForm.append('useLowerFps', useLowerFps ? 'true' : 'false');
+        fallbackForm.append(
+          'useLowerResolution',
+          useLowerResolution ? 'true' : 'false',
+        );
+        fallbackForm.append('addSubtitles', addSubtitles ? 'true' : 'false');
+        fallbackForm.append(
+          'enableGlitchTransitions',
+          enableGlitchTransitions ? 'true' : 'false',
+        );
+        fallbackForm.append(
+          'enableZoomRotateTransitions',
+          enableZoomRotateTransitions ? 'true' : 'false',
+        );
+        if (backgroundMusicSrc) {
+          fallbackForm.append('backgroundMusicSrc', backgroundMusicSrc);
+        }
+        if (normalizedBackgroundMusicVolume !== 1) {
+          fallbackForm.append(
+            'backgroundMusicVolume',
+            String(normalizedBackgroundMusicVolume),
+          );
+        }
+
+        const imageUploads = await prepareImageUploadsForRender(sentences);
+        imageUploads.forEach((file) => fallbackForm.append('images', file));
+
+        res = await fetch(`${API_URL}/videos`, {
+          method: 'POST',
+          body: fallbackForm,
+        });
+      }
+
       if (!res.ok) {
-        throw new Error('Failed to start video generation');
+        const text = await res.text().catch(() => '');
+        throw new Error(text || 'Failed to start video generation');
       }
 
       const data = (await res.json()) as {

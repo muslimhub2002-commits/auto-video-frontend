@@ -1,7 +1,5 @@
-"use client";
-
-import { GeneratePageInner } from "../GeneratePageInner";
+import GeneratePageClient from '../GeneratePageClient';
 
 export default function GenerateChatPage() {
-  return <GeneratePageInner />;
+  return <GeneratePageClient />;
 }
