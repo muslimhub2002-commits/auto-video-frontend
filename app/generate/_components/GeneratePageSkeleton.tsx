@@ -29,7 +29,7 @@ export function GeneratePageSkeleton() {
             {/* Header Skeleton */}
             <div className="text-center py-12 relative">
               <div className="inline-block relative mb-6">
-                <div className="w-24 h-24 bg-gradient-to-br from-purple-200 to-blue-200 rounded-2xl animate-pulse"></div>
+                <div className="w-24 h-24 bg-linear-to-br from-purple-200 to-blue-200 rounded-2xl animate-pulse"></div>
               </div>
               <div className="h-10 bg-gray-200 rounded-lg w-96 mx-auto mb-3 animate-pulse"></div>
               <div className="h-6 bg-gray-100 rounded-lg w-2/3 mx-auto animate-pulse"></div>
@@ -76,7 +76,7 @@ export function GeneratePageSkeleton() {
 
                 {/* Generate Button Skeleton */}
                 <div className="pt-4">
-                  <div className="h-12 bg-gradient-to-r from-purple-200 to-blue-200 rounded-lg animate-pulse"></div>
+                  <div className="h-12 bg-linear-to-r from-purple-200 to-blue-200 rounded-lg animate-pulse"></div>
                 </div>
               </div>
             </div>

@@ -53,6 +53,7 @@ interface ScriptSectionProps {
   onSaveDraft: () => void;
   isSavingDraft: boolean;
   onOpenLibrary: () => void;
+  isLongForm?: boolean;
   originalScriptSubject?: string;
   originalScriptSubjectContent?: string;
   isEnhancingScript: boolean;
@@ -95,6 +96,7 @@ export function ScriptSection(props: ScriptSectionProps) {
     onSaveDraft,
     isSavingDraft,
     onOpenLibrary,
+    isLongForm,
     originalScriptSubject,
     originalScriptSubjectContent,
     isEnhancingScript,
@@ -190,6 +192,7 @@ export function ScriptSection(props: ScriptSectionProps) {
 
   const shouldShowEnhanceButton = script.trim().length > 0;
   const isEnhanceDisabled = hasSentences || hasConfigChanged || isEnhancingScript;
+  const shouldClampScriptTextarea = Boolean(isLongForm && hasSentences);
 
   return (
     <AccordionItem value="script" className="border-b border-gray-200 px-6">
@@ -579,9 +582,9 @@ export function ScriptSection(props: ScriptSectionProps) {
               value={script}
               onChange={(e) => onScriptChange(e.target.value)}
               readOnly={isSplitting || hasSentences}
-              rows={12}
+              rows={shouldClampScriptTextarea ? 8 : 12}
               className={`bg-white border-gray-300 text-gray-900 placeholder:text-gray-400 resize-none rounded-lg shadow-sm transition-all ${isSplitting || hasSentences ? 'opacity-80 cursor-not-allowed' : ''
-                }`}
+                } ${shouldClampScriptTextarea ? 'max-h-72 overflow-y-auto' : ''}`}
             />
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-gray-500">

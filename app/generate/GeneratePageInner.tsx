@@ -475,7 +475,7 @@ const CTA_SENTENCES_BY_LANGUAGE: Record<
 > = {
   en: {
     subscribe: 'Please Subscribe & Help us reach out to more people',
-    shorts: 'You can watch the full video from the link in the first comment',
+    shorts: 'You can find the first video pinned in our channel',
   },
   ar: {
     subscribe: 'يرجى الاشتراك ومساعدتنا في الوصول إلى المزيد من الناس',
@@ -6811,6 +6811,7 @@ export function GeneratePageInner() {
                   onSaveDraft={handleSaveScriptDraft}
                   isSavingDraft={isSavingDraft}
                   onOpenLibrary={handleOpenScriptLibrary}
+                  isLongForm={isLongForm}
                   originalScriptSubject={originalScriptSubject}
                   originalScriptSubjectContent={originalScriptSubjectContent}
                   isEnhancingScript={isEnhancingScript}

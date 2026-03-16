@@ -9,6 +9,35 @@ export const IMAGE_MOTION_SPEED_MIN = 0.5;
 export const IMAGE_MOTION_SPEED_MAX = 2.5;
 export const IMAGE_MOTION_SPEED_STEP = 0.1;
 export const DEFAULT_IMAGE_MOTION_SPEED = 1.2;
+const LEGACY_IMAGE_MOTION_SPEED = 1;
+
+export function getDefaultImageMotionSpeed(isShortVideo = true) {
+  return isShortVideo ? DEFAULT_IMAGE_MOTION_SPEED : IMAGE_MOTION_SPEED_MIN;
+}
+
+export function resolveImageMotionSpeed(
+  speed: number | null | undefined,
+  settings?: Record<string, unknown> | ImageMotionSettings | null,
+  isShortVideo = true,
+) {
+  const defaultSpeed = getDefaultImageMotionSpeed(isShortVideo);
+  const settingsSpeed = Number(settings?.speed);
+
+  if (Number.isFinite(settingsSpeed)) {
+    return normalizeImageMotionSpeed(settingsSpeed);
+  }
+
+  const numeric = Number(speed);
+  if (!Number.isFinite(numeric)) {
+    return defaultSpeed;
+  }
+
+  if (Math.abs(numeric - LEGACY_IMAGE_MOTION_SPEED) < 0.0001) {
+    return defaultSpeed;
+  }
+
+  return normalizeImageMotionSpeed(numeric);
+}
 
 export type ImageFilterSettings = {
   presetKey?: Exclude<SentenceItem['visualEffect'], null | undefined> | 'custom';
@@ -294,8 +323,11 @@ export function resolveVisualEffectFromSettings(
 export function getDefaultImageMotionSettings(
   effect: SentenceItem['imageMotionEffect'] | null | undefined,
   speed?: number | null,
+  isShortVideo = true,
 ): ImageMotionSettings {
-  const normalizedSpeed = normalizeImageMotionSpeed(speed);
+  const normalizedSpeed = normalizeImageMotionSpeed(
+    speed ?? getDefaultImageMotionSpeed(isShortVideo),
+  );
   const base = {
     speed: normalizedSpeed,
     originX: 50,
@@ -340,8 +372,13 @@ export function normalizeImageMotionSettings(
   settings: Record<string, unknown> | ImageMotionSettings | null | undefined,
   fallbackEffect?: SentenceItem['imageMotionEffect'] | null,
   fallbackSpeed?: number | null,
+  isShortVideo = true,
 ): ImageMotionSettings {
-  const defaults = getDefaultImageMotionSettings(fallbackEffect ?? 'default', fallbackSpeed);
+  const defaults = getDefaultImageMotionSettings(
+    fallbackEffect ?? 'default',
+    fallbackSpeed,
+    isShortVideo,
+  );
   return {
     presetKey:
       typeof settings?.presetKey === 'string'
@@ -399,6 +436,7 @@ type ImageEffectPreviewProps = {
   visualEffect: SentenceItem['visualEffect'] | null | undefined;
   imageMotionEffect: SentenceItem['imageMotionEffect'] | null | undefined;
   imageMotionSpeed?: number | null | undefined;
+  isShortVideo?: boolean;
   imageFilterSettings?: Record<string, unknown> | ImageFilterSettings | null | undefined;
   imageMotionSettings?: Record<string, unknown> | ImageMotionSettings | null | undefined;
   children: ReactNode;
@@ -413,6 +451,7 @@ export function ImageEffectPreview({
   visualEffect,
   imageMotionEffect,
   imageMotionSpeed,
+  isShortVideo = true,
   imageFilterSettings,
   imageMotionSettings,
   children,
@@ -463,6 +502,7 @@ export function ImageEffectPreview({
     imageMotionSettings,
     imageMotionEffect ?? 'default',
     imageMotionSpeed,
+    isShortVideo,
   );
   const normalizedMotionSpeed = normalizeImageMotionSpeed(
     resolvedMotionSettings.speed ?? imageMotionSpeed,

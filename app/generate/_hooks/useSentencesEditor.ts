@@ -232,7 +232,7 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         imageMotionEffect: 'default',
         customMotionEffectId: null,
         imageMotionSettings: null,
-        imageMotionSpeed: 1,
+        imageMotionSpeed: null,
         image: null,
         imageUrl: null,
         imagePrompt: null,

@@ -65,6 +65,7 @@ import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
   DEFAULT_IMAGE_MOTION_SPEED,
+  getDefaultImageMotionSpeed,
   getImageMotionEffectLabel,
   getVisualEffectLabel,
   ImageEffectPreview,
@@ -72,6 +73,7 @@ import {
   normalizeImageFilterSettings,
   isImageMotionEffectSelectValue,
   normalizeImageMotionSettings,
+  resolveImageMotionSpeed,
   resolveMotionEffectFromSettings,
   resolveVisualEffectFromSettings,
   type ImageFilterPresetDto,
@@ -1017,13 +1019,21 @@ function SentenceEditorCardComponent({
     [item.imageFilterSettings, item.visualEffect],
   );
   const resolvedImageMotionSettings = useMemo(
-    () =>
-      normalizeImageMotionSettings(
+    () => {
+      const resolvedImageMotionSpeed = resolveImageMotionSpeed(
+        item.imageMotionSpeed,
+        item.imageMotionSettings,
+        isShortVideo,
+      );
+
+      return normalizeImageMotionSettings(
         item.imageMotionSettings,
         item.imageMotionEffect ?? 'default',
-        item.imageMotionSpeed,
-      ),
-    [item.imageMotionEffect, item.imageMotionSettings, item.imageMotionSpeed],
+        resolvedImageMotionSpeed,
+        isShortVideo,
+      );
+    },
+    [isShortVideo, item.imageMotionEffect, item.imageMotionSettings, item.imageMotionSpeed],
   );
   const quickLookSelectValue = useMemo(
     () =>
@@ -1110,7 +1120,8 @@ function SentenceEditorCardComponent({
       const nextSettings = normalizeImageMotionSettings(
         preset.settings,
         item.imageMotionEffect ?? 'default',
-        item.imageMotionSpeed,
+        resolveImageMotionSpeed(item.imageMotionSpeed, item.imageMotionSettings, isShortVideo),
+        isShortVideo,
       );
       onSentencePatch({
         imageMotionEffect: resolveMotionEffectFromSettings(
@@ -1119,18 +1130,22 @@ function SentenceEditorCardComponent({
         ),
         customMotionEffectId: preset.id,
         imageMotionSettings: { ...nextSettings, presetKey: 'custom' },
-        imageMotionSpeed: nextSettings.speed ?? DEFAULT_IMAGE_MOTION_SPEED,
+        imageMotionSpeed: nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo),
       });
       return;
     }
 
     const effect = value.slice('builtin:'.length) as NonNullable<SentenceItem['imageMotionEffect']>;
-    const nextSettings = getDefaultImageMotionSettings(effect, item.imageMotionSpeed);
+    const nextSettings = getDefaultImageMotionSettings(
+      effect,
+      resolveImageMotionSpeed(item.imageMotionSpeed, item.imageMotionSettings, isShortVideo),
+      isShortVideo,
+    );
     onSentencePatch({
       imageMotionEffect: effect,
       customMotionEffectId: null,
       imageMotionSettings: nextSettings,
-      imageMotionSpeed: nextSettings.speed ?? DEFAULT_IMAGE_MOTION_SPEED,
+      imageMotionSpeed: nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo),
     });
   };
 
@@ -2245,6 +2260,7 @@ function SentenceEditorCardComponent({
                                 visualEffect={item.visualEffect}
                                 imageMotionEffect={item.imageMotionEffect}
                                 imageMotionSpeed={item.imageMotionSpeed}
+                                isShortVideo={isShortVideo}
                                 imageFilterSettings={resolvedImageFilterSettings}
                                 imageMotionSettings={resolvedImageMotionSettings}
                                 enableMotion={shouldAnimateImagePreview}
@@ -2258,7 +2274,7 @@ function SentenceEditorCardComponent({
                                       startPreviewUrl,
                                       item.visualEffect ?? null,
                                       item.imageMotionEffect ?? 'default',
-                                      item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+                                      item.imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
                                       item.imageFilterSettings ?? null,
                                       item.imageMotionSettings ?? null,
                                     )
@@ -2362,6 +2378,7 @@ function SentenceEditorCardComponent({
                                 visualEffect={item.visualEffect}
                                 imageMotionEffect={item.imageMotionEffect}
                                 imageMotionSpeed={item.imageMotionSpeed}
+                                isShortVideo={isShortVideo}
                                 imageFilterSettings={resolvedImageFilterSettings}
                                 imageMotionSettings={resolvedImageMotionSettings}
                                 enableMotion={shouldAnimateImagePreview}
@@ -2375,7 +2392,7 @@ function SentenceEditorCardComponent({
                                       endPreviewUrl,
                                       item.visualEffect ?? null,
                                       item.imageMotionEffect ?? 'default',
-                                      item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+                                      item.imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
                                       item.imageFilterSettings ?? null,
                                       item.imageMotionSettings ?? null,
                                     )
@@ -2544,6 +2561,7 @@ function SentenceEditorCardComponent({
                             visualEffect={item.visualEffect}
                             imageMotionEffect={item.imageMotionEffect}
                             imageMotionSpeed={item.imageMotionSpeed}
+                            isShortVideo={isShortVideo}
                             imageFilterSettings={resolvedImageFilterSettings}
                             imageMotionSettings={resolvedImageMotionSettings}
                             enableMotion={shouldAnimateImagePreview}
@@ -2557,7 +2575,7 @@ function SentenceEditorCardComponent({
                                   referencePreviewUrl,
                                   item.visualEffect ?? null,
                                   item.imageMotionEffect ?? 'default',
-                                  item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+                                  item.imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
                                   item.imageFilterSettings ?? null,
                                   item.imageMotionSettings ?? null,
                                 )
@@ -2978,6 +2996,7 @@ function SentenceEditorCardComponent({
                         visualEffect={item.visualEffect}
                         imageMotionEffect={item.imageMotionEffect}
                         imageMotionSpeed={item.imageMotionSpeed}
+                        isShortVideo={isShortVideo}
                         imageFilterSettings={resolvedImageFilterSettings}
                         imageMotionSettings={resolvedImageMotionSettings}
                         enableMotion={shouldAnimateImagePreview}
@@ -2991,7 +3010,7 @@ function SentenceEditorCardComponent({
                               item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string),
                               item.visualEffect ?? null,
                               item.imageMotionEffect ?? 'default',
-                              item.imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+                              item.imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
                               item.imageFilterSettings ?? null,
                               item.imageMotionSettings ?? null,
                             )
@@ -3001,6 +3020,7 @@ function SentenceEditorCardComponent({
                     ) : (
                       <ImageEffectPreview
                         visualEffect={item.visualEffect}
+                        isShortVideo={isShortVideo}
                         imageMotionEffect={item.imageMotionEffect}
                         imageFilterSettings={resolvedImageFilterSettings}
                         imageMotionSettings={resolvedImageMotionSettings}
@@ -3108,6 +3128,7 @@ function SentenceEditorCardComponent({
 
         <ImageEffectsDetailModal
           isOpen={isImageEffectsDetailModalOpen}
+          isShortVideo={isShortVideo}
           activeTab={imageEffectsTab}
           previewImageUrl={detailPreviewUrl}
           visualEffect={item.visualEffect}

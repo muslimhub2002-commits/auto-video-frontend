@@ -16,6 +16,7 @@ import type { SentenceItem } from '../../_types/sentences';
 import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
+  getDefaultImageMotionSpeed,
   getImageMotionEffectLabel,
   getVisualEffectLabel,
   IMAGE_MOTION_EFFECT_SELECT_VALUES,
@@ -30,6 +31,7 @@ import {
   type MotionEffectPresetDto,
   normalizeImageFilterSettings,
   normalizeImageMotionSettings,
+  resolveImageMotionSpeed,
   resolveMotionEffectFromSettings,
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
@@ -58,6 +60,7 @@ const PREVIEW_RESTART_DEBOUNCE_MS = 140;
 
 type ImageEffectsDetailModalProps = {
   isOpen: boolean;
+  isShortVideo: boolean;
   activeTab: DetailTab;
   previewImageUrl: string | null;
   visualEffect: SentenceItem['visualEffect'] | null | undefined;
@@ -183,6 +186,7 @@ function getUnifiedEndValueMode(settings: ImageMotionSettings): 'loop' | 'contin
 
 export function ImageEffectsDetailModal({
   isOpen,
+  isShortVideo,
   activeTab,
   previewImageUrl,
   visualEffect,
@@ -199,6 +203,11 @@ export function ImageEffectsDetailModal({
   onSaveImageFilterPreset,
   onSaveMotionEffectPreset,
 }: ImageEffectsDetailModalProps) {
+  const incomingImageMotionSpeed = resolveImageMotionSpeed(
+    imageMotionSpeed,
+    imageMotionSettings,
+    isShortVideo,
+  );
   const [currentTab, setCurrentTab] = useState<DetailTab>(activeTab);
   const [lookSaveTitle, setLookSaveTitle] = useState('');
   const [motionSaveTitle, setMotionSaveTitle] = useState('');
@@ -213,7 +222,7 @@ export function ImageEffectsDetailModal({
     NonNullable<SentenceItem['imageMotionEffect']>
   >(imageMotionEffect ?? 'default');
   const [draftImageMotionSpeed, setDraftImageMotionSpeed] = useState<number>(
-    imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+    incomingImageMotionSpeed,
   );
   const [draftCustomImageFilterId, setDraftCustomImageFilterId] = useState<string | null>(
     customImageFilterId ?? null,
@@ -229,7 +238,8 @@ export function ImageEffectsDetailModal({
       normalizeImageMotionSettings(
         imageMotionSettings,
         imageMotionEffect ?? 'default',
-        imageMotionSpeed,
+        incomingImageMotionSpeed,
+        isShortVideo,
       ),
   );
 
@@ -243,18 +253,20 @@ export function ImageEffectsDetailModal({
         draftImageMotionSettings,
         draftImageMotionEffect ?? 'default',
         draftImageMotionSpeed,
+        isShortVideo,
       ),
-    [draftImageMotionEffect, draftImageMotionSettings, draftImageMotionSpeed],
+    [draftImageMotionEffect, draftImageMotionSettings, draftImageMotionSpeed, isShortVideo],
   );
   const [debouncedPreview, setDebouncedPreview] = useState<DebouncedPreviewState>(() => ({
     visualEffect: visualEffect ?? null,
     imageMotionEffect: imageMotionEffect ?? 'default',
-    imageMotionSpeed: imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+    imageMotionSpeed: incomingImageMotionSpeed,
     imageFilterSettings: normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
     imageMotionSettings: normalizeImageMotionSettings(
       imageMotionSettings,
       imageMotionEffect ?? 'default',
-      imageMotionSpeed,
+      incomingImageMotionSpeed,
+      isShortVideo,
     ),
     resetKey: 0,
   }));
@@ -276,7 +288,7 @@ export function ImageEffectsDetailModal({
     setCurrentTab(activeTab);
     setDraftVisualEffect(visualEffect ?? null);
     setDraftImageMotionEffect(imageMotionEffect ?? 'default');
-    setDraftImageMotionSpeed(imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED);
+    setDraftImageMotionSpeed(incomingImageMotionSpeed);
     setDraftCustomImageFilterId(customImageFilterId ?? null);
     setDraftCustomMotionEffectId(customMotionEffectId ?? null);
     setDraftImageFilterSettings(
@@ -286,7 +298,8 @@ export function ImageEffectsDetailModal({
       normalizeImageMotionSettings(
         imageMotionSettings,
         imageMotionEffect ?? 'default',
-        imageMotionSpeed,
+        incomingImageMotionSpeed,
+        isShortVideo,
       ),
     );
     setLookSaveTitle('');
@@ -294,12 +307,13 @@ export function ImageEffectsDetailModal({
     setDebouncedPreview((prev) => ({
       visualEffect: visualEffect ?? null,
       imageMotionEffect: imageMotionEffect ?? 'default',
-      imageMotionSpeed: imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+      imageMotionSpeed: incomingImageMotionSpeed,
       imageFilterSettings: normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
       imageMotionSettings: normalizeImageMotionSettings(
         imageMotionSettings,
         imageMotionEffect ?? 'default',
-        imageMotionSpeed,
+        incomingImageMotionSpeed,
+        isShortVideo,
       ),
       resetKey: prev.resetKey + 1,
     }));
@@ -310,7 +324,8 @@ export function ImageEffectsDetailModal({
     imageFilterSettings,
     imageMotionEffect,
     imageMotionSettings,
-    imageMotionSpeed,
+    incomingImageMotionSpeed,
+    isShortVideo,
     isOpen,
     visualEffect,
   ]);
@@ -397,22 +412,23 @@ export function ImageEffectsDetailModal({
         preset.settings,
         draftImageMotionEffect ?? 'default',
         draftImageMotionSpeed,
+        isShortVideo,
       );
       setDraftImageMotionEffect(
         resolveMotionEffectFromSettings(settings, draftImageMotionEffect ?? 'default'),
       );
       setDraftCustomMotionEffectId(preset.id);
       setDraftImageMotionSettings({ ...settings, presetKey: 'custom' });
-      setDraftImageMotionSpeed(settings.speed ?? DEFAULT_IMAGE_MOTION_SPEED);
+      setDraftImageMotionSpeed(settings.speed ?? getDefaultImageMotionSpeed(isShortVideo));
       return;
     }
 
     const effect = value.replace('builtin:', '') as NonNullable<SentenceItem['imageMotionEffect']>;
-    const settings = getDefaultImageMotionSettings(effect, draftImageMotionSpeed);
+    const settings = getDefaultImageMotionSettings(effect, draftImageMotionSpeed, isShortVideo);
     setDraftImageMotionEffect(effect);
     setDraftCustomMotionEffectId(null);
     setDraftImageMotionSettings(settings);
-    setDraftImageMotionSpeed(settings.speed ?? DEFAULT_IMAGE_MOTION_SPEED);
+    setDraftImageMotionSpeed(settings.speed ?? getDefaultImageMotionSpeed(isShortVideo));
   };
 
   const updateLookSettings = (patch: Partial<ImageFilterSettings>) => {
@@ -439,7 +455,7 @@ export function ImageEffectsDetailModal({
     );
     setDraftCustomMotionEffectId(null);
     setDraftImageMotionSettings(nextSettings);
-    setDraftImageMotionSpeed(nextSettings.speed ?? DEFAULT_IMAGE_MOTION_SPEED);
+    setDraftImageMotionSpeed(nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo));
   };
 
   const updateAllEndValueModes = (value: 'loop' | 'continue') => {
@@ -487,7 +503,7 @@ export function ImageEffectsDetailModal({
       customMotionEffectId: draftCustomMotionEffectId,
       imageMotionSettings: resolvedMotion,
       imageMotionSpeed:
-        resolvedMotion.speed ?? draftImageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+        resolvedMotion.speed ?? draftImageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
     });
     handleRequestClose();
   };
@@ -558,6 +574,7 @@ export function ImageEffectsDetailModal({
                 visualEffect={debouncedPreview.visualEffect}
                 imageMotionEffect={debouncedPreview.imageMotionEffect}
                 imageMotionSpeed={debouncedPreview.imageMotionSpeed}
+                isShortVideo={isShortVideo}
                 imageFilterSettings={debouncedPreview.imageFilterSettings}
                 imageMotionSettings={debouncedPreview.imageMotionSettings}
                 enableMotion={currentTab === 'motion'}
