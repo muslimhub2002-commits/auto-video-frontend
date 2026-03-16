@@ -81,14 +81,14 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
     [],
   );
 
-  const handleSentenceForcedEraKeyChange = useCallback(
+  const handleSentenceForcedLocationKeyChange = useCallback(
     (index: number, next: string | null) => {
       setSentences((prev) =>
         prev.map((s, i) =>
           i === index
             ? {
                 ...s,
-                forcedEraKey: next === null ? null : String(next).trim(),
+                forcedLocationKey: next === null ? null : String(next).trim(),
               }
             : s,
         ),
@@ -216,8 +216,8 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         soundEffects: [],
         transitionSoundEffects: [],
         characterKeys: null,
-        eraKey: null,
-        forcedEraKey: null,
+        locationKey: null,
+        forcedLocationKey: null,
         videoGenerationMode: 'referenceImage',
         videoPrompt: null,
         referenceImage: null,
@@ -296,7 +296,7 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
     setSentences,
     handleSentencePatch,
     handleSentenceForcedCharacterKeysChange,
-    handleSentenceForcedEraKeyChange,
+    handleSentenceForcedLocationKeyChange,
     handleSentenceVisualEffectChange,
     handleSentenceImageMotionEffectChange,
     handleSentenceImageMotionSpeedChange,

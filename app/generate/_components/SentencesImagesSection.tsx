@@ -30,6 +30,7 @@ import {
 import type { SentenceItem } from '../_types/sentences';
 import { useSentenceEnhancement } from '../_hooks/useSentenceEnhancement';
 import { useEnhanceImagePrompt } from '../_hooks/useEnhanceImagePrompt';
+import { useImageModelOptions } from '../_hooks/useImageModelOptions';
 import { LlmModelSelect } from './LlmModelSelect';
 import { ImagePreviewOverlay } from './sentences/ImagePreviewOverlay';
 import { EnhanceWithPromptModal } from './sentences/EnhanceWithPromptModal';
@@ -56,7 +57,7 @@ type ScriptCharacter = {
   isWoman: boolean;
 };
 
-type ScriptEra = {
+type ScriptLocation = {
   key: string;
   name: string;
   description?: string;
@@ -91,9 +92,9 @@ type SentencesImagesSectionProps = {
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
 
-  scriptEras: ScriptEra[];
-  onScriptErasChange: (next: ScriptEra[]) => void;
-  onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
+  scriptLocations: ScriptLocation[];
+  onScriptLocationsChange: (next: ScriptLocation[]) => void;
+  onSentenceForcedLocationKeyChange: (index: number, next: string | null) => void;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   isLoadingImageFilterPresets?: boolean;
@@ -240,9 +241,9 @@ export function SentencesImagesSection({
   onScriptCharactersChange,
   onSentenceForcedCharacterKeysChange,
 
-  scriptEras,
-  onScriptErasChange,
-  onSentenceForcedEraKeyChange,
+  scriptLocations,
+  onScriptLocationsChange,
+  onSentenceForcedLocationKeyChange,
   imageFilterPresets,
   motionEffectPresets,
   isLoadingImageFilterPresets = false,
@@ -353,6 +354,18 @@ export function SentencesImagesSection({
     onGenerateSentenceImage,
   });
 
+  const {
+    providerOptions,
+    selectedProvider,
+    selectedModelValue,
+    modelOptions,
+    onProviderChange,
+    onModelChange,
+  } = useImageModelOptions({
+    selectedValue: imageModel,
+    onSelectedValueChange: onImageModelChange,
+  });
+
   const [suspenseModalOpen, setSuspenseModalOpen] = useState(false);
   const [suspenseSelectedIndex, setSuspenseSelectedIndex] = useState<number | null>(null);
   const [isSuspenseNoMediaAlertOpen, setIsSuspenseNoMediaAlertOpen] = useState(false);
@@ -440,24 +453,32 @@ export function SentencesImagesSection({
                 </SelectContent>
               </Select>
 
-              <Select value={imageModel} onValueChange={onImageModelChange}>
+              <Select
+                value={selectedProvider}
+                onValueChange={(value) => onProviderChange(value as typeof selectedProvider)}
+              >
+                <SelectTrigger label="Image Provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {providerOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={selectedModelValue} onValueChange={onModelChange}>
                 <SelectTrigger label="Image Model">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="leonardo">Leonardo AI</SelectItem>
-                  <SelectItem value="grok-imagine-image">Grok — grok-imagine-image</SelectItem>
-                  <SelectItem value="gpt-image-1">OpenAI — gpt-image-1</SelectItem>
-                  <SelectItem value="gpt-image-1-mini">OpenAI — gpt-image-1-mini</SelectItem>
-                  <SelectItem value="gpt-image-1.5">OpenAI — gpt-image-1.5</SelectItem>
-                  <SelectItem value="modelslab:flux">
-                    Flux (ModelsLab)
-                  </SelectItem>
-                  <SelectItem value="modelslab:flux-2-pro">
-                    Flux 2 Pro (ModelsLab)
-                  </SelectItem>
-                  <SelectItem value="imagen-4">Imagen 4</SelectItem>
-                  <SelectItem value="imagen-4-ultra">Imagen 4 Ultra</SelectItem>
+                  {modelOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -602,9 +623,9 @@ export function SentencesImagesSection({
               scriptCharacters={scriptCharacters}
               onScriptCharactersChange={onScriptCharactersChange}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
-              scriptEras={scriptEras}
-              onScriptErasChange={onScriptErasChange}
-              onSentenceForcedEraKeyChange={onSentenceForcedEraKeyChange}
+              scriptLocations={scriptLocations}
+              onScriptLocationsChange={onScriptLocationsChange}
+              onSentenceForcedLocationKeyChange={onSentenceForcedLocationKeyChange}
               imageFilterPresets={imageFilterPresets}
               motionEffectPresets={motionEffectPresets}
               isLoadingImageFilterPresets={isLoadingImageFilterPresets}

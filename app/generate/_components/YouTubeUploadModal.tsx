@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { useImageModelOptions } from '../_hooks/useImageModelOptions';
 import { LlmModelSelect } from './LlmModelSelect';
 
 interface YouTubeUploadModalProps {
@@ -95,6 +96,12 @@ export function YouTubeUploadModal({
     Array<{ key: string; name: string; description: string }>
   >([]);
   const [wallpaperUsedCharacterKeys, setWallpaperUsedCharacterKeys] = useState<string[]>([]);
+
+  const { imageModelOptions } = useImageModelOptions({
+    selectedValue: wallpaperImageModel,
+    onSelectedValueChange: setWallpaperImageModel,
+    enabled: isOpen && !isShortVideo,
+  });
 
   const WALLPAPER_STYLE_PRESETS = [
     {
@@ -1052,15 +1059,11 @@ export function YouTubeUploadModal({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="leonardo">Leonardo AI</SelectItem>
-                    <SelectItem value="grok-imagine-image">Grok — grok-imagine-image</SelectItem>
-                    <SelectItem value="gpt-image-1">OpenAI — gpt-image-1</SelectItem>
-                    <SelectItem value="gpt-image-1-mini">OpenAI — gpt-image-1-mini</SelectItem>
-                    <SelectItem value="gpt-image-1.5">OpenAI — gpt-image-1.5</SelectItem>
-                    <SelectItem value="modelslab:flux">Flux (ModelsLab)</SelectItem>
-                    <SelectItem value="modelslab:flux-2-pro">Flux 2 Pro (ModelsLab)</SelectItem>
-                    <SelectItem value="imagen-4">Imagen 4</SelectItem>
-                    <SelectItem value="imagen-4-ultra">Imagen 4 Ultra</SelectItem>
+                    {imageModelOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

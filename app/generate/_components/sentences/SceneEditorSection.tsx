@@ -9,12 +9,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Clock, Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users, Music2, Clapperboard } from 'lucide-react';
+import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users, Music2, Clapperboard, MapPin } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
 import { CharactersModal } from './CharactersModal';
-import { ErasModal, type ScriptEra } from './ErasModal';
+import { LocationsModal, type ScriptLocation } from './LocationsModal';
 import type {
   ImageFilterPresetDto,
   ImageFilterSettings,
@@ -60,9 +60,9 @@ type SceneEditorSectionProps = {
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
 
-  scriptEras: ScriptEra[];
-  onScriptErasChange: (next: ScriptEra[]) => void;
-  onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
+  scriptLocations: ScriptLocation[];
+  onScriptLocationsChange: (next: ScriptLocation[]) => void;
+  onSentenceForcedLocationKeyChange: (index: number, next: string | null) => void;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   isLoadingImageFilterPresets?: boolean;
@@ -200,8 +200,8 @@ type SentenceRowProps = {
   videoModel: 'gemini' | 'grok';
   scriptCharacters: ScriptCharacter[];
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
-  scriptEras: ScriptEra[];
-  onSentenceForcedEraKeyChange: (index: number, next: string | null) => void;
+  scriptLocations: ScriptLocation[];
+  onSentenceForcedLocationKeyChange: (index: number, next: string | null) => void;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   isLoadingImageFilterPresets: boolean;
@@ -312,8 +312,8 @@ const SentenceRow = memo(function SentenceRow({
   videoModel,
   scriptCharacters,
   onSentenceForcedCharacterKeysChange,
-  scriptEras,
-  onSentenceForcedEraKeyChange,
+  scriptLocations,
+  onSentenceForcedLocationKeyChange,
   imageFilterPresets,
   motionEffectPresets,
   isLoadingImageFilterPresets,
@@ -390,8 +390,8 @@ const SentenceRow = memo(function SentenceRow({
           onForcedCharacterKeysChange={(next) =>
             onSentenceForcedCharacterKeysChange(index, next)
           }
-          scriptEras={scriptEras}
-          onForcedEraKeyChange={(next) => onSentenceForcedEraKeyChange(index, next)}
+          scriptLocations={scriptLocations}
+          onForcedLocationKeyChange={(next) => onSentenceForcedLocationKeyChange(index, next)}
           imageFilterPresets={imageFilterPresets}
           motionEffectPresets={motionEffectPresets}
           isLoadingImageFilterPresets={isLoadingImageFilterPresets}
@@ -611,7 +611,7 @@ const SentenceRow = memo(function SentenceRow({
   prev.isGeneratingVideoPrompt === next.isGeneratingVideoPrompt &&
   prev.videoModel === next.videoModel &&
   prev.scriptCharacters === next.scriptCharacters &&
-  prev.scriptEras === next.scriptEras &&
+  prev.scriptLocations === next.scriptLocations &&
   prev.imageFilterPresets === next.imageFilterPresets &&
   prev.motionEffectPresets === next.motionEffectPresets &&
   prev.isLoadingImageFilterPresets === next.isLoadingImageFilterPresets &&
@@ -641,9 +641,9 @@ export function SceneEditorSection({
   onScriptCharactersChange,
   onSentenceForcedCharacterKeysChange,
 
-  scriptEras,
-  onScriptErasChange,
-  onSentenceForcedEraKeyChange,
+  scriptLocations,
+  onScriptLocationsChange,
+  onSentenceForcedLocationKeyChange,
   imageFilterPresets,
   motionEffectPresets,
   isLoadingImageFilterPresets = false,
@@ -709,7 +709,7 @@ export function SceneEditorSection({
   const clearInsertedTimeoutRef = useRef<number | null>(null);
 
   const [isCharactersModalOpen, setIsCharactersModalOpen] = useState(false);
-  const [isErasModalOpen, setIsErasModalOpen] = useState(false);
+  const [isLocationsModalOpen, setIsLocationsModalOpen] = useState(false);
 
   const completeCount = useMemo(
     () =>
@@ -772,14 +772,14 @@ export function SceneEditorSection({
               size="sm"
               variant="outline"
               onClick={() => {
-                setIsErasModalOpen(true);
+                setIsLocationsModalOpen(true);
               }}
-              className="gap-2 h-10 px-4 border-violet-200 bg-white text-violet-700 hover:bg-violet-50 hover:border-violet-300 shadow-sm hover:shadow transition-all"
-              title="View and edit all eras"
+              className="gap-2 h-10 px-4 border-cyan-200 bg-white text-cyan-700 hover:bg-cyan-50 hover:border-cyan-300 shadow-sm hover:shadow transition-all"
+              title="View and edit all locations"
             >
-              <Clock className="h-4 w-4" />
+              <MapPin className="h-4 w-4" />
 
-              <span className="text-sm font-semibold">Eras</span>
+              <span className="text-sm font-semibold">Locations</span>
             </Button>
 
             <Button
@@ -838,11 +838,11 @@ export function SceneEditorSection({
         onSave={onScriptCharactersChange}
       />
 
-      <ErasModal
-        isOpen={isErasModalOpen}
-        eras={scriptEras}
-        onClose={() => setIsErasModalOpen(false)}
-        onSave={onScriptErasChange}
+      <LocationsModal
+        isOpen={isLocationsModalOpen}
+        locations={scriptLocations}
+        onClose={() => setIsLocationsModalOpen(false)}
+        onSave={onScriptLocationsChange}
       />
 
       {/* Sentences List */}
@@ -876,8 +876,8 @@ export function SceneEditorSection({
               videoModel={videoModel}
               scriptCharacters={scriptCharacters}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
-              scriptEras={scriptEras}
-              onSentenceForcedEraKeyChange={onSentenceForcedEraKeyChange}
+              scriptLocations={scriptLocations}
+              onSentenceForcedLocationKeyChange={onSentenceForcedLocationKeyChange}
               imageFilterPresets={imageFilterPresets}
               motionEffectPresets={motionEffectPresets}
               isLoadingImageFilterPresets={isLoadingImageFilterPresets}

@@ -47,10 +47,10 @@ export type SentenceItem = {
 
   // Non-forced mappings inferred during split (used for draft round-tripping).
   characterKeys?: string[] | null;
-  eraKey?: string | null;
+  locationKey?: string | null;
 
   // Forced override set explicitly by the user.
-  forcedEraKey?: string | null;
+  forcedLocationKey?: string | null;
 
   videoGenerationMode?: 'frames' | 'text' | 'referenceImage';
   videoPrompt?: string | null;

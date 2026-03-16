@@ -54,11 +54,12 @@ import {
   Clock,
   Timer,
   SlidersHorizontal,
+  MapPin,
 } from 'lucide-react';
 
 import { ForcedCharactersModal } from './ForcedCharactersModal';
-import { ForcedEraModal } from './ForcedEraModal';
-import type { ScriptEra } from './ErasModal';
+import { ForcedLocationModal } from './ForcedLocationModal';
+import type { ScriptLocation } from './LocationsModal';
 import { SentenceTextEditor } from './SentenceTextEditor';
 import { SoundEffectEditModal, type SoundEffectEditValues } from '../SoundEffectEditModal';
 import {
@@ -394,8 +395,8 @@ type SentenceEditorCardProps = {
   scriptCharacters: ScriptCharacter[];
   onForcedCharacterKeysChange: (next: string[] | null) => void;
 
-  scriptEras: ScriptEra[];
-  onForcedEraKeyChange: (next: string | null) => void;
+  scriptLocations: ScriptLocation[];
+  onForcedLocationKeyChange: (next: string | null) => void;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   isLoadingImageFilterPresets: boolean;
@@ -493,8 +494,8 @@ function SentenceEditorCardComponent({
   scriptCharacters,
   onForcedCharacterKeysChange,
 
-  scriptEras,
-  onForcedEraKeyChange,
+  scriptLocations,
+  onForcedLocationKeyChange,
   imageFilterPresets,
   motionEffectPresets,
   isLoadingImageFilterPresets,
@@ -959,7 +960,7 @@ function SentenceEditorCardComponent({
       : videoGenerationMode;
 
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
-  const [isForcedEraOpen, setIsForcedEraOpen] = useState(false);
+  const [isForcedLocationOpen, setIsForcedLocationOpen] = useState(false);
   const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion'>('visual');
   const [isImageEffectsDetailModalOpen, setIsImageEffectsDetailModalOpen] = useState(false);
   const isImageSceneTab = mediaMode === 'single';
@@ -992,8 +993,8 @@ function SentenceEditorCardComponent({
     : 0;
   const canPickForcedCharacters = Array.isArray(scriptCharacters) && scriptCharacters.length > 0;
 
-  const canPickForcedEra = Array.isArray(scriptEras) && scriptEras.length > 0;
-  const forcedEraKey = String(item.forcedEraKey ?? '').trim() || null;
+  const canPickForcedLocation = Array.isArray(scriptLocations) && scriptLocations.length > 0;
+  const forcedLocationKey = String(item.forcedLocationKey ?? '').trim() || null;
 
   const visualEffectValue = useMemo(
     () =>
@@ -1446,24 +1447,24 @@ function SentenceEditorCardComponent({
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={!canPickForcedEra}
+                  disabled={!canPickForcedLocation}
                   onClick={() => {
-                    setIsForcedEraOpen(true);
+                    setIsForcedLocationOpen(true);
                   }}
                   className={
-                    forcedEraKey
-                      ? 'gap-2 h-8 border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 hover:border-violet-400 transition-all'
+                    forcedLocationKey
+                      ? 'gap-2 h-8 border-cyan-300 text-cyan-700 bg-cyan-50 hover:bg-cyan-100 hover:border-cyan-400 transition-all'
                       : 'gap-2 h-8 border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all'
                   }
                   title={
-                    canPickForcedEra
-                      ? 'Force an era for this sentence'
-                      : 'No eras available (add eras first)'
+                    canPickForcedLocation
+                      ? 'Force a location for this sentence'
+                      : 'No locations available (add locations first)'
                   }
                 >
-                  <Clock className="h-4 w-4" />
+                  <MapPin className="h-4 w-4" />
                   <span className="text-xs font-semibold">
-                    Era{forcedEraKey ? ' (1)' : ''}
+                    Location{forcedLocationKey ? ' (1)' : ''}
                   </span>
                 </Button>
 
@@ -1565,13 +1566,13 @@ function SentenceEditorCardComponent({
                 onSave={(next) => onForcedCharacterKeysChange(next)}
               />
 
-              <ForcedEraModal
-                isOpen={isForcedEraOpen}
-                eras={scriptEras}
-                selectedKey={item.forcedEraKey ?? null}
-                onClose={() => setIsForcedEraOpen(false)}
-                onClear={() => onForcedEraKeyChange('')}
-                onSave={(next) => onForcedEraKeyChange(next)}
+              <ForcedLocationModal
+                isOpen={isForcedLocationOpen}
+                locations={scriptLocations}
+                selectedKey={item.forcedLocationKey ?? null}
+                onClose={() => setIsForcedLocationOpen(false)}
+                onClear={() => onForcedLocationKeyChange('')}
+                onSave={(next) => onForcedLocationKeyChange(next)}
               />
             </div>
 
@@ -3181,7 +3182,7 @@ function areSentenceEditorCardPropsEqual(
     prev.isLast === next.isLast &&
     prev.videoModel === next.videoModel &&
     prev.scriptCharacters === next.scriptCharacters &&
-    prev.scriptEras === next.scriptEras &&
+    prev.scriptLocations === next.scriptLocations &&
     prev.imageFilterPresets === next.imageFilterPresets &&
     prev.motionEffectPresets === next.motionEffectPresets &&
     prev.isLoadingImageFilterPresets === next.isLoadingImageFilterPresets &&

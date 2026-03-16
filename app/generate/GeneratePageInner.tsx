@@ -71,7 +71,7 @@ type ScriptCharacter = {
   isWoman: boolean;
 };
 
-type ScriptEra = {
+type ScriptLocation = {
   key: string;
   name: string;
   description?: string;
@@ -119,8 +119,8 @@ type BackendSentenceDto = {
   }>;
   forced_character_keys?: string[] | null;
   character_keys?: string[] | null;
-  era_key?: string | null;
-  forced_era_key?: string | null;
+  location_key?: string | null;
+  forced_location_key?: string | null;
   transition_to_next?: SentenceItem['transitionToNext'] | null;
   visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
   image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
@@ -462,7 +462,7 @@ type ScriptDraftDto = {
   reference_scripts?: { id: string; title: string | null; script: string }[];
   voice?: { id: string; voice: string } | null;
   characters?: ScriptCharacter[];
-  eras?: ScriptEra[];
+  locations?: ScriptLocation[];
   sentences?: BackendSentenceDto[];
 };
 
@@ -747,8 +747,8 @@ export function GeneratePageInner() {
   // Canonical characters extracted during split.
   const [scriptCharacters, setScriptCharacters] = useState<ScriptCharacter[]>([]);
 
-  // Canonical eras extracted during split or edited by the user.
-  const [scriptEras, setScriptEras] = useState<ScriptEra[]>([]);
+  // Canonical locations extracted during split or edited by the user.
+  const [scriptLocations, setScriptLocations] = useState<ScriptLocation[]>([]);
 
   // Sentence image generation configuration
   const [imagePromptModel, setImagePromptModel] = useState('gpt-4.1-mini');
@@ -812,7 +812,7 @@ export function GeneratePageInner() {
     setSentences,
     handleSentencePatch,
     handleSentenceForcedCharacterKeysChange,
-    handleSentenceForcedEraKeyChange,
+    handleSentenceForcedLocationKeyChange,
     handleSentenceVisualEffectChange,
     handleSentenceImageMotionEffectChange,
     handleSentenceImageMotionSpeedChange,
@@ -3263,7 +3263,7 @@ export function GeneratePageInner() {
     setSentences([]);
     setSplitError(null);
     setScriptCharacters([]);
-    setScriptEras([]);
+    setScriptLocations([]);
     setVoiceOver(null);
     setVoiceDuration(null);
     setSavedVoiceId(null);
@@ -3367,10 +3367,10 @@ export function GeneratePageInner() {
         sentences: Array<{
           text: string;
           characterKeys: string[];
-          eraKey: string | null;
+          locationKey: string | null;
         }>;
         characters?: ScriptCharacter[];
-        eras?: ScriptEra[];
+        locations?: ScriptLocation[];
       };
 
       // Normalize and ensure the subscribe sentence appears only once at the end
@@ -3389,7 +3389,7 @@ export function GeneratePageInner() {
       const processed: Array<{
         text: string;
         characterKeys: string[];
-        eraKey: string | null;
+        locationKey: string | null;
       }> = [];
       let hasSubscribe = false;
 
@@ -3403,7 +3403,7 @@ export function GeneratePageInner() {
             processed.push({
               text: subscribeSentence,
               characterKeys: [],
-              eraKey: null,
+              locationKey: null,
             });
           }
         } else {
@@ -3412,7 +3412,7 @@ export function GeneratePageInner() {
             characterKeys: Array.isArray(raw?.characterKeys)
               ? raw.characterKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
               : [],
-            eraKey: String(raw?.eraKey ?? '').trim() || null,
+            locationKey: String(raw?.locationKey ?? '').trim() || null,
           });
         }
       }
@@ -3421,19 +3421,19 @@ export function GeneratePageInner() {
         processed.push({
           text: subscribeSentence,
           characterKeys: [],
-          eraKey: null,
+          locationKey: null,
         });
       }
 
       const now = Date.now();
-      const items: SentenceItem[] = processed.map(({ text, characterKeys, eraKey }, idx) => {
+      const items: SentenceItem[] = processed.map(({ text, characterKeys, locationKey }, idx) => {
         const subscribeLike = isSubscribeCtaSentence(text);
         return {
           id: `${now}-${idx}`,
           text,
           characterKeys: characterKeys.length ? Array.from(new Set(characterKeys)) : null,
-          eraKey,
-          forcedEraKey: eraKey,
+          locationKey,
+          forcedLocationKey: locationKey,
           mediaMode: 'single',
           sceneTab: subscribeLike ? 'video' : 'image',
           forcedCharacterKeys: Array.from(new Set(characterKeys)),
@@ -3464,7 +3464,7 @@ export function GeneratePageInner() {
       aiSplitCacheRef.current = null;
       setSentences(items);
       setScriptCharacters(Array.isArray(data.characters) ? data.characters : []);
-      setScriptEras(Array.isArray(data.eras) ? data.eras : []);
+      setScriptLocations(Array.isArray(data.locations) ? data.locations : []);
     } catch (error) {
       console.error('Split script failed', error);
       setSplitError('Failed to split script. Please try again.');
@@ -3605,7 +3605,7 @@ export function GeneratePageInner() {
     setSentences([]);
     setSplitError(null);
     setScriptCharacters([]);
-    setScriptEras([]);
+    setScriptLocations([]);
     setOriginalScriptSubject(undefined);
     setOriginalScriptSubjectContent(undefined);
   };
@@ -3614,8 +3614,8 @@ export function GeneratePageInner() {
     setScriptCharacters(Array.isArray(next) ? next : []);
   };
 
-  const handleScriptErasChange = (next: ScriptEra[]) => {
-    setScriptEras(Array.isArray(next) ? next : []);
+  const handleScriptLocationsChange = (next: ScriptLocation[]) => {
+    setScriptLocations(Array.isArray(next) ? next : []);
   };
 
   const handleOpenScriptLibrary = () => {
@@ -3636,12 +3636,13 @@ export function GeneratePageInner() {
       const resolvedForcedCharacterKeys =
         forcedCharacterKeys ?? inferredCharacterKeys;
 
-      const inferredEraKey = String(s.era_key ?? '').trim() || null;
-      const forcedEraKey =
-        s.forced_era_key === null || s.forced_era_key === undefined
+      const inferredLocationKey = String(s.location_key ?? '').trim() || null;
+      const forcedLocationKey =
+        s.forced_location_key === null || s.forced_location_key === undefined
           ? null
-          : String(s.forced_era_key).trim();
-      const resolvedForcedEraKey = forcedEraKey !== null ? forcedEraKey : inferredEraKey;
+          : String(s.forced_location_key).trim();
+      const resolvedForcedLocationKey =
+        forcedLocationKey !== null ? forcedLocationKey : inferredLocationKey;
 
       const soundEffects = (s.sound_effects ?? [])
         .slice()
@@ -3694,8 +3695,8 @@ export function GeneratePageInner() {
         soundEffects,
         transitionSoundEffects,
         characterKeys: inferredCharacterKeys,
-        eraKey: inferredEraKey,
-        forcedEraKey: resolvedForcedEraKey,
+        locationKey: inferredLocationKey,
+        forcedLocationKey: resolvedForcedLocationKey,
         mediaMode: subscribeLike || s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
         sceneTab: subscribeLike ? 'video' : s.video ? 'video' : 'image',
         forcedCharacterKeys: resolvedForcedCharacterKeys,
@@ -3807,7 +3808,7 @@ export function GeneratePageInner() {
     );
 
     setScriptCharacters(Array.isArray(draft.characters) ? draft.characters : []);
-    setScriptEras(Array.isArray(draft.eras) ? draft.eras : []);
+    setScriptLocations(Array.isArray(draft.locations) ? draft.locations : []);
 
     setVoiceOver(null);
     setVoiceDuration(null);
@@ -4206,9 +4207,9 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
-        eras: scriptEras.length ? scriptEras : undefined,
-        forcedEraKey:
-          typeof target.forcedEraKey === 'string' ? target.forcedEraKey.trim() : '',
+        locations: scriptLocations.length ? scriptLocations : undefined,
+        forcedLocationKey:
+          typeof target.forcedLocationKey === 'string' ? target.forcedLocationKey.trim() : '',
         style,
         scriptLength,
         isShort: effectiveIsShort,
@@ -4281,9 +4282,9 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
-        eras: scriptEras.length ? scriptEras : undefined,
-        forcedEraKey:
-          typeof target.forcedEraKey === 'string' ? target.forcedEraKey.trim() : '',
+        locations: scriptLocations.length ? scriptLocations : undefined,
+        forcedLocationKey:
+          typeof target.forcedLocationKey === 'string' ? target.forcedLocationKey.trim() : '',
         style,
         scriptLength,
         isShort: effectiveIsShort,
@@ -4380,9 +4381,9 @@ export function GeneratePageInner() {
         sentence: target.text,
         script,
         subject: scriptSubject,
-        eras: scriptEras.length ? scriptEras : undefined,
-        forcedEraKey:
-          typeof target.forcedEraKey === 'string' ? target.forcedEraKey.trim() : '',
+        locations: scriptLocations.length ? scriptLocations : undefined,
+        forcedLocationKey:
+          typeof target.forcedLocationKey === 'string' ? target.forcedLocationKey.trim() : '',
         style,
         scriptLength,
         isShort: effectiveIsShort,
@@ -5771,8 +5772,8 @@ export function GeneratePageInner() {
         const payload: {
           text: string;
           character_keys?: string[] | null;
-          era_key?: string | null;
-          forced_era_key?: string | null;
+          location_key?: string | null;
+          forced_location_key?: string | null;
           image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
@@ -5837,11 +5838,11 @@ export function GeneratePageInner() {
               Array.isArray(s.characterKeys) && s.characterKeys.length
                 ? s.characterKeys
                 : null,
-            era_key: String(s.eraKey ?? '').trim() || null,
-            forced_era_key:
-              s.forcedEraKey === null || s.forcedEraKey === undefined
+            location_key: String(s.locationKey ?? '').trim() || null,
+            forced_location_key:
+              s.forcedLocationKey === null || s.forcedLocationKey === undefined
                 ? null
-                : String(s.forcedEraKey).trim(),
+                : String(s.forcedLocationKey).trim(),
             image_id: imageId ?? undefined,
             start_frame_image_id: startFrameImageId ?? undefined,
             end_frame_image_id: endFrameImageId ?? undefined,
@@ -6059,7 +6060,7 @@ export function GeneratePageInner() {
               video_url: snap?.videoUrl ?? undefined,
               language: scriptLanguage,
               characters: scriptCharacters.length ? scriptCharacters : undefined,
-              eras: scriptEras.length ? scriptEras : undefined,
+              locations: scriptLocations.length ? scriptLocations : undefined,
               sentences: shortSentencesPayload,
               subject: scriptSubject,
               subject_content:
@@ -6142,12 +6143,12 @@ export function GeneratePageInner() {
         voice_id?: string;
         video_url?: string;
         characters?: ScriptCharacter[];
-        eras?: ScriptEra[];
+        locations?: ScriptLocation[];
         sentences?: {
           text: string;
           character_keys?: string[] | null;
-          era_key?: string | null;
-          forced_era_key?: string | null;
+          location_key?: string | null;
+          forced_location_key?: string | null;
           image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
@@ -6178,7 +6179,7 @@ export function GeneratePageInner() {
         voice_id: voiceId ?? undefined,
         video_url: existingFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
-        eras: scriptEras.length ? scriptEras : undefined,
+        locations: scriptLocations.length ? scriptLocations : undefined,
         sentences: fullSentencePayload.length > 0 ? fullSentencePayload : undefined,
         subject: scriptSubject,
         subject_content:
@@ -6199,7 +6200,7 @@ export function GeneratePageInner() {
       const upsertedScript = upserted.data as {
         id: string;
         characters?: ScriptCharacter[];
-        eras?: ScriptEra[];
+        locations?: ScriptLocation[];
         sentences?: BackendSentenceDto[];
         shorts_scripts?: string[] | null;
       };
@@ -6215,8 +6216,8 @@ export function GeneratePageInner() {
         setScriptCharacters(upsertedScript.characters);
       }
 
-      if (Array.isArray(upsertedScript?.eras)) {
-        setScriptEras(upsertedScript.eras);
+      if (Array.isArray(upsertedScript?.locations)) {
+        setScriptLocations(upsertedScript.locations);
       }
 
       if (upsertedScript?.sentences && upsertedScript.sentences.length > 0) {
@@ -6908,9 +6909,9 @@ export function GeneratePageInner() {
                   scriptCharacters={scriptCharacters}
                   onScriptCharactersChange={handleScriptCharactersChange}
                   onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
-                  scriptEras={scriptEras}
-                  onScriptErasChange={handleScriptErasChange}
-                  onSentenceForcedEraKeyChange={handleSentenceForcedEraKeyChange}
+                  scriptLocations={scriptLocations}
+                  onScriptLocationsChange={handleScriptLocationsChange}
+                  onSentenceForcedLocationKeyChange={handleSentenceForcedLocationKeyChange}
                   imageFilterPresets={imageFilterPresets}
                   motionEffectPresets={motionEffectPresets}
                   isLoadingImageFilterPresets={isLoadingImageFilterPresets}
