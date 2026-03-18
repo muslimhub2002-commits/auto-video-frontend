@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Accordion,
@@ -467,7 +468,7 @@ type ScriptDraftDto = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
- 'http://localhost:3000';
+  'http://localhost:3000';
 
 const CTA_SENTENCES_BY_LANGUAGE: Record<
   string,
@@ -642,24 +643,6 @@ async function sha256HexForFile(file: File): Promise<string | null> {
   }
 }
 
-function parseScriptLengthMinutes(value: string): number | null {
-  const s = String(value ?? '').trim().toLowerCase();
-  if (!s) return null;
-
-  const secondsMatch = /([0-9]+(?:\.[0-9]+)?)\s*second/u.exec(s);
-  if (secondsMatch?.[1]) {
-    const seconds = Number(secondsMatch[1]);
-    return Number.isFinite(seconds) ? seconds / 60 : null;
-  }
-
-  const minutesMatch = /([0-9]+(?:\.[0-9]+)?)\s*minute/u.exec(s);
-  if (minutesMatch?.[1]) {
-    const minutes = Number(minutesMatch[1]);
-    return Number.isFinite(minutes) ? minutes : null;
-  }
-
-  return null;
-}
 
 // SentenceItem type is shared in ./_types/sentences
 
@@ -810,6 +793,7 @@ export function GeneratePageInner() {
   const {
     sentences,
     setSentences,
+    updateSentenceById,
     handleSentencePatch,
     handleSentenceForcedCharacterKeysChange,
     handleSentenceForcedLocationKeyChange,
@@ -824,6 +808,15 @@ export function GeneratePageInner() {
     handleInsertEmptySentenceAfter,
     handleAddSuspenseScene,
   } = useSentencesEditor();
+  const patchSentenceById = useCallback(
+    (sentenceId: string, patch: Partial<SentenceItem>) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        ...patch,
+      }));
+    },
+    [updateSentenceById],
+  );
   const [isSplitting, setIsSplitting] = useState(false);
   const [isSplittingIntoShorts, setIsSplittingIntoShorts] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
@@ -862,16 +855,16 @@ export function GeneratePageInner() {
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [libraryTarget, setLibraryTarget] = useState<
     | {
-      index: number;
+      sentenceId: string;
       which: 'single' | 'start' | 'end' | 'reference';
     }
     | null
   >(null);
   const [isVideoLibraryOpen, setIsVideoLibraryOpen] = useState(false);
-  const [videoLibraryTargetIndex, setVideoLibraryTargetIndex] = useState<number | null>(null);
+  const [videoLibraryTargetId, setVideoLibraryTargetId] = useState<string | null>(null);
   const [isSoundEffectsLibraryOpen, setIsSoundEffectsLibraryOpen] = useState(false);
-  const [soundEffectsLibraryTargetIndex, setSoundEffectsLibraryTargetIndex] = useState<number | null>(null);
-  const [transitionSoundEditorTargetIndex, setTransitionSoundEditorTargetIndex] = useState<number | null>(null);
+  const [soundEffectsLibraryTargetId, setSoundEffectsLibraryTargetId] = useState<string | null>(null);
+  const [transitionSoundEditorTargetId, setTransitionSoundEditorTargetId] = useState<string | null>(null);
   const [transitionSoundDraftItems, setTransitionSoundDraftItems] = useState<TransitionSoundDraftItem>([]);
   const [isSavingTransitionSoundBySentenceId, setIsSavingTransitionSoundBySentenceId] = useState<Record<string, boolean>>({});
   const [isUploadingSentenceSfxBySentenceId, setIsUploadingSentenceSfxBySentenceId] = useState<Record<string, boolean>>({});
@@ -946,11 +939,7 @@ export function GeneratePageInner() {
   const aiSplitCacheRef = useRef<AiSplitCache | null>(null);
 
   // Scripts longer than 3 minutes are treated as regular (non-shorts) videos.
-  const scriptLengthMinutes = parseScriptLengthMinutes(scriptLength);
-  const isLongForm =
-    typeof scriptLengthMinutes === 'number' &&
-    Number.isFinite(scriptLengthMinutes) &&
-    scriptLengthMinutes > 3;
+  const isLongForm = script.length > 2500
   const isShortsTabActive = isLongForm && activeShortTabIndex !== null;
   const effectiveIsShort = isShortsTabActive ? true : isLongForm ? false : isShort;
   const effectiveAspectRatio = effectiveIsShort ? '9:16' : '16:9';
@@ -1355,31 +1344,31 @@ export function GeneratePageInner() {
 
       const soundEffects = Array.isArray(s.soundEffects)
         ? computeSentenceSoundEffectTiming(s.soundEffects, {
-            ignoreOffsets: s.alignSoundEffectsToSceneEnd === true,
+          ignoreOffsets: s.alignSoundEffectsToSceneEnd === true,
+        })
+          .filter((e) => Boolean(e?.url))
+          .map((e) => {
+            return {
+              src: String(e.url).trim(),
+              delaySeconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
+              durationSeconds:
+                typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
+                  ? Math.max(0, e.durationSeconds)
+                  : undefined,
+              trimStartSeconds: e.trimStartSeconds > 0 ? Math.max(0, e.trimStartSeconds) : undefined,
+              volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+            };
           })
-            .filter((e) => Boolean(e?.url))
-            .map((e) => {
-              return {
-                src: String(e.url).trim(),
-                delaySeconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
-                durationSeconds:
-                  typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
-                    ? Math.max(0, e.durationSeconds)
-                    : undefined,
-                trimStartSeconds: e.trimStartSeconds > 0 ? Math.max(0, e.trimStartSeconds) : undefined,
-                volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
-              };
-            })
         : [];
 
       const transitionSoundEffects = Array.isArray(s.transitionSoundEffects)
         ? s.transitionSoundEffects
-            .filter((e) => Boolean(e?.url))
-            .map((e) => ({
-              src: String(e.url).trim(),
-              delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
-              volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
-            }))
+          .filter((e) => Boolean(e?.url))
+          .map((e) => ({
+            src: String(e.url).trim(),
+            delaySeconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+            volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+          }))
         : [];
 
       const soundEffectsPatch = soundEffects.length ? { soundEffects } : {};
@@ -1809,13 +1798,13 @@ export function GeneratePageInner() {
       sortedSentences.length
         ? sortedSentences
         : [
-            {
-              id: `${now}-0`,
-              text: primaryScript.script,
-              index: 0,
-              image: null,
-            },
-          ];
+          {
+            id: `${now}-0`,
+            text: primaryScript.script,
+            index: 0,
+            image: null,
+          },
+        ];
 
     const restored: SentenceItem[] = sentencesForRestore
       .map((s, idx) => {
@@ -2008,10 +1997,10 @@ export function GeneratePageInner() {
 
       const items = Array.isArray(res.data?.items)
         ? res.data.items.map((item) => ({
-            id: String(item.id ?? '').trim(),
-            title: String(item.title ?? '').trim() || 'Untitled look',
-            settings: normalizeSettingsObject(item.settings),
-          }))
+          id: String(item.id ?? '').trim(),
+          title: String(item.title ?? '').trim() || 'Untitled look',
+          settings: normalizeSettingsObject(item.settings),
+        }))
         : [];
 
       setImageFilterPresets(items.filter((item) => item.id));
@@ -2038,10 +2027,10 @@ export function GeneratePageInner() {
 
       const items = Array.isArray(res.data?.items)
         ? res.data.items.map((item) => ({
-            id: String(item.id ?? '').trim(),
-            title: String(item.title ?? '').trim() || 'Untitled motion',
-            settings: normalizeSettingsObject(item.settings),
-          }))
+          id: String(item.id ?? '').trim(),
+          title: String(item.title ?? '').trim() || 'Untitled motion',
+          settings: normalizeSettingsObject(item.settings),
+        }))
         : [];
 
       setMotionEffectPresets(items.filter((item) => item.id));
@@ -2351,9 +2340,9 @@ export function GeneratePageInner() {
       return prev.map((entry) =>
         entry.id === nextItem.id
           ? {
-              ...entry,
-              ...nextItem,
-            }
+            ...entry,
+            ...nextItem,
+          }
           : entry,
       );
     });
@@ -3365,6 +3354,8 @@ export function GeneratePageInner() {
 
       const data = (await response.json()) as {
         sentences: Array<{
+          id?: string;
+          index?: number;
           text: string;
           characterKeys: string[];
           locationKey: string | null;
@@ -3387,6 +3378,7 @@ export function GeneratePageInner() {
       const targetNorm = normalize(subscribeSentence);
 
       const processed: Array<{
+        id: string | null;
         text: string;
         characterKeys: string[];
         locationKey: string | null;
@@ -3401,6 +3393,7 @@ export function GeneratePageInner() {
           if (!hasSubscribe) {
             hasSubscribe = true;
             processed.push({
+              id: String(raw?.id ?? '').trim() || null,
               text: subscribeSentence,
               characterKeys: [],
               locationKey: null,
@@ -3408,6 +3401,7 @@ export function GeneratePageInner() {
           }
         } else {
           processed.push({
+            id: String(raw?.id ?? '').trim() || null,
             text: trimmed,
             characterKeys: Array.isArray(raw?.characterKeys)
               ? raw.characterKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
@@ -3419,6 +3413,7 @@ export function GeneratePageInner() {
 
       if (!hasSubscribe) {
         processed.push({
+          id: null,
           text: subscribeSentence,
           characterKeys: [],
           locationKey: null,
@@ -3426,10 +3421,10 @@ export function GeneratePageInner() {
       }
 
       const now = Date.now();
-      const items: SentenceItem[] = processed.map(({ text, characterKeys, locationKey }, idx) => {
+      const items: SentenceItem[] = processed.map(({ id, text, characterKeys, locationKey }, idx) => {
         const subscribeLike = isSubscribeCtaSentence(text);
         return {
-          id: `${now}-${idx}`,
+          id: id || `${now}-${idx}`,
           text,
           characterKeys: characterKeys.length ? Array.from(new Set(characterKeys)) : null,
           locationKey,
@@ -3672,7 +3667,7 @@ export function GeneratePageInner() {
             ) as 'withPrevious' | 'afterPreviousEnds',
             durationSeconds:
               typeof lib?.duration_seconds === 'number' &&
-              Number.isFinite(lib.duration_seconds)
+                Number.isFinite(lib.duration_seconds)
                 ? Math.max(0, lib.duration_seconds)
                 : null,
           };
@@ -3795,10 +3790,10 @@ export function GeneratePageInner() {
     setReferenceScripts(
       Array.isArray(draft.reference_scripts)
         ? draft.reference_scripts.map((item) => ({
-            id: item.id,
-            title: item.title,
-            script: item.script,
-          }))
+          id: item.id,
+          title: item.title,
+          script: item.script,
+        }))
         : [],
     );
 
@@ -3908,9 +3903,9 @@ export function GeneratePageInner() {
             const shortVoiceFile =
               shortScript.voice?.voice
                 ? await downloadVoiceAsFile({
-                    url: shortScript.voice.voice,
-                    fileName: `draft-short-${idx + 1}-voice-over.mp3`,
-                  })
+                  url: shortScript.voice.voice,
+                  fileName: `draft-short-${idx + 1}-voice-over.mp3`,
+                })
                 : null;
 
             const shortVoiceDuration = shortVoiceFile
@@ -4073,17 +4068,17 @@ export function GeneratePageInner() {
         const seededReferenceFields =
           mode === 'frames' && hasSingleImage && !hasReference
             ? {
-                referenceImage: item.image ?? null,
-                referenceImageUrl: item.image ? null : item.imageUrl ?? null,
-              }
+              referenceImage: item.image ?? null,
+              referenceImageUrl: item.image ? null : item.imageUrl ?? null,
+            }
             : {};
 
         const seededStartFrameFields =
           mode === 'frames' && hasSingleImage && !hasStartFrame
             ? {
-                startImage: item.image ?? null,
-                startImageUrl: item.image ? null : item.imageUrl ?? null,
-              }
+              startImage: item.image ?? null,
+              startImageUrl: item.image ? null : item.imageUrl ?? null,
+            }
             : {};
 
         // Important: do not clear previously generated/uploaded media when toggling.
@@ -4193,14 +4188,11 @@ export function GeneratePageInner() {
   const handleGenerateSentenceImage = async (index: number, promptOverride?: string) => {
     const target = sentences[index];
     if (!target) return;
+    const sentenceId = target.id;
 
     const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
 
-    setSentences((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, isGeneratingImage: true } : item,
-      ),
-    );
+    patchSentenceById(sentenceId, { isGeneratingImage: true });
 
     try {
       const res = await api.post('/ai/generate-image-from-sentence', {
@@ -4240,27 +4232,17 @@ export function GeneratePageInner() {
         throw new Error('Image generation returned no imageUrl');
       }
 
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index
-            ? {
-              ...item,
-              imageUrl,
-              imagePrompt: data.prompt,
-              isGeneratingImage: false,
-              isFromLibrary: false,
-              savedImageId: data.savedImageId ?? item.savedImageId ?? null,
-            }
-            : item,
-        ),
-      );
+      updateSentenceById(sentenceId, (item) => ({
+        ...item,
+        imageUrl,
+        imagePrompt: data.prompt,
+        isGeneratingImage: false,
+        isFromLibrary: false,
+        savedImageId: data.savedImageId ?? item.savedImageId ?? null,
+      }));
     } catch (error) {
       console.error('Generate image failed', error);
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index ? { ...item, isGeneratingImage: false } : item,
-        ),
-      );
+      patchSentenceById(sentenceId, { isGeneratingImage: false });
       setSplitError('Failed to generate image for this sentence.');
     }
   };
@@ -4268,14 +4250,11 @@ export function GeneratePageInner() {
   const handleGenerateSentenceReferenceImage = async (index: number) => {
     const target = sentences[index];
     if (!target) return;
+    const sentenceId = target.id;
 
     const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
 
-    setSentences((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, isGeneratingReferenceImage: true } : item,
-      ),
-    );
+    patchSentenceById(sentenceId, { isGeneratingReferenceImage: true });
 
     try {
       const res = await api.post('/ai/generate-image-from-sentence', {
@@ -4313,25 +4292,14 @@ export function GeneratePageInner() {
         throw new Error('Image generation returned no imageUrl');
       }
 
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index
-            ? {
-                ...item,
-                referenceImage: null,
-                referenceImageUrl: imageUrl,
-                isGeneratingReferenceImage: false,
-              }
-            : item,
-        ),
-      );
+      patchSentenceById(sentenceId, {
+        referenceImage: null,
+        referenceImageUrl: imageUrl,
+        isGeneratingReferenceImage: false,
+      });
     } catch (error) {
       console.error('Generate reference image failed', error);
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index ? { ...item, isGeneratingReferenceImage: false } : item,
-        ),
-      );
+      patchSentenceById(sentenceId, { isGeneratingReferenceImage: false });
       setSplitError('Failed to generate reference image for this sentence.');
     }
   };
@@ -4347,6 +4315,7 @@ export function GeneratePageInner() {
   ) => {
     const target = sentences[index];
     if (!target) return;
+    const sentenceId = target.id;
 
     const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
 
@@ -4357,19 +4326,13 @@ export function GeneratePageInner() {
     //   return;
     // }
 
-    setSentences((prev) =>
-      prev.map((item, i) =>
-        i === index
-          ? {
-              ...item,
-              isGeneratingStartImage:
-                which === 'start' ? true : item.isGeneratingStartImage,
-              isGeneratingEndImage:
-                which === 'end' ? true : item.isGeneratingEndImage,
-            }
-          : item,
-      ),
-    );
+    updateSentenceById(sentenceId, (item) => ({
+      ...item,
+      isGeneratingStartImage:
+        which === 'start' ? true : item.isGeneratingStartImage,
+      isGeneratingEndImage:
+        which === 'end' ? true : item.isGeneratingEndImage,
+    }));
 
     try {
       const continuityPrompt =
@@ -4417,27 +4380,24 @@ export function GeneratePageInner() {
 
       const savedId = data.savedImageId ?? null;
 
-      setSentences((prev) =>
-        prev.map((item, i) => {
-          if (i !== index) return item;
-          if (which === 'start') {
-            return {
-              ...item,
-              startImageUrl: imageUrl,
-              startImagePrompt: data.prompt,
-              startSavedImageId: savedId,
-              isGeneratingStartImage: false,
-            };
-          }
+      updateSentenceById(sentenceId, (item) => {
+        if (which === 'start') {
           return {
             ...item,
-            endImageUrl: imageUrl,
-            endImagePrompt: data.prompt,
-            endSavedImageId: savedId,
-            isGeneratingEndImage: false,
+            startImageUrl: imageUrl,
+            startImagePrompt: data.prompt,
+            startSavedImageId: savedId,
+            isGeneratingStartImage: false,
           };
-        }),
-      );
+        }
+        return {
+          ...item,
+          endImageUrl: imageUrl,
+          endImagePrompt: data.prompt,
+          endSavedImageId: savedId,
+          isGeneratingEndImage: false,
+        };
+      });
 
       if (!savedId) {
         showAlert('Frame image generated but not saved. Please try again.', {
@@ -4447,19 +4407,13 @@ export function GeneratePageInner() {
       }
     } catch (error) {
       console.error('Generate frame image failed', error);
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index
-            ? {
-                ...item,
-                isGeneratingStartImage:
-                  which === 'start' ? false : item.isGeneratingStartImage,
-                isGeneratingEndImage:
-                  which === 'end' ? false : item.isGeneratingEndImage,
-              }
-            : item,
-        ),
-      );
+      updateSentenceById(sentenceId, (item) => ({
+        ...item,
+        isGeneratingStartImage:
+          which === 'start' ? false : item.isGeneratingStartImage,
+        isGeneratingEndImage:
+          which === 'end' ? false : item.isGeneratingEndImage,
+      }));
       setSplitError('Failed to generate frame image for this sentence.');
     }
   };
@@ -4467,6 +4421,7 @@ export function GeneratePageInner() {
   const handleGenerateSentenceVideoFrames = async (index: number) => {
     const sentence = sentences[index];
     if (!sentence) return;
+    const sentenceId = sentence.id;
 
     const scriptId = String(activeScriptId ?? '').trim();
     const canUsePersistedEndpoint = Boolean(scriptId) && isUuid(sentence.id);
@@ -4584,19 +4539,12 @@ export function GeneratePageInner() {
       }
 
       // Persist per-mode video so it can be restored when switching modes.
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                videoUrl: url,
-                savedVideoId,
-                framesVideoUrl: url,
-                framesSavedVideoId: savedVideoId,
-              }
-            : s,
-        ),
-      );
+      patchSentenceById(sentenceId, {
+        videoUrl: url,
+        savedVideoId,
+        framesVideoUrl: url,
+        framesSavedVideoId: savedVideoId,
+      });
 
       showToast('Sentence video generated.', 'success');
     } catch (error) {
@@ -4608,6 +4556,7 @@ export function GeneratePageInner() {
   const handleGenerateSentenceVideoFromText = async (index: number) => {
     const sentence = sentences[index];
     if (!sentence) return;
+    const sentenceId = sentence.id;
 
     try {
       showToast('Generating video for this sentence…', 'info');
@@ -4630,19 +4579,12 @@ export function GeneratePageInner() {
         return;
       }
 
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                videoUrl: url,
-                savedVideoId: null,
-                textVideoUrl: url,
-                textSavedVideoId: null,
-              }
-            : s,
-        ),
-      );
+      patchSentenceById(sentenceId, {
+        videoUrl: url,
+        savedVideoId: null,
+        textVideoUrl: url,
+        textSavedVideoId: null,
+      });
 
       showToast('Sentence video generated.', 'success');
     } catch (error) {
@@ -4654,6 +4596,7 @@ export function GeneratePageInner() {
   const handleGenerateSentenceVideoFromReferenceImage = async (index: number) => {
     const sentence = sentences[index];
     if (!sentence) return;
+    const sentenceId = sentence.id;
 
     try {
       showToast('Generating video for this sentence…', 'info');
@@ -4709,19 +4652,12 @@ export function GeneratePageInner() {
         return;
       }
 
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                videoUrl: url,
-                savedVideoId: null,
-                referenceVideoUrl: url,
-                referenceSavedVideoId: null,
-              }
-            : s,
-        ),
-      );
+      patchSentenceById(sentenceId, {
+        videoUrl: url,
+        savedVideoId: null,
+        referenceVideoUrl: url,
+        referenceSavedVideoId: null,
+      });
 
       showToast('Sentence video generated.', 'success');
     } catch (error) {
@@ -4738,54 +4674,54 @@ export function GeneratePageInner() {
       prev.map((s, i) =>
         i === index
           ? (() => {
-              if (s.videoUrl === '/subscribe.mp4') {
-                const nextSubscribe: SentenceItem = { ...s, videoGenerationMode: mode };
-                nextSubscribe.videoPrompt =
-                  mode === 'text' || mode === 'referenceImage'
-                    ? (nextSubscribe.videoPrompt ?? '')
-                    : nextSubscribe.videoPrompt ?? null;
-                return nextSubscribe;
-              }
-
-              const previousMode = (s.videoGenerationMode ?? 'referenceImage') as NonNullable<
-                SentenceItem['videoGenerationMode']
-              >;
-
-              const next: SentenceItem = { ...s, videoGenerationMode: mode };
-
-              // Migrate legacy surface fields into the previous mode slot once.
-              if (next.videoUrl && next.videoUrl !== '/subscribe.mp4') {
-                if (previousMode === 'frames' && !next.framesVideoUrl) {
-                  next.framesVideoUrl = next.videoUrl;
-                  next.framesSavedVideoId = next.savedVideoId ?? null;
-                } else if (previousMode === 'text' && !next.textVideoUrl) {
-                  next.textVideoUrl = next.videoUrl;
-                  next.textSavedVideoId = next.savedVideoId ?? null;
-                } else if (previousMode === 'referenceImage' && !next.referenceVideoUrl) {
-                  next.referenceVideoUrl = next.videoUrl;
-                  next.referenceSavedVideoId = next.savedVideoId ?? null;
-                }
-              }
-
-              // Restore the target mode's video into the surface fields.
-              if (mode === 'frames') {
-                next.videoUrl = next.framesVideoUrl ?? null;
-                next.savedVideoId = next.framesSavedVideoId ?? null;
-              } else if (mode === 'text') {
-                next.videoUrl = next.textVideoUrl ?? null;
-                next.savedVideoId = next.textSavedVideoId ?? null;
-              } else {
-                next.videoUrl = next.referenceVideoUrl ?? null;
-                next.savedVideoId = next.referenceSavedVideoId ?? null;
-              }
-
-              next.videoPrompt =
+            if (s.videoUrl === '/subscribe.mp4') {
+              const nextSubscribe: SentenceItem = { ...s, videoGenerationMode: mode };
+              nextSubscribe.videoPrompt =
                 mode === 'text' || mode === 'referenceImage'
-                  ? (next.videoPrompt ?? '')
-                  : next.videoPrompt ?? null;
+                  ? (nextSubscribe.videoPrompt ?? '')
+                  : nextSubscribe.videoPrompt ?? null;
+              return nextSubscribe;
+            }
 
-              return next;
-            })()
+            const previousMode = (s.videoGenerationMode ?? 'referenceImage') as NonNullable<
+              SentenceItem['videoGenerationMode']
+            >;
+
+            const next: SentenceItem = { ...s, videoGenerationMode: mode };
+
+            // Migrate legacy surface fields into the previous mode slot once.
+            if (next.videoUrl && next.videoUrl !== '/subscribe.mp4') {
+              if (previousMode === 'frames' && !next.framesVideoUrl) {
+                next.framesVideoUrl = next.videoUrl;
+                next.framesSavedVideoId = next.savedVideoId ?? null;
+              } else if (previousMode === 'text' && !next.textVideoUrl) {
+                next.textVideoUrl = next.videoUrl;
+                next.textSavedVideoId = next.savedVideoId ?? null;
+              } else if (previousMode === 'referenceImage' && !next.referenceVideoUrl) {
+                next.referenceVideoUrl = next.videoUrl;
+                next.referenceSavedVideoId = next.savedVideoId ?? null;
+              }
+            }
+
+            // Restore the target mode's video into the surface fields.
+            if (mode === 'frames') {
+              next.videoUrl = next.framesVideoUrl ?? null;
+              next.savedVideoId = next.framesSavedVideoId ?? null;
+            } else if (mode === 'text') {
+              next.videoUrl = next.textVideoUrl ?? null;
+              next.savedVideoId = next.textSavedVideoId ?? null;
+            } else {
+              next.videoUrl = next.referenceVideoUrl ?? null;
+              next.savedVideoId = next.referenceSavedVideoId ?? null;
+            }
+
+            next.videoPrompt =
+              mode === 'text' || mode === 'referenceImage'
+                ? (next.videoPrompt ?? '')
+                : next.videoPrompt ?? null;
+
+            return next;
+          })()
           : s,
       ),
     );
@@ -4834,10 +4770,11 @@ export function GeneratePageInner() {
     const sentence = sentences[index];
     if (!sentence) return;
     if (sentence.videoUrl === '/subscribe.mp4') return;
+    const sentenceId = sentence.id;
 
     setIsGeneratingVideoPromptBySentenceId((prev) => ({
       ...prev,
-      [sentence.id]: true,
+      [sentenceId]: true,
     }));
 
     try {
@@ -4858,16 +4795,14 @@ export function GeneratePageInner() {
         return;
       }
 
-      setSentences((prev) =>
-        prev.map((s, i) => (i === index ? { ...s, videoPrompt: prompt } : s)),
-      );
+      patchSentenceById(sentenceId, { videoPrompt: prompt });
     } catch (error) {
       console.error('Generate video prompt failed', error);
       showAlert('Failed to generate a video prompt. Please try again.', { type: 'error' });
     } finally {
       setIsGeneratingVideoPromptBySentenceId((prev) => ({
         ...prev,
-        [sentence.id]: false,
+        [sentenceId]: false,
       }));
     }
   };
@@ -4881,10 +4816,10 @@ export function GeneratePageInner() {
       prev.map((s, i) =>
         i === index
           ? {
-              ...s,
-              referenceImage: file,
-              referenceImageUrl: file ? null : s.referenceImageUrl ?? null,
-            }
+            ...s,
+            referenceImage: file,
+            referenceImageUrl: file ? null : s.referenceImageUrl ?? null,
+          }
           : s,
       ),
     );
@@ -5024,6 +4959,7 @@ export function GeneratePageInner() {
   const handleSaveSentenceImage = async (index: number) => {
     const target = sentences[index];
     if (!target) return;
+    const sentenceId = target.id;
     if (target.savedImageId) {
       return;
     }
@@ -5036,9 +4972,7 @@ export function GeneratePageInner() {
       return;
     }
 
-    setSentences((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, isSavingImage: true } : item)),
-    );
+    patchSentenceById(sentenceId, { isSavingImage: true });
 
     try {
       let fileToUpload: File | null = null;
@@ -5064,21 +4998,14 @@ export function GeneratePageInner() {
 
       const saved = response.data;
 
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index
-            ? { ...item, isSavingImage: false, savedImageId: saved.id }
-            : item,
-        ),
-      );
+      patchSentenceById(sentenceId, {
+        isSavingImage: false,
+        savedImageId: saved.id,
+      });
     } catch (error) {
       console.error('Save image failed', error);
       showAlert('Failed to save image. Please try again.', { type: 'error' });
-      setSentences((prev) =>
-        prev.map((item, i) =>
-          i === index ? { ...item, isSavingImage: false } : item,
-        ),
-      );
+      patchSentenceById(sentenceId, { isSavingImage: false });
     }
   };
 
@@ -5086,53 +5013,49 @@ export function GeneratePageInner() {
     index: number,
     which: 'single' | 'start' | 'end' | 'reference' = 'single',
   ) => {
-    setLibraryTarget({ index, which });
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    setLibraryTarget({ sentenceId, which });
     setIsLibraryModalOpen(true);
   };
 
   const handleSelectVideoFromLibrary = (index: number) => {
-    setVideoLibraryTargetIndex(index);
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    setVideoLibraryTargetId(sentenceId);
     setIsVideoLibraryOpen(true);
   };
 
   const handleLibraryVideoSelect = (videoUrl: string, id: string | null) => {
-    if (videoLibraryTargetIndex === null) return;
+    if (videoLibraryTargetId === null) return;
 
-    const index = videoLibraryTargetIndex;
+    updateSentenceById(videoLibraryTargetId, (item) => {
+      const mode = (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
+        SentenceItem['videoGenerationMode']
+      >;
+      const next: SentenceItem = {
+        ...item,
+        sceneTab: 'video',
+        video: null,
+        videoUrl,
+        savedVideoId: id,
+      };
 
-    setSentences((prev) =>
-      prev.map((item, i) =>
-        i === index
-          ? (() => {
-              const mode = (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
-                SentenceItem['videoGenerationMode']
-              >;
-              const next: SentenceItem = {
-                ...item,
-                sceneTab: 'video',
-                video: null,
-                videoUrl,
-                savedVideoId: id,
-              };
+      if (mode === 'frames') {
+        next.framesVideoUrl = videoUrl;
+        next.framesSavedVideoId = id;
+      } else if (mode === 'text') {
+        next.textVideoUrl = videoUrl;
+        next.textSavedVideoId = id;
+      } else {
+        next.referenceVideoUrl = videoUrl;
+        next.referenceSavedVideoId = id;
+      }
 
-              if (mode === 'frames') {
-                next.framesVideoUrl = videoUrl;
-                next.framesSavedVideoId = id;
-              } else if (mode === 'text') {
-                next.textVideoUrl = videoUrl;
-                next.textSavedVideoId = id;
-              } else {
-                next.referenceVideoUrl = videoUrl;
-                next.referenceSavedVideoId = id;
-              }
+      return next;
+    });
 
-              return next;
-            })()
-          : item,
-      ),
-    );
-
-    setVideoLibraryTargetIndex(null);
+    setVideoLibraryTargetId(null);
   };
 
   const handleLibraryImageSelect = (
@@ -5142,89 +5065,82 @@ export function GeneratePageInner() {
   ) => {
     if (!libraryTarget) return;
 
-    const { index, which } = libraryTarget;
+    const { sentenceId, which } = libraryTarget;
 
-    setSentences((prev) =>
-      prev.map((item, i) =>
-        i === index
-          ? which === 'single'
+    updateSentenceById(sentenceId, (item) =>
+      which === 'single'
+        ? {
+          ...item,
+          imageUrl,
+          image: null,
+          imagePrompt: prompt ?? null,
+          isFromLibrary: true,
+          savedImageId: id,
+        }
+        : which === 'start'
+          ? {
+            ...item,
+            startImageUrl: imageUrl,
+            startImage: null,
+            startImagePrompt: prompt ?? null,
+            isFromLibrary: true,
+            startSavedImageId: id,
+          }
+          : which === 'end'
             ? {
               ...item,
-              imageUrl,
-              image: null,
-              imagePrompt: prompt ?? null,
+              endImageUrl: imageUrl,
+              endImage: null,
+              endImagePrompt: prompt ?? null,
               isFromLibrary: true,
-              savedImageId: id,
+              endSavedImageId: id,
             }
-            : which === 'start'
-              ? {
-                ...item,
-                startImageUrl: imageUrl,
-                startImage: null,
-                startImagePrompt: prompt ?? null,
-                isFromLibrary: true,
-                startSavedImageId: id,
-              }
-              : which === 'end'
-                ? {
-                  ...item,
-                  endImageUrl: imageUrl,
-                  endImage: null,
-                  endImagePrompt: prompt ?? null,
-                  isFromLibrary: true,
-                  endSavedImageId: id,
-                }
-                : {
-                  ...item,
-                  referenceImageUrl: imageUrl,
-                  referenceImage: null,
-                  isFromLibrary: true,
-                }
-          : item,
-      ),
+            : {
+              ...item,
+              referenceImageUrl: imageUrl,
+              referenceImage: null,
+              isFromLibrary: true,
+            },
     );
 
     setLibraryTarget(null);
   };
 
   const handleOpenSentenceSoundEffectsLibrary = (index: number) => {
-    setSoundEffectsLibraryTargetIndex(index);
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    setSoundEffectsLibraryTargetId(sentenceId);
     setIsSoundEffectsLibraryOpen(true);
   };
 
   const handleApplySentenceSoundEffectsFromLibrary = (items: SoundEffectDto[]) => {
-    if (soundEffectsLibraryTargetIndex === null) return;
-    const index = soundEffectsLibraryTargetIndex;
+    if (soundEffectsLibraryTargetId === null) return;
 
-    setSentences((prev) =>
-      prev.map((s, i) => {
-        if (i !== index) return s;
+    updateSentenceById(soundEffectsLibraryTargetId, (s) => {
+      const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
+      const additions = (items ?? []).map((it) => ({
+        id: it.id,
+        title: String(it.name ?? it.title ?? 'Sound effect'),
+        url: it.url,
+        delaySeconds: 0,
+        volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
+        audioSettings: cloneSoundEffectAudioSettings(it.audio_settings),
+        defaultAudioSettings: cloneSoundEffectAudioSettings(it.audio_settings),
+        timingMode: 'withPrevious' as const,
+        durationSeconds:
+          typeof it.duration_seconds === 'number' && Number.isFinite(it.duration_seconds)
+            ? Math.max(0, it.duration_seconds)
+            : null,
+      }));
 
-        const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
-        const additions = (items ?? []).map((it) => ({
-          id: it.id,
-          title: String(it.name ?? it.title ?? 'Sound effect'),
-          url: it.url,
-          delaySeconds: 0,
-          volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
-          audioSettings: cloneSoundEffectAudioSettings(it.audio_settings),
-          defaultAudioSettings: cloneSoundEffectAudioSettings(it.audio_settings),
-          timingMode: 'withPrevious' as const,
-          durationSeconds:
-            typeof it.duration_seconds === 'number' && Number.isFinite(it.duration_seconds)
-              ? Math.max(0, it.duration_seconds)
-              : null,
-        }));
-
-        return {
-          ...s,
-          soundEffects: [...current, ...additions],
-        };
-      }),
-    );
+      return {
+        ...s,
+        soundEffects: [...current, ...additions],
+      };
+    });
 
     setIsSoundEffectsLibraryOpen(false);
-    setSoundEffectsLibraryTargetIndex(null);
+    setSoundEffectsLibraryTargetId(null);
   };
 
   const handleUploadSentenceSoundEffect = async (index: number, files: File[]) => {
@@ -5293,42 +5209,39 @@ export function GeneratePageInner() {
         createdItems.push(...items);
       }
 
-      setSentences((prev) =>
-        prev.map((s, i) => {
-          if (i !== index) return s;
-          const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
-          return {
-            ...s,
-            soundEffects: [
-              ...current,
-              ...createdItems.map((created, idx) => {
-                const fallbackTitle =
-                  String(list[idx]?.name ?? '')
-                    .replace(/\.[^.]+$/u, '')
-                    .trim() || 'Sound effect';
-                return {
-                  id: created.id,
-                  title: String(created.name ?? created.title ?? fallbackTitle),
-                  url: created.url,
-                  delaySeconds: 0,
-                  volumePercent: Math.max(
-                    0,
-                    Math.min(300, Number(created.volume_percent ?? 100) || 100),
-                  ),
-                  audioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
-                  defaultAudioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
-                  timingMode: 'withPrevious' as const,
-                  durationSeconds:
-                    typeof created.duration_seconds === 'number' &&
+      updateSentenceById(sentenceId, (s) => {
+        const current = Array.isArray(s.soundEffects) ? s.soundEffects : [];
+        return {
+          ...s,
+          soundEffects: [
+            ...current,
+            ...createdItems.map((created, idx) => {
+              const fallbackTitle =
+                String(list[idx]?.name ?? '')
+                  .replace(/\.[^.]+$/u, '')
+                  .trim() || 'Sound effect';
+              return {
+                id: created.id,
+                title: String(created.name ?? created.title ?? fallbackTitle),
+                url: created.url,
+                delaySeconds: 0,
+                volumePercent: Math.max(
+                  0,
+                  Math.min(300, Number(created.volume_percent ?? 100) || 100),
+                ),
+                audioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+                defaultAudioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+                timingMode: 'withPrevious' as const,
+                durationSeconds:
+                  typeof created.duration_seconds === 'number' &&
                     Number.isFinite(created.duration_seconds)
-                      ? Math.max(0, created.duration_seconds)
-                      : null,
-                };
-              }),
-            ],
-          };
-        }),
-      );
+                    ? Math.max(0, created.duration_seconds)
+                    : null,
+              };
+            }),
+          ],
+        };
+      });
 
       showToast(
         createdItems.length > 1
@@ -5386,35 +5299,28 @@ export function GeneratePageInner() {
 
       const merged = res.data;
 
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-              ...s,
-              soundEffects: [
-                {
-                  id: merged.id,
-                  title: merged.title,
-                  url: merged.url,
-                  delaySeconds: 0,
-                  volumePercent: Math.max(
-                    0,
-                    Math.min(300, Number(merged.volume_percent ?? 100) || 100),
-                  ),
-                  audioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
-                  defaultAudioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
-                  timingMode: 'withPrevious',
-                  durationSeconds:
-                    typeof merged.duration_seconds === 'number' &&
-                    Number.isFinite(merged.duration_seconds)
-                      ? Math.max(0, merged.duration_seconds)
-                      : null,
-                },
-              ],
-            }
-            : s,
-        ),
-      );
+      patchSentenceById(sentenceId, {
+        soundEffects: [
+          {
+            id: merged.id,
+            title: merged.title,
+            url: merged.url,
+            delaySeconds: 0,
+            volumePercent: Math.max(
+              0,
+              Math.min(300, Number(merged.volume_percent ?? 100) || 100),
+            ),
+            audioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
+            defaultAudioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
+            timingMode: 'withPrevious',
+            durationSeconds:
+              typeof merged.duration_seconds === 'number' &&
+                Number.isFinite(merged.duration_seconds)
+                ? Math.max(0, merged.duration_seconds)
+                : null,
+          },
+        ],
+      });
 
       showToast('Mix saved to your sound effects library.', 'success');
     } catch (err) {
@@ -5460,17 +5366,18 @@ export function GeneratePageInner() {
 
   const handleOpenTransitionSoundEditor = (index: number) => {
     const sentence = sentences[index];
+    if (!sentence) return;
     setTransitionSoundDraftItems(
       Array.isArray(sentence?.transitionSoundEffects)
         ? sentence.transitionSoundEffects.map((item) => ({ ...item }))
         : [],
     );
-    setTransitionSoundEditorTargetIndex(index);
+    setTransitionSoundEditorTargetId(sentence.id);
   };
 
   const handleCloseTransitionSoundEditor = () => {
     setTransitionSoundDraftItems([]);
-    setTransitionSoundEditorTargetIndex(null);
+    setTransitionSoundEditorTargetId(null);
   };
 
   const handleSentenceTransitionSoundEffectsChange = (
@@ -5490,58 +5397,101 @@ export function GeneratePageInner() {
   };
 
   const handleApplyTransitionSoundEditor = () => {
-    if (transitionSoundEditorTargetIndex === null) {
+    if (transitionSoundEditorTargetId === null) {
       handleCloseTransitionSoundEditor();
       return;
     }
 
-    handleSentenceTransitionSoundEffectsChange(transitionSoundEditorTargetIndex, transitionSoundDraftItems);
+    updateSentenceById(transitionSoundEditorTargetId, (sentence) => ({
+      ...sentence,
+      transitionSoundEffects: Array.isArray(transitionSoundDraftItems)
+        ? transitionSoundDraftItems
+        : [],
+    }));
     handleCloseTransitionSoundEditor();
   };
 
   const handleSaveSentenceTransitionSound = async (
-    index: number,
+    sentenceId: string,
     itemsOverride?: NonNullable<SentenceItem['transitionSoundEffects']>,
-  ) => {
-    const sentence = sentences[index];
-    if (!sentence) return;
+  ): Promise<NonNullable<SentenceItem['transitionSoundEffects']> | null> => {
+    const index = sentences.findIndex((sentence) => sentence.id === sentenceId);
+    const sentence = index >= 0 ? sentences[index] : null;
+    if (!sentence) return null;
 
     const itemsSource = itemsOverride ?? sentence.transitionSoundEffects;
     const items = Array.isArray(itemsSource)
       ? itemsSource.filter((item) => Boolean(item?.id))
       : [];
-    if (items.length === 0) return;
+    if (items.length === 0) return null;
 
-    const sentenceId = sentence.id;
-    setIsSavingTransitionSoundBySentenceId((prev) => ({ ...prev, [sentenceId]: true }));
+    const targetSentenceId = sentence.id;
+    setIsSavingTransitionSoundBySentenceId((prev) => ({ ...prev, [targetSentenceId]: true }));
 
     try {
       if (items.length === 1) {
-        await api.patch(`/sound-effects/transition/${encodeURIComponent(items[0].id)}`, {
-          isTransitionSound: true,
-        });
-      } else {
-        const mergedRes = await api.post<SoundEffectDto>('/sound-effects/merge', {
-          title: `Transition sound mix ${index + 1}`,
-          items: items.map((item) => ({
-            sound_effect_id: item.id,
-            delay_seconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
-            volume_percent: Math.max(0, Math.min(300, Number(item.volumePercent ?? 100) || 100)),
-          })),
-        });
+        const [item] = items;
+        if (item.isTransitionSound !== true) {
+          await api.patch(`/sound-effects/transition/${encodeURIComponent(item.id)}`, {
+            isTransitionSound: true,
+          });
+        }
 
-        await api.patch(`/sound-effects/transition/${encodeURIComponent(mergedRes.data.id)}`, {
+        const savedItems = items.map((entry) => ({
+          ...entry,
+          isTransitionSound: true,
+        }));
+
+        showToast('Transition sound saved for reuse.', 'success');
+        return savedItems;
+      }
+
+      const mergedRes = await api.post<SoundEffectDto>('/sound-effects/merge', {
+        title: `Transition sound mix ${index + 1}`,
+        items: items.map((item) => ({
+          sound_effect_id: item.id,
+          delay_seconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
+          volume_percent: Math.max(0, Math.min(300, Number(item.volumePercent ?? 100) || 100)),
+        })),
+      });
+
+      const mergedId = String(mergedRes.data?.id ?? '').trim();
+      const mergedUrl = String(mergedRes.data?.url ?? '').trim();
+      if (!mergedId || !mergedUrl) {
+        throw new Error('Merged transition sound response is missing id or url.');
+      }
+
+      if (mergedRes.data?.is_transition_sound !== true) {
+        await api.patch(`/sound-effects/transition/${encodeURIComponent(mergedId)}`, {
           isTransitionSound: true,
         });
       }
 
+      const savedItems: NonNullable<SentenceItem['transitionSoundEffects']> = [
+        {
+          id: mergedId,
+          title:
+            String(mergedRes.data?.name ?? mergedRes.data?.title ?? `Transition sound mix ${index + 1}`).trim() ||
+            `Transition sound mix ${index + 1}`,
+          url: mergedUrl,
+          delaySeconds: 0,
+          volumePercent: Math.max(
+            0,
+            Math.min(300, Number(mergedRes.data?.volume_percent ?? 100) || 100),
+          ),
+          isTransitionSound: true,
+        },
+      ];
+
       showToast('Transition sound saved for reuse.', 'success');
+      return savedItems;
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('Failed to save transition sound', err);
       showToast('Failed to save transition sound.', 'error');
+      return null;
     } finally {
-      setIsSavingTransitionSoundBySentenceId((prev) => ({ ...prev, [sentenceId]: false }));
+      setIsSavingTransitionSoundBySentenceId((prev) => ({ ...prev, [targetSentenceId]: false }));
     }
   };
 
@@ -5695,6 +5645,8 @@ export function GeneratePageInner() {
     setIsSavingDraft(true);
 
     try {
+      flushSync(() => { });
+
       // Snapshot the active tab before saving.
       tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] = captureActiveTabSnapshot();
       if (activeShortTabIndex === null) {
@@ -5857,10 +5809,10 @@ export function GeneratePageInner() {
             image_effects_mode: s.imageEffectsMode ?? 'quick',
             visual_effect:
               s.visualEffect === 'colorGrading' ||
-              s.visualEffect === 'animatedLighting' ||
-              s.visualEffect === 'glassSubtle' ||
-              s.visualEffect === 'glassReflections' ||
-              s.visualEffect === 'glassStrong'
+                s.visualEffect === 'animatedLighting' ||
+                s.visualEffect === 'glassSubtle' ||
+                s.visualEffect === 'glassReflections' ||
+                s.visualEffect === 'glassStrong'
                 ? s.visualEffect
                 : null,
             image_filter_id: s.customImageFilterId ?? null,
@@ -5871,39 +5823,39 @@ export function GeneratePageInner() {
             image_motion_speed: normalizeImageMotionSpeedValue(s.imageMotionSpeed),
             sound_effects: Array.isArray(s.soundEffects)
               ? s.soundEffects
-                  .filter((e) => Boolean(e?.id))
-                  .map((e) => ({
-                    sound_effect_id: String(e.id),
-                    delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
-                    volume_percent: Math.max(
-                      0,
-                      Math.min(300, Number(e.volumePercent ?? 100) || 100),
-                    ),
-                    audio_settings_override: areSoundEffectAudioSettingsEqual(
-                      e.audioSettings,
-                      e.defaultAudioSettings,
-                    )
-                      ? null
-                      : normalizeSoundEffectAudioSettings(e.audioSettings),
-                    timing_mode:
-                      e.timingMode === 'afterPreviousEnds'
-                        ? 'after_previous_ends'
-                        : 'with_previous',
-                  }))
+                .filter((e) => Boolean(e?.id))
+                .map((e) => ({
+                  sound_effect_id: String(e.id),
+                  delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+                  volume_percent: Math.max(
+                    0,
+                    Math.min(300, Number(e.volumePercent ?? 100) || 100),
+                  ),
+                  audio_settings_override: areSoundEffectAudioSettingsEqual(
+                    e.audioSettings,
+                    e.defaultAudioSettings,
+                  )
+                    ? null
+                    : normalizeSoundEffectAudioSettings(e.audioSettings),
+                  timing_mode:
+                    e.timingMode === 'afterPreviousEnds'
+                      ? 'after_previous_ends'
+                      : 'with_previous',
+                }))
               : undefined,
             transition_sound_effects: Array.isArray(s.transitionSoundEffects)
               ? s.transitionSoundEffects
-                  .filter((e) => Boolean(e?.id) && Boolean(e?.url))
-                  .map((e) => ({
-                    sound_effect_id: String(e.id),
-                    title: String(e.title ?? '').trim() || undefined,
-                    url: String(e.url ?? '').trim() || undefined,
-                    delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
-                    volume_percent: Math.max(
-                      0,
-                      Math.min(300, Number(e.volumePercent ?? 100) || 100),
-                    ),
-                  }))
+                .filter((e) => Boolean(e?.id) && Boolean(e?.url))
+                .map((e) => ({
+                  sound_effect_id: String(e.id),
+                  title: String(e.title ?? '').trim() || undefined,
+                  url: String(e.url ?? '').trim() || undefined,
+                  delay_seconds: Math.max(0, Number(e.delaySeconds ?? 0) || 0),
+                  volume_percent: Math.max(
+                    0,
+                    Math.min(300, Number(e.volumePercent ?? 100) || 100),
+                  ),
+                }))
               : undefined,
           });
         }
@@ -6041,9 +5993,9 @@ export function GeneratePageInner() {
             const finalItems = endsWithCta
               ? withoutEmpty
               : [
-                  ...withoutEmpty.filter((s) => !isSubscribeLikeSentence(s.text)),
-                  createShortsCtaSentenceItem(),
-                ];
+                ...withoutEmpty.filter((s) => !isSubscribeLikeSentence(s.text)),
+                createShortsCtaSentenceItem(),
+              ];
 
             const shortSentencesPayload = await buildSentencePayload(
               finalItems,
@@ -6072,7 +6024,7 @@ export function GeneratePageInner() {
                 referenceScripts.length > 0
                   ? referenceScripts.map((s) => s.id)
                   : undefined,
-              is_short_script: true,
+              is_short_script: script.length < 2500 ? true : false,
             };
 
             const existingShortId =
@@ -6080,13 +6032,13 @@ export function GeneratePageInner() {
 
             const upsertedShort = existingShortId
               ? await api.patch<{ id: string; sentences?: BackendSentenceDto[] }>(
-                  `/scripts/${encodeURIComponent(existingShortId)}`,
-                  shortPayload,
-                )
+                `/scripts/${encodeURIComponent(existingShortId)}`,
+                shortPayload,
+              )
               : await api.post<{ id: string; sentences?: BackendSentenceDto[] }>(
-                  '/scripts',
-                  shortPayload,
-                );
+                '/scripts',
+                shortPayload,
+              );
 
             const id = String(upsertedShort.data?.id ?? '').trim();
             if (!id) {
@@ -6443,8 +6395,8 @@ export function GeneratePageInner() {
   const applyTranslationToEditor = (params: {
     targetLanguage: string;
     result:
-      | { kind: 'sentences'; sentences: string[]; script?: string }
-      | { kind: 'script'; script: string };
+    | { kind: 'sentences'; sentences: string[]; script?: string }
+    | { kind: 'script'; script: string };
   }) => {
     clearVoiceState();
     resetDraftIdentity();
@@ -6461,10 +6413,10 @@ export function GeneratePageInner() {
       const translatedScript = String(params.result.script ?? '').trim();
       setScript(
         translatedScript ||
-          translatedSentences
-            .map((t) => String(t ?? '').trim())
-            .filter(Boolean)
-            .join(' '),
+        translatedSentences
+          .map((t) => String(t ?? '').trim())
+          .filter(Boolean)
+          .join(' '),
       );
     } else {
       setScript(params.result.script);
@@ -6831,12 +6783,12 @@ export function GeneratePageInner() {
                   shortsTabs={(shortRanges.length
                     ? shortRanges
                     : shortScriptIds.map((_id, idx) => {
-                        const snap = tabSnapshotsRef.current[tabKeyForIndex(idx)];
-                        const count = (snap?.sentences ?? []).filter(
-                          (s) => !isSubscribeLikeSentence(s.text),
-                        ).length;
-                        return { start: 0, end: Math.max(0, count - 1) };
-                      })
+                      const snap = tabSnapshotsRef.current[tabKeyForIndex(idx)];
+                      const count = (snap?.sentences ?? []).filter(
+                        (s) => !isSubscribeLikeSentence(s.text),
+                      ).length;
+                      return { start: 0, end: Math.max(0, count - 1) };
+                    })
                   ).map((r, idx) => ({
                     label: `Short ${idx + 1}`,
                     count: Math.max(0, r.end - r.start + 1),
@@ -7024,7 +6976,7 @@ export function GeneratePageInner() {
               </Accordion>
               <RenderSettingsSection
                 isShort={isShortsTabActive ? true : isShort}
-                onIsShortChange={isShortsTabActive ? ((_value: boolean) => {}) : setIsShort}
+                onIsShortChange={isShortsTabActive ? ((_value: boolean) => { }) : setIsShort}
                 disableIsShort={isLongForm || isShortsTabActive}
                 useLowerFps={useLowerFps}
                 onUseLowerFpsChange={setUseLowerFps}
@@ -7168,7 +7120,7 @@ export function GeneratePageInner() {
       <GenerateModalsHost
         isImageLibraryOpen={isLibraryModalOpen}
         libraryTarget={libraryTarget}
-        videoLibraryTargetIndex={videoLibraryTargetIndex}
+        videoLibraryTargetId={videoLibraryTargetId}
         scriptContext={script}
         sentences={sentences}
         onCloseImageLibrary={() => {
@@ -7185,13 +7137,13 @@ export function GeneratePageInner() {
 
         isVideoLibraryOpen={isVideoLibraryOpen}
         selectedVideoUrl={
-          videoLibraryTargetIndex === null
+          videoLibraryTargetId === null
             ? null
-            : sentences[videoLibraryTargetIndex]?.videoUrl ?? null
+            : sentences.find((sentence) => sentence.id === videoLibraryTargetId)?.videoUrl ?? null
         }
         onCloseVideoLibrary={() => {
           setIsVideoLibraryOpen(false);
-          setVideoLibraryTargetIndex(null);
+          setVideoLibraryTargetId(null);
         }}
         onSelectVideo={handleLibraryVideoSelect}
         isScriptLibraryOpen={isScriptLibraryOpen}
@@ -7209,29 +7161,41 @@ export function GeneratePageInner() {
         isSoundEffectsLibraryOpen={isSoundEffectsLibraryOpen}
         onCloseSoundEffectsLibrary={() => {
           setIsSoundEffectsLibraryOpen(false);
-          setSoundEffectsLibraryTargetIndex(null);
+          setSoundEffectsLibraryTargetId(null);
         }}
         onApplySoundEffects={handleApplySentenceSoundEffectsFromLibrary}
-        isTransitionSoundModalOpen={transitionSoundEditorTargetIndex !== null}
+        isTransitionSoundModalOpen={transitionSoundEditorTargetId !== null}
         transitionSoundTransitionType={
-          transitionSoundEditorTargetIndex === null
+          transitionSoundEditorTargetId === null
             ? null
-            : sentences[transitionSoundEditorTargetIndex]?.transitionToNext ?? null
+            : sentences.find((sentence) => sentence.id === transitionSoundEditorTargetId)?.transitionToNext ?? null
         }
         transitionSoundItems={transitionSoundDraftItems}
         onCloseTransitionSoundModal={handleCloseTransitionSoundEditor}
         onChangeTransitionSoundDraft={setTransitionSoundDraftItems}
         onApplyTransitionSound={handleApplyTransitionSoundEditor}
-        onSaveTransitionSoundReusable={() => {
-          if (transitionSoundEditorTargetIndex === null) return;
-          return handleSaveSentenceTransitionSound(transitionSoundEditorTargetIndex, transitionSoundDraftItems);
+        onSaveTransitionSoundReusable={async () => {
+          if (transitionSoundEditorTargetId === null) return;
+
+          const savedItems = await handleSaveSentenceTransitionSound(
+            transitionSoundEditorTargetId,
+            transitionSoundDraftItems,
+          );
+          if (!savedItems) return;
+
+          updateSentenceById(transitionSoundEditorTargetId, (sentence) => ({
+            ...sentence,
+            transitionSoundEffects: savedItems,
+          }));
+          setTransitionSoundDraftItems(savedItems);
+          handleCloseTransitionSoundEditor();
         }}
         isSavingTransitionSoundReusable={
-          transitionSoundEditorTargetIndex === null
+          transitionSoundEditorTargetId === null
             ? false
             : Boolean(
               isSavingTransitionSoundBySentenceId[
-                sentences[transitionSoundEditorTargetIndex]?.id ?? ''
+              transitionSoundEditorTargetId
               ],
             )
         }

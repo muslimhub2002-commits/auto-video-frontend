@@ -43,6 +43,7 @@ export type SentenceItem = {
     url: string;
     delaySeconds: number;
     volumePercent: number;
+    isTransitionSound?: boolean;
   }>;
 
   // Non-forced mappings inferred during split (used for draft round-tripping).

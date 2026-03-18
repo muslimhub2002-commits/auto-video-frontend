@@ -19,34 +19,11 @@ function SentenceTextEditorComponent({
 }: SentenceTextEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const draftTextRef = useRef<string>(String(text ?? ''));
-  const commitTimeoutRef = useRef<number | null>(null);
   const isComposingRef = useRef(false);
 
   const commitText = (next: string) => {
     onCommit(next);
   };
-
-  const scheduleCommitText = (next: string) => {
-    draftTextRef.current = next;
-
-    if (commitTimeoutRef.current !== null) {
-      window.clearTimeout(commitTimeoutRef.current);
-    }
-
-    commitTimeoutRef.current = window.setTimeout(() => {
-      commitTimeoutRef.current = null;
-      commitText(draftTextRef.current);
-    }, 200);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (commitTimeoutRef.current !== null) {
-        window.clearTimeout(commitTimeoutRef.current);
-        commitTimeoutRef.current = null;
-      }
-    };
-  }, []);
 
   useEffect(() => {
     const next = String(text ?? '');
@@ -70,19 +47,17 @@ function SentenceTextEditorComponent({
       }}
       onCompositionEnd={(event) => {
         isComposingRef.current = false;
-        scheduleCommitText(event.currentTarget.value);
+        const next = event.currentTarget.value;
+        draftTextRef.current = next;
+        commitText(next);
       }}
       onChange={(event) => {
         const next = event.target.value;
         draftTextRef.current = next;
         if (isComposingRef.current) return;
-        scheduleCommitText(next);
+        commitText(next);
       }}
       onBlur={(event) => {
-        if (commitTimeoutRef.current !== null) {
-          window.clearTimeout(commitTimeoutRef.current);
-          commitTimeoutRef.current = null;
-        }
         commitText(event.currentTarget.value);
       }}
       className={className}

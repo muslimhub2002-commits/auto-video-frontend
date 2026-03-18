@@ -12,7 +12,7 @@ import { SoundEffectsLibraryModal, type SoundEffectDto } from './SoundEffectsLib
 
 type LibraryTarget =
   | {
-      index: number;
+      sentenceId: string;
       which: 'single' | 'start' | 'end' | 'reference';
     }
   | null;
@@ -27,7 +27,7 @@ type AlertState = {
 type GenerateModalsHostProps = {
   isImageLibraryOpen: boolean;
   libraryTarget: LibraryTarget;
-  videoLibraryTargetIndex: number | null;
+  videoLibraryTargetId: string | null;
   scriptContext: string;
   sentences: SentenceItem[];
   onCloseImageLibrary: () => void;
@@ -71,7 +71,7 @@ type GenerateModalsHostProps = {
 
 function selectedImageUrlFromTarget(sentences: SentenceItem[], libraryTarget: LibraryTarget): string | null {
   if (!libraryTarget) return null;
-  const sentence = sentences[libraryTarget.index];
+  const sentence = sentences.find((item) => item.id === libraryTarget.sentenceId);
   if (!sentence) return null;
 
   if (libraryTarget.which === 'single') return sentence.imageUrl ?? null;
@@ -85,21 +85,21 @@ function selectedSentenceTextFromImageTarget(
   libraryTarget: LibraryTarget,
 ): string | null {
   if (!libraryTarget) return null;
-  return sentences[libraryTarget.index]?.text ?? null;
+  return sentences.find((item) => item.id === libraryTarget.sentenceId)?.text ?? null;
 }
 
 function selectedSentenceTextFromVideoTarget(
   sentences: SentenceItem[],
-  videoLibraryTargetIndex: number | null,
+  videoLibraryTargetId: string | null,
 ): string | null {
-  if (videoLibraryTargetIndex === null) return null;
-  return sentences[videoLibraryTargetIndex]?.text ?? null;
+  if (videoLibraryTargetId === null) return null;
+  return sentences.find((item) => item.id === videoLibraryTargetId)?.text ?? null;
 }
 
 export function GenerateModalsHost({
   isImageLibraryOpen,
   libraryTarget,
-  videoLibraryTargetIndex,
+  videoLibraryTargetId,
   scriptContext,
   sentences,
   onCloseImageLibrary,
@@ -139,7 +139,7 @@ export function GenerateModalsHost({
   const currentImageSentenceText = selectedSentenceTextFromImageTarget(sentences, libraryTarget);
   const currentVideoSentenceText = selectedSentenceTextFromVideoTarget(
     sentences,
-    videoLibraryTargetIndex,
+    videoLibraryTargetId,
   );
 
   return (

@@ -51,6 +51,8 @@ export function TransitionSoundModal({
   const everStartedRef = useRef<Set<string>>(new Set());
 
   const selectedCount = currentItems.length;
+  const canSaveReusable =
+    currentItems.length > 0 && currentItems.some((item) => item.isTransitionSound !== true);
   const defaultTransitionText = useMemo(() => getDefaultTransitionText(transitionType), [transitionType]);
   const titleId = 'transition-sound-modal-title';
   const descriptionId = 'transition-sound-modal-description';
@@ -144,6 +146,7 @@ export function TransitionSoundModal({
       url: it.url,
       delaySeconds: 0,
       volumePercent: Math.max(0, Math.min(300, Number(it.volume_percent ?? 100) || 100)),
+      isTransitionSound: it.is_transition_sound === true,
     }));
     onChange([...currentItems, ...additions]);
   };
@@ -364,7 +367,7 @@ export function TransitionSoundModal({
               <Button type="button" onClick={handleApply} size="sm" className="bg-linear-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700">
                 Apply
               </Button>
-              {currentItems.length > 0 ? (
+              {canSaveReusable ? (
                 <Button
                   type="button"
                   size="sm"

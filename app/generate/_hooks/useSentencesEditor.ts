@@ -30,145 +30,217 @@ function mergeSentenceText(targetText: string, sourceText: string) {
 export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
   const [sentences, setSentences] = useState<SentenceItem[]>(initialSentences);
 
-  const handleSentencePatch = useCallback(
-    (index: number, patch: Partial<SentenceItem>) => {
-      setSentences((prev) =>
-        prev.map((sentence, sentenceIndex) =>
-          sentenceIndex === index
-            ? {
-                ...sentence,
-                ...patch,
-              }
-            : sentence,
-        ),
-      );
+  const updateSentenceById = useCallback(
+    (
+      sentenceId: string,
+      updater: (sentence: SentenceItem) => SentenceItem,
+    ) => {
+      setSentences((prev) => {
+        let didUpdate = false;
+
+        const next = prev.map((sentence) => {
+          if (sentence.id !== sentenceId) return sentence;
+          didUpdate = true;
+          return updater(sentence);
+        });
+
+        return didUpdate ? next : prev;
+      });
     },
     [],
+  );
+
+  const handleSentencePatchById = useCallback(
+    (sentenceId: string, patch: Partial<SentenceItem>) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        ...patch,
+      }));
+    },
+    [updateSentenceById],
+  );
+
+  const handleSentencePatch = useCallback(
+    (index: number, patch: Partial<SentenceItem>) => {
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleSentencePatchById(sentenceId, patch);
+    },
+    [handleSentencePatchById, sentences],
+  );
+
+  const handleTransitionToNextChangeById = useCallback(
+    (sentenceId: string, value: TransitionType | null) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        transitionToNext: value,
+      }));
+    },
+    [updateSentenceById],
   );
 
   const handleTransitionToNextChange = useCallback(
     (index: number, value: TransitionType | null) => {
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                transitionToNext: value,
-              }
-            : s,
-        ),
-      );
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleTransitionToNextChangeById(sentenceId, value);
     },
-    [],
+    [handleTransitionToNextChangeById, sentences],
+  );
+
+  const handleSentenceForcedCharacterKeysChangeById = useCallback(
+    (sentenceId: string, next: string[] | null) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        forcedCharacterKeys: Array.isArray(next)
+          ? Array.from(new Set(next.filter(Boolean)))
+          : null,
+      }));
+    },
+    [updateSentenceById],
   );
 
   const handleSentenceForcedCharacterKeysChange = useCallback(
     (index: number, next: string[] | null) => {
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                forcedCharacterKeys:
-                  Array.isArray(next)
-                    ? Array.from(new Set(next.filter(Boolean)))
-                    : null,
-              }
-            : s,
-        ),
-      );
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleSentenceForcedCharacterKeysChangeById(sentenceId, next);
     },
-    [],
+    [handleSentenceForcedCharacterKeysChangeById, sentences],
+  );
+
+  const handleSentenceForcedLocationKeyChangeById = useCallback(
+    (sentenceId: string, next: string | null) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        forcedLocationKey: next === null ? null : String(next).trim(),
+      }));
+    },
+    [updateSentenceById],
   );
 
   const handleSentenceForcedLocationKeyChange = useCallback(
     (index: number, next: string | null) => {
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                forcedLocationKey: next === null ? null : String(next).trim(),
-              }
-            : s,
-        ),
-      );
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleSentenceForcedLocationKeyChangeById(sentenceId, next);
     },
-    [],
+    [handleSentenceForcedLocationKeyChangeById, sentences],
+  );
+
+  const handleSentenceVisualEffectChangeById = useCallback(
+    (sentenceId: string, value: VisualEffectType | null) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        visualEffect: value,
+      }));
+    },
+    [updateSentenceById],
   );
 
   const handleSentenceVisualEffectChange = useCallback(
     (index: number, value: VisualEffectType | null) => {
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                visualEffect: value,
-              }
-            : s,
-        ),
-      );
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleSentenceVisualEffectChangeById(sentenceId, value);
     },
-    [],
+    [handleSentenceVisualEffectChangeById, sentences],
+  );
+
+  const handleSentenceImageMotionEffectChangeById = useCallback(
+    (sentenceId: string, value: ImageMotionEffectType | null) => {
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        imageMotionEffect: value ?? 'default',
+      }));
+    },
+    [updateSentenceById],
   );
 
   const handleSentenceImageMotionEffectChange = useCallback(
     (index: number, value: ImageMotionEffectType | null) => {
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                imageMotionEffect: value ?? 'default',
-              }
-            : s,
-        ),
-      );
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleSentenceImageMotionEffectChangeById(sentenceId, value);
     },
-    [],
+    [handleSentenceImageMotionEffectChangeById, sentences],
+  );
+
+  const handleSentenceImageMotionSpeedChangeById = useCallback(
+    (sentenceId: string, value: number) => {
+      const normalized = normalizeImageMotionSpeedValue(value);
+
+      updateSentenceById(sentenceId, (sentence) => ({
+        ...sentence,
+        imageMotionSpeed: normalized,
+      }));
+    },
+    [updateSentenceById],
   );
 
   const handleSentenceImageMotionSpeedChange = useCallback(
     (index: number, value: number) => {
-      const normalized = normalizeImageMotionSpeedValue(value);
-
-      setSentences((prev) =>
-        prev.map((s, i) =>
-          i === index
-            ? {
-                ...s,
-                imageMotionSpeed: normalized,
-              }
-            : s,
-        ),
-      );
+      const sentenceId = sentences[index]?.id;
+      if (!sentenceId) return;
+      handleSentenceImageMotionSpeedChangeById(sentenceId, value);
     },
-    [],
+    [handleSentenceImageMotionSpeedChangeById, sentences],
+  );
+
+  const handleSentenceTextChangeById = useCallback(
+    (sentenceId: string, text: string) => {
+      updateSentenceById(sentenceId, (sentence) => {
+        if (sentence.text === text) return sentence;
+        return { ...sentence, text };
+      });
+    },
+    [updateSentenceById],
   );
 
   const handleSentenceTextChange = useCallback((index: number, text: string) => {
-    setSentences((prev) => {
-      const current = prev[index];
-      if (!current) return prev;
-      if (current.text === text) return prev;
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    handleSentenceTextChangeById(sentenceId, text);
+  }, [handleSentenceTextChangeById, sentences]);
 
-      const next = [...prev];
-      next[index] = { ...current, text };
-      return next;
-    });
-  }, []);
-
-  const handleMergeSentenceIntoPrevious = useCallback((index: number) => {
+  const handleMergeSentenceIntoPreviousById = useCallback((sentenceId: string) => {
     setSentences((prev) => {
-      if (index <= 0 || index >= prev.length) return prev;
+      const index = prev.findIndex((sentence) => sentence.id === sentenceId);
+      if (index <= 0) return prev;
+
       const targetIndex = index - 1;
       const target = prev[targetIndex];
       const source = prev[index];
       if (!target || !source) return prev;
 
-      const next = prev.map((item, i) =>
-        i === targetIndex
+      const next = prev.map((item, itemIndex) =>
+        itemIndex === targetIndex
+          ? { ...item, text: mergeSentenceText(item.text, source.text) }
+          : item,
+      );
+      next.splice(index, 1);
+      return next;
+    });
+  }, []);
+
+  const handleMergeSentenceIntoPrevious = useCallback((index: number) => {
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    handleMergeSentenceIntoPreviousById(sentenceId);
+  }, [handleMergeSentenceIntoPreviousById, sentences]);
+
+  const handleMergeSentenceIntoNextById = useCallback((sentenceId: string) => {
+    setSentences((prev) => {
+      const index = prev.findIndex((sentence) => sentence.id === sentenceId);
+      if (index < 0 || index >= prev.length - 1) return prev;
+
+      const targetIndex = index + 1;
+      const target = prev[targetIndex];
+      const source = prev[index];
+      if (!target || !source) return prev;
+
+      const next = prev.map((item, itemIndex) =>
+        itemIndex === targetIndex
           ? { ...item, text: mergeSentenceText(item.text, source.text) }
           : item,
       );
@@ -178,35 +250,31 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
   }, []);
 
   const handleMergeSentenceIntoNext = useCallback((index: number) => {
-    setSentences((prev) => {
-      if (index < 0 || index >= prev.length - 1) return prev;
-      const targetIndex = index + 1;
-      const target = prev[targetIndex];
-      const source = prev[index];
-      if (!target || !source) return prev;
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    handleMergeSentenceIntoNextById(sentenceId);
+  }, [handleMergeSentenceIntoNextById, sentences]);
 
-      const next = prev.map((item, i) =>
-        i === targetIndex
-          ? { ...item, text: mergeSentenceText(item.text, source.text) }
-          : item,
-      );
-      next.splice(index, 1);
-      return next;
+  const handleDeleteSentenceById = useCallback((sentenceId: string) => {
+    setSentences((prev) => {
+      const index = prev.findIndex((sentence) => sentence.id === sentenceId);
+      if (index < 0) return prev;
+      return prev.filter((sentence) => sentence.id !== sentenceId);
     });
   }, []);
 
   const handleDeleteSentence = useCallback((index: number) => {
-    setSentences((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-      return prev.filter((_, i) => i !== index);
-    });
-  }, []);
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return;
+    handleDeleteSentenceById(sentenceId);
+  }, [handleDeleteSentenceById, sentences]);
 
-  const handleInsertEmptySentenceAfter = useCallback((index: number): string => {
+  const handleInsertEmptySentenceAfterId = useCallback((sentenceId: string): string => {
     const newId = createClientId('sentence');
 
     setSentences((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
+      const index = prev.findIndex((sentence) => sentence.id === sentenceId);
+      if (index < 0) return prev;
 
       const empty: SentenceItem = {
         id: newId,
@@ -270,9 +338,15 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
     return newId;
   }, []);
 
-  const handleAddSuspenseScene = useCallback((sourceIndex: number) => {
+  const handleInsertEmptySentenceAfter = useCallback((index: number): string => {
+    const sentenceId = sentences[index]?.id;
+    if (!sentenceId) return createClientId('sentence');
+    return handleInsertEmptySentenceAfterId(sentenceId);
+  }, [handleInsertEmptySentenceAfterId, sentences]);
+
+  const handleAddSuspenseSceneById = useCallback((sentenceId: string) => {
     setSentences((prev) => {
-      const source = prev[sourceIndex];
+      const source = prev.find((sentence) => sentence.id === sentenceId);
       if (!source) return prev;
 
       const newId = createClientId('suspense');
@@ -286,26 +360,46 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         savedImageId: source.savedImageId ?? null,
       };
 
-      const withoutExistingSuspense = prev.filter((s) => !s.isSuspense);
+      const withoutExistingSuspense = prev.filter((sentence) => !sentence.isSuspense);
       return [copy, ...withoutExistingSuspense];
     });
   }, []);
 
+  const handleAddSuspenseScene = useCallback((sourceIndex: number) => {
+    const sentenceId = sentences[sourceIndex]?.id;
+    if (!sentenceId) return;
+    handleAddSuspenseSceneById(sentenceId);
+  }, [handleAddSuspenseSceneById, sentences]);
+
   return {
     sentences,
     setSentences,
+    updateSentenceById,
+    handleSentencePatchById,
     handleSentencePatch,
+    handleTransitionToNextChangeById,
     handleSentenceForcedCharacterKeysChange,
+    handleSentenceForcedCharacterKeysChangeById,
     handleSentenceForcedLocationKeyChange,
+    handleSentenceForcedLocationKeyChangeById,
     handleSentenceVisualEffectChange,
+    handleSentenceVisualEffectChangeById,
     handleSentenceImageMotionEffectChange,
+    handleSentenceImageMotionEffectChangeById,
     handleSentenceImageMotionSpeedChange,
+    handleSentenceImageMotionSpeedChangeById,
     handleTransitionToNextChange,
     handleSentenceTextChange,
+    handleSentenceTextChangeById,
     handleMergeSentenceIntoPrevious,
+    handleMergeSentenceIntoPreviousById,
     handleMergeSentenceIntoNext,
+    handleMergeSentenceIntoNextById,
     handleDeleteSentence,
+    handleDeleteSentenceById,
     handleInsertEmptySentenceAfter,
+    handleInsertEmptySentenceAfterId,
     handleAddSuspenseScene,
+    handleAddSuspenseSceneById,
   };
 }

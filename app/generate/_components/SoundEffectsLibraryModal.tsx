@@ -21,6 +21,7 @@ export type SoundEffectDto = {
   volume_percent?: number;
   audio_settings?: SoundEffectAudioSettings | null;
   duration_seconds?: number | null;
+  is_transition_sound?: boolean;
   is_merged?: boolean;
   is_preset?: boolean;
   source_sound_effect_id?: string | null;

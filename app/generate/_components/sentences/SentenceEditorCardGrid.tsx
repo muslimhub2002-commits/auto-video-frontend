@@ -619,6 +619,7 @@ function SentenceEditorCardComponent({
   >({});
 
   const [isSoundEffectsOpen, setIsSoundEffectsOpen] = useState(false);
+  const [isUploadingSoundEffectLocal, setIsUploadingSoundEffectLocal] = useState(false);
 
   const [editingSoundEffectIndex, setEditingSoundEffectIndex] = useState<number | null>(null);
   const [isSavingSoundEffectEdit, setIsSavingSoundEffectEdit] = useState(false);
@@ -963,6 +964,7 @@ function SentenceEditorCardComponent({
   const [isForcedLocationOpen, setIsForcedLocationOpen] = useState(false);
   const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion'>('visual');
   const [isImageEffectsDetailModalOpen, setIsImageEffectsDetailModalOpen] = useState(false);
+  const isUploadingSoundEffectActive = isUploadingSoundEffect || isUploadingSoundEffectLocal;
   const isImageSceneTab = mediaMode === 'single';
   const imageEffectsMode = item.imageEffectsMode ?? 'quick';
   const shouldAnimateImagePreview = isImageSceneTab;
@@ -1970,11 +1972,16 @@ function SentenceEditorCardComponent({
                       accept="audio/*"
                       multiple
                       className="hidden"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const list = Array.from(e.target.files ?? []);
                         if (list.length === 0) return;
-                        void Promise.resolve(onUploadSoundEffect(list));
-                        e.currentTarget.value = '';
+                        setIsUploadingSoundEffectLocal(true);
+                        try {
+                          await Promise.resolve(onUploadSoundEffect(list));
+                        } finally {
+                          setIsUploadingSoundEffectLocal(false);
+                          e.currentTarget.value = '';
+                        }
                       }}
                     />
 
@@ -1982,11 +1989,11 @@ function SentenceEditorCardComponent({
                       type="button"
                       size="sm"
                       onClick={() => document.getElementById(`sentence-sfx-${item.id}`)?.click()}
-                      disabled={isUploadingSoundEffect}
+                      disabled={isUploadingSoundEffectActive}
                       className="gap-2 h-9 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
                       title="Upload a sound effect"
                     >
-                      {isUploadingSoundEffect ? (
+                      {isUploadingSoundEffectActive ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
                           <span className="text-xs font-bold">Uploading...</span>

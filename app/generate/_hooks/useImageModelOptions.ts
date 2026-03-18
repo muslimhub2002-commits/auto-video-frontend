@@ -77,6 +77,24 @@ const STATIC_NON_LEONARDO_OPTIONS: ImageModelOption[] = [
     providerKey: 'modelslab',
   },
   {
+    value: 'gemini-2.5-flash-image',
+    label: 'Nano Banana',
+    provider: 'Gemini',
+    providerKey: 'gemini',
+  },
+  {
+    value: 'gemini-3.1-flash-image-preview',
+    label: 'Nano Banana 2 Preview',
+    provider: 'Gemini',
+    providerKey: 'gemini',
+  },
+  {
+    value: 'gemini-3-pro-image-preview',
+    label: 'Nano Banana Pro Preview',
+    provider: 'Gemini',
+    providerKey: 'gemini',
+  },
+  {
     value: 'imagen-4',
     label: 'Imagen 4',
     provider: 'Gemini',
@@ -121,6 +139,7 @@ const getProviderKeyForImageModel = (value: string): ImageProviderKey => {
   if (normalized.startsWith('leonardo')) return 'leonardo';
   if (normalized.startsWith('gpt-image-')) return 'openai';
   if (normalized === 'grok-imagine-image') return 'grok';
+  if (normalized.startsWith('gemini-')) return 'gemini';
   if (normalized.startsWith('imagen-')) return 'gemini';
   if (normalized.startsWith('modelslab:')) return 'modelslab';
 
