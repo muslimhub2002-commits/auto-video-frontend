@@ -48,6 +48,9 @@ export function LlmModelSelect({
         <SelectItem value="grok-3-mini-latest">Grok 3 mini (latest)</SelectItem>
         <SelectItem value="grok-code-fast-1">Grok Code Fast 1</SelectItem>
 
+        <SelectItem value="deepseek-chat">DeepSeek Chat</SelectItem>
+        <SelectItem value="deepseek-reasoner">DeepSeek Reasoner</SelectItem>
+
         <SelectItem value="gemini-2.0-flash">Gemini 2.0 Flash</SelectItem>
 
         <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>
