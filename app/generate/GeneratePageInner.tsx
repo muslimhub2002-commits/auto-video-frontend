@@ -56,12 +56,21 @@ import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
 import type { SentenceItem } from './_types/sentences';
 import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
+import {
+  getDefaultImageFilterSettings,
+  getDefaultImageMotionSettings,
+  getDefaultImageMotionSpeed,
+  normalizeImageFilterSettings,
+  normalizeImageMotionSettings,
+  resolveImageMotionSpeed,
+} from './_components/sentences/ImageEffectPreview';
 import type {
   ImageFilterPresetDto,
   ImageFilterSettings,
   ImageMotionSettings,
   MotionEffectPresetDto,
 } from './_components/sentences/ImageEffectPreview';
+import { hasCustomLookSelection, hasCustomMotionSelection } from './_utils/imageEffectSelection';
 
 type ScriptCharacter = {
   key: string;
@@ -133,6 +142,60 @@ type PresetLibraryResponse<TPreset> = {
   total?: number;
   page?: number;
   limit?: number;
+};
+
+type BulkLookEffectResponse = {
+  items?: Array<{
+    sentenceId?: string;
+    index?: number;
+    visualEffect?: SentenceItem['visualEffect'];
+    imageFilterSettings?: Record<string, unknown> | null;
+  }>;
+};
+
+type BulkMotionEffectResponse = {
+  items?: Array<{
+    sentenceId?: string;
+    index?: number;
+    imageMotionEffect?: SentenceItem['imageMotionEffect'];
+    imageMotionSettings?: Record<string, unknown> | null;
+  }>;
+};
+
+type BulkAiEffectKind = 'look' | 'motion';
+
+type BulkLookEffectRequestItem = {
+  index: number;
+  sentenceId: string;
+  imagePrompt: string;
+  visualEffect: SentenceItem['visualEffect'] | 'none';
+  customImageFilterId: string | null;
+  imageFilterSettings: Record<string, unknown> | null;
+};
+
+type BulkLookEffectItem = {
+  sentenceId: string;
+  index: number;
+  visualEffect: Exclude<SentenceItem['visualEffect'], null | 'none'>;
+  imageFilterSettings: ImageFilterSettings;
+};
+
+type BulkMotionEffectRequestItem = {
+  index: number;
+  sentenceId: string;
+  imagePrompt: string;
+  imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+  imageMotionSpeed: number | null;
+  customMotionEffectId: string | null;
+  imageMotionSettings: Record<string, unknown> | null;
+};
+
+type BulkMotionEffectItem = {
+  sentenceId: string;
+  index: number;
+  imageMotionEffect: Exclude<SentenceItem['imageMotionEffect'], null | 'default'>;
+  imageMotionSettings: ImageMotionSettings;
+  imageMotionSpeed: number;
 };
 
 function normalizeImageMotionSpeedValue(value: number | null | undefined) {
@@ -842,6 +905,7 @@ export function GeneratePageInner() {
   const [isSyncingVoices, setIsSyncingVoices] = useState(false);
   const [syncVoicesResult, setSyncVoicesResult] = useState<string | null>(null);
   const [isGeneratingAllImages, setIsGeneratingAllImages] = useState(false);
+  const [isApplyingBulkAiEffect, setIsApplyingBulkAiEffect] = useState<BulkAiEffectKind | null>(null);
   const [generateAllImagesConfirm, setGenerateAllImagesConfirm] = useState<
     | null
     | {
@@ -850,6 +914,16 @@ export function GeneratePageInner() {
       missingIndices: number[];
       existingCount: number;
       missingCount: number;
+    }
+  >(null);
+  const [bulkAiEffectsConfirm, setBulkAiEffectsConfirm] = useState<
+    | null
+    | {
+      kind: BulkAiEffectKind;
+      eligibleIndices: number[];
+      uneditedIndices: number[];
+      existingCount: number;
+      uneditedCount: number;
     }
   >(null);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
@@ -2081,6 +2155,78 @@ export function GeneratePageInner() {
     }
   };
 
+  const handleUpdateImageFilterPreset = async (
+    imageFilterId: string,
+    settings: ImageFilterSettings,
+  ): Promise<ImageFilterPresetDto | null> => {
+    if (!user) {
+      showAlert('You must be logged in to update a look preset.', { type: 'warning' });
+      return null;
+    }
+
+    const trimmedId = String(imageFilterId ?? '').trim();
+    if (!trimmedId) return null;
+
+    try {
+      const res = await api.patch<ImageFilterPresetDto>(`/image-filters/${trimmedId}`, {
+        settings,
+      });
+
+      const currentPreset = imageFilterPresets.find((item) => item.id === trimmedId);
+      const saved: ImageFilterPresetDto = {
+        id: String(res.data?.id ?? trimmedId).trim(),
+        title:
+          String(res.data?.title ?? currentPreset?.title ?? 'Untitled look').trim() ||
+          'Untitled look',
+        settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+      };
+
+      setImageFilterPresets((prev) => {
+        const next = prev.map((item) => (item.id === saved.id ? saved : item));
+        return next.some((item) => item.id === saved.id) ? next : [saved, ...next];
+      });
+      showToast('Look preset updated.', 'success');
+      return saved;
+    } catch (error) {
+      console.error('Failed to update image filter preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to update look preset.'), 'error');
+      return null;
+    }
+  };
+
+  const handleDeleteImageFilterPreset = async (imageFilterId: string): Promise<boolean> => {
+    if (!user) {
+      showAlert('You must be logged in to delete a look preset.', { type: 'warning' });
+      return false;
+    }
+
+    const trimmedId = String(imageFilterId ?? '').trim();
+    if (!trimmedId) return false;
+
+    try {
+      await api.delete(`/image-filters/${trimmedId}`);
+      setImageFilterPresets((prev) => prev.filter((item) => item.id !== trimmedId));
+      setSentences((prev) =>
+        prev.map((sentence) =>
+          sentence.customImageFilterId === trimmedId
+            ? {
+                ...sentence,
+                visualEffect: null,
+                customImageFilterId: null,
+                imageFilterSettings: getDefaultImageFilterSettings(null),
+              }
+            : sentence,
+        ),
+      );
+      showToast('Look preset deleted.', 'success');
+      return true;
+    } catch (error) {
+      console.error('Failed to delete image filter preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to delete look preset.'), 'error');
+      return false;
+    }
+  };
+
   const handleSaveMotionEffectPreset = async (
     title: string,
     settings: ImageMotionSettings,
@@ -2117,6 +2263,85 @@ export function GeneratePageInner() {
       console.error('Failed to save motion effect preset', error);
       showToast('Failed to save motion preset.', 'error');
       return null;
+    }
+  };
+
+  const handleUpdateMotionEffectPreset = async (
+    motionEffectId: string,
+    settings: ImageMotionSettings,
+  ): Promise<MotionEffectPresetDto | null> => {
+    if (!user) {
+      showAlert('You must be logged in to update a motion preset.', { type: 'warning' });
+      return null;
+    }
+
+    const trimmedId = String(motionEffectId ?? '').trim();
+    if (!trimmedId) return null;
+
+    try {
+      const res = await api.patch<MotionEffectPresetDto>(`/motion-effects/${trimmedId}`, {
+        settings,
+      });
+
+      const currentPreset = motionEffectPresets.find((item) => item.id === trimmedId);
+      const saved: MotionEffectPresetDto = {
+        id: String(res.data?.id ?? trimmedId).trim(),
+        title:
+          String(res.data?.title ?? currentPreset?.title ?? 'Untitled motion').trim() ||
+          'Untitled motion',
+        settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+      };
+
+      setMotionEffectPresets((prev) => {
+        const next = prev.map((item) => (item.id === saved.id ? saved : item));
+        return next.some((item) => item.id === saved.id) ? next : [saved, ...next];
+      });
+      showToast('Motion preset updated.', 'success');
+      return saved;
+    } catch (error) {
+      console.error('Failed to update motion effect preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to update motion preset.'), 'error');
+      return null;
+    }
+  };
+
+  const handleDeleteMotionEffectPreset = async (motionEffectId: string): Promise<boolean> => {
+    if (!user) {
+      showAlert('You must be logged in to delete a motion preset.', { type: 'warning' });
+      return false;
+    }
+
+    const trimmedId = String(motionEffectId ?? '').trim();
+    if (!trimmedId) return false;
+
+    try {
+      await api.delete(`/motion-effects/${trimmedId}`);
+      setMotionEffectPresets((prev) => prev.filter((item) => item.id !== trimmedId));
+      const defaultSpeed = getDefaultImageMotionSpeed(effectiveIsShort);
+      const defaultSettings = getDefaultImageMotionSettings(
+        'default',
+        defaultSpeed,
+        effectiveIsShort,
+      );
+      setSentences((prev) =>
+        prev.map((sentence) =>
+          sentence.customMotionEffectId === trimmedId
+            ? {
+                ...sentence,
+                imageMotionEffect: 'default',
+                customMotionEffectId: null,
+                imageMotionSpeed: defaultSpeed,
+                imageMotionSettings: defaultSettings,
+              }
+            : sentence,
+        ),
+      );
+      showToast('Motion preset deleted.', 'success');
+      return true;
+    } catch (error) {
+      console.error('Failed to delete motion effect preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to delete motion preset.'), 'error');
+      return false;
     }
   };
 
@@ -4929,6 +5154,325 @@ export function GeneratePageInner() {
     return;
   };
 
+  const getBulkEffectEligibleIndices = useCallback(() => {
+    return sentences.reduce<number[]>((acc, sentence, index) => {
+      const imagePrompt = String(sentence.imagePrompt ?? '').trim();
+      if (sentence.sceneTab === 'video') return acc;
+      if (!imagePrompt) return acc;
+      acc.push(index);
+      return acc;
+    }, []);
+  }, [sentences]);
+
+  const requestAiLookEffects = useCallback(async (
+    payload: BulkLookEffectRequestItem[],
+  ): Promise<BulkLookEffectItem[]> => {
+    if (!payload.length) return [];
+
+    const sourceBySentenceId = new Map(payload.map((item) => [item.sentenceId, item]));
+    const { data } = await api.post<BulkLookEffectResponse>('/ai/generate-bulk-look-effects', {
+      sentences: payload,
+    });
+
+    return (Array.isArray(data?.items) ? data.items : [])
+      .map((item) => {
+        const sentenceId = String(item?.sentenceId ?? '').trim();
+        const source = sourceBySentenceId.get(sentenceId);
+        const visualEffect = item?.visualEffect;
+
+        if (!source || !visualEffect || visualEffect === 'none') {
+          return null;
+        }
+
+        const preservedBlurPx = normalizeImageFilterSettings(
+          source.imageFilterSettings,
+          source.visualEffect === 'none' ? null : source.visualEffect,
+        ).blurPx;
+
+        return {
+          sentenceId,
+          index: source.index,
+          visualEffect,
+          imageFilterSettings: normalizeImageFilterSettings(
+            {
+              ...(item?.imageFilterSettings ?? {}),
+              blurPx: preservedBlurPx,
+            },
+            visualEffect,
+          ),
+        } satisfies BulkLookEffectItem;
+      })
+      .filter(Boolean) as BulkLookEffectItem[];
+  }, []);
+
+  const requestAiMotionEffects = useCallback(async (
+    payload: BulkMotionEffectRequestItem[],
+  ): Promise<BulkMotionEffectItem[]> => {
+    if (!payload.length) return [];
+
+    const sourceBySentenceId = new Map(payload.map((item) => [item.sentenceId, item]));
+    const { data } = await api.post<BulkMotionEffectResponse>('/ai/generate-bulk-motion-effects', {
+      sentences: payload,
+    });
+
+    return (Array.isArray(data?.items) ? data.items : [])
+      .map((item) => {
+        const sentenceId = String(item?.sentenceId ?? '').trim();
+        const source = sourceBySentenceId.get(sentenceId);
+        const imageMotionEffect = item?.imageMotionEffect;
+
+        if (!source || !imageMotionEffect || imageMotionEffect === 'default') {
+          return null;
+        }
+
+        const imageMotionSpeed = resolveImageMotionSpeed(
+          source.imageMotionSpeed,
+          source.imageMotionSettings,
+          effectiveIsShort,
+        );
+
+        return {
+          sentenceId,
+          index: source.index,
+          imageMotionEffect,
+          imageMotionSpeed,
+          imageMotionSettings: normalizeImageMotionSettings(
+            item?.imageMotionSettings ?? null,
+            imageMotionEffect,
+            imageMotionSpeed,
+            effectiveIsShort,
+          ),
+        } satisfies BulkMotionEffectItem;
+      })
+      .filter(Boolean) as BulkMotionEffectItem[];
+  }, [effectiveIsShort]);
+
+  const handleGenerateSingleImageLookWithAi = useCallback(async (
+    sentenceId: string,
+    params: {
+      visualEffect: SentenceItem['visualEffect'] | null;
+      customImageFilterId: string | null;
+      imageFilterSettings: ImageFilterSettings;
+    },
+  ) => {
+    const sentence = sentences.find((item) => item.id === sentenceId);
+    const sentenceIndex = sentences.findIndex((item) => item.id === sentenceId);
+    const imagePrompt = String(sentence?.imagePrompt ?? '').trim();
+    if (!sentence || sentenceIndex < 0 || !imagePrompt) {
+      throw new Error('This image needs a prompt before AI Look can run.');
+    }
+
+    const items = await requestAiLookEffects([
+      {
+        index: sentenceIndex,
+        sentenceId,
+        imagePrompt,
+        visualEffect: params.visualEffect ?? 'none',
+        customImageFilterId: params.customImageFilterId,
+        imageFilterSettings: params.imageFilterSettings,
+      },
+    ]);
+
+    const item = items[0];
+    if (!item) {
+      throw new Error('AI did not return a look update for this image.');
+    }
+
+    return {
+      visualEffect: item.visualEffect,
+      customImageFilterId: null,
+      imageFilterSettings: item.imageFilterSettings,
+    };
+  }, [requestAiLookEffects, sentences]);
+
+  const handleGenerateSingleImageMotionWithAi = useCallback(async (
+    sentenceId: string,
+    params: {
+      imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+      customMotionEffectId: string | null;
+      imageMotionSettings: ImageMotionSettings;
+      imageMotionSpeed: number;
+    },
+  ): Promise<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  }> => {
+    const sentence = sentences.find((item) => item.id === sentenceId);
+    const sentenceIndex = sentences.findIndex((item) => item.id === sentenceId);
+    const imagePrompt = String(sentence?.imagePrompt ?? '').trim();
+    if (!sentence || sentenceIndex < 0 || !imagePrompt) {
+      throw new Error('This image needs a prompt before AI Motion can run.');
+    }
+
+    const items = await requestAiMotionEffects([
+      {
+        index: sentenceIndex,
+        sentenceId,
+        imagePrompt,
+        imageMotionEffect: params.imageMotionEffect,
+        imageMotionSpeed: params.imageMotionSpeed,
+        customMotionEffectId: params.customMotionEffectId,
+        imageMotionSettings: params.imageMotionSettings,
+      },
+    ]);
+
+    const item = items[0];
+    if (!item) {
+      throw new Error('AI did not return a motion update for this image.');
+    }
+
+    const imageMotionEffect = item.imageMotionEffect as NonNullable<
+      SentenceItem['imageMotionEffect']
+    >;
+
+    return {
+      imageMotionEffect,
+      customMotionEffectId: null,
+      imageMotionSettings: item.imageMotionSettings,
+      imageMotionSpeed: item.imageMotionSpeed,
+    };
+  }, [requestAiMotionEffects, sentences]);
+
+  const runBulkAiLookEffects = useCallback(async (indices: number[]) => {
+    const payload = indices
+      .map((index) => {
+        const sentence = sentences[index];
+        if (!sentence) return null;
+
+        const imagePrompt = String(sentence.imagePrompt ?? '').trim();
+        if (!imagePrompt) return null;
+
+        return {
+          index,
+          sentenceId: sentence.id,
+          imagePrompt,
+          visualEffect: sentence.visualEffect ?? 'none',
+          customImageFilterId: sentence.customImageFilterId ?? null,
+          imageFilterSettings: sentence.imageFilterSettings ?? null,
+        };
+      })
+      .filter(Boolean);
+
+    if (!payload.length) {
+      showToast('No eligible image scenes with prompts were found for look effects.', 'warning');
+      return;
+    }
+
+    try {
+      setIsApplyingBulkAiEffect('look');
+      const items = await requestAiLookEffects(payload as BulkLookEffectRequestItem[]);
+      if (!items.length) {
+        showToast('AI did not return any look updates.', 'warning');
+        return;
+      }
+
+      items.forEach((item) => {
+        patchSentenceById(item.sentenceId, {
+          visualEffect: item.visualEffect,
+          customImageFilterId: null,
+          imageFilterSettings: item.imageFilterSettings,
+        });
+      });
+
+      showToast('AI look effects applied in the editor.', 'success');
+    } catch (error) {
+      console.error('Failed to apply AI look effects:', error);
+      showToast('Failed to apply AI look effects.', 'error');
+    } finally {
+      setIsApplyingBulkAiEffect(null);
+    }
+  }, [patchSentenceById, requestAiLookEffects, showToast]);
+
+  const runBulkAiMotionEffects = useCallback(async (indices: number[]) => {
+    const payload = indices
+      .map((index) => {
+        const sentence = sentences[index];
+        if (!sentence) return null;
+
+        const imagePrompt = String(sentence.imagePrompt ?? '').trim();
+        if (!imagePrompt) return null;
+
+        return {
+          index,
+          sentenceId: sentence.id,
+          imagePrompt,
+          imageMotionEffect: sentence.imageMotionEffect ?? 'default',
+          imageMotionSpeed: sentence.imageMotionSpeed ?? null,
+          customMotionEffectId: sentence.customMotionEffectId ?? null,
+          imageMotionSettings: sentence.imageMotionSettings ?? null,
+        };
+      })
+      .filter(Boolean);
+
+    if (!payload.length) {
+      showToast('No eligible image scenes with prompts were found for motion effects.', 'warning');
+      return;
+    }
+
+    try {
+      setIsApplyingBulkAiEffect('motion');
+      const items = await requestAiMotionEffects(payload as BulkMotionEffectRequestItem[]);
+      if (!items.length) {
+        showToast('AI did not return any motion updates.', 'warning');
+        return;
+      }
+
+      items.forEach((item) => {
+        patchSentenceById(item.sentenceId, {
+          imageMotionEffect: item.imageMotionEffect,
+          customMotionEffectId: null,
+          imageMotionSpeed: item.imageMotionSpeed,
+          imageMotionSettings: item.imageMotionSettings,
+        });
+      });
+
+      showToast('AI motion effects applied in the editor.', 'success');
+    } catch (error) {
+      console.error('Failed to apply AI motion effects:', error);
+      showToast('Failed to apply AI motion effects.', 'error');
+    } finally {
+      setIsApplyingBulkAiEffect(null);
+    }
+  }, [patchSentenceById, requestAiMotionEffects, showToast]);
+
+  const handleOpenBulkAiEffects = useCallback((kind: BulkAiEffectKind) => {
+    if (isApplyingBulkAiEffect) return;
+
+    const eligibleIndices = getBulkEffectEligibleIndices();
+    if (!eligibleIndices.length) {
+      showToast('No eligible image scenes with image prompts were found.', 'warning');
+      return;
+    }
+
+    const uneditedIndices = eligibleIndices.filter((index) => {
+      const sentence = sentences[index];
+      if (!sentence) return false;
+      return kind === 'look'
+        ? !hasCustomLookSelection(sentence)
+        : !hasCustomMotionSelection(sentence);
+    });
+
+    const existingCount = eligibleIndices.length - uneditedIndices.length;
+    if (!uneditedIndices.length) {
+      showToast(
+        kind === 'look'
+          ? 'All eligible images already have custom look settings. Replace them all?'
+          : 'All eligible images already have custom motion settings. Replace them all?',
+        'info',
+      );
+    }
+
+    setBulkAiEffectsConfirm({
+      kind,
+      eligibleIndices,
+      uneditedIndices,
+      existingCount,
+      uneditedCount: uneditedIndices.length,
+    });
+  }, [getBulkEffectEligibleIndices, isApplyingBulkAiEffect, runBulkAiLookEffects, runBulkAiMotionEffects, sentences, showToast]);
+
   const handleVideoModelChange = (next: 'gemini' | 'grok') => {
     setVideoModel(next);
     if (next !== 'grok') return;
@@ -6870,7 +7414,13 @@ export function GeneratePageInner() {
                   isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
                   onSentencePatch={handleSentencePatch}
                   onSaveImageFilterPreset={handleSaveImageFilterPreset}
+                  onUpdateImageFilterPreset={handleUpdateImageFilterPreset}
+                  onDeleteImageFilterPreset={handleDeleteImageFilterPreset}
                   onSaveMotionEffectPreset={handleSaveMotionEffectPreset}
+                  onUpdateMotionEffectPreset={handleUpdateMotionEffectPreset}
+                  onDeleteMotionEffectPreset={handleDeleteMotionEffectPreset}
+                  onGenerateSingleImageLookWithAi={handleGenerateSingleImageLookWithAi}
+                  onGenerateSingleImageMotionWithAi={handleGenerateSingleImageMotionWithAi}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
                   onSentenceImageMotionEffectChange={
                     handleSentenceImageMotionEffectChange
@@ -6918,6 +7468,10 @@ export function GeneratePageInner() {
                   onGenerateSentenceReferenceImage={handleGenerateSentenceReferenceImage}
                   onGenerateAllImages={handleGenerateAllSentenceImages}
                   isGeneratingAllImages={isGeneratingAllImages}
+                  onGenerateBulkLookEffects={() => handleOpenBulkAiEffects('look')}
+                  isApplyingBulkLookEffects={isApplyingBulkAiEffect === 'look'}
+                  onGenerateBulkMotionEffects={() => handleOpenBulkAiEffects('motion')}
+                  isApplyingBulkMotionEffects={isApplyingBulkAiEffect === 'motion'}
                   onSentenceTextChange={handleSentenceTextChange}
                   onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
                   onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
@@ -7221,6 +7775,77 @@ export function GeneratePageInner() {
       />
 
       {/* Generate All Images Confirmation */}
+      <AlertDialog
+        isOpen={Boolean(bulkAiEffectsConfirm)}
+        onClose={() => {
+          if (isApplyingBulkAiEffect) return;
+          setBulkAiEffectsConfirm(null);
+        }}
+        onCancel={() => {
+          if (!bulkAiEffectsConfirm || isApplyingBulkAiEffect) return;
+
+          if (
+            bulkAiEffectsConfirm.existingCount > 0 &&
+            bulkAiEffectsConfirm.uneditedIndices.length > 0
+          ) {
+            const { kind, uneditedIndices } = bulkAiEffectsConfirm;
+            setBulkAiEffectsConfirm(null);
+            void (kind === 'look'
+              ? runBulkAiLookEffects(uneditedIndices)
+              : runBulkAiMotionEffects(uneditedIndices));
+            return;
+          }
+
+          setBulkAiEffectsConfirm(null);
+        }}
+        onConfirm={() => {
+          if (!bulkAiEffectsConfirm || isApplyingBulkAiEffect) return;
+          const { kind, eligibleIndices } = bulkAiEffectsConfirm;
+          setBulkAiEffectsConfirm(null);
+          void (kind === 'look'
+            ? runBulkAiLookEffects(eligibleIndices)
+            : runBulkAiMotionEffects(eligibleIndices));
+        }}
+        title={
+          bulkAiEffectsConfirm?.kind === 'look'
+            ? bulkAiEffectsConfirm?.existingCount === 0
+              ? 'Apply AI look to eligible images?'
+              : bulkAiEffectsConfirm?.uneditedIndices.length
+                ? 'Apply AI look to all eligible images?'
+                : 'Replace all custom look settings?'
+            : bulkAiEffectsConfirm?.existingCount === 0
+              ? 'Apply AI motion to eligible images?'
+              : bulkAiEffectsConfirm?.uneditedIndices.length
+                ? 'Apply AI motion to all eligible images?'
+                : 'Replace all custom motion settings?'
+        }
+        description={
+          bulkAiEffectsConfirm?.kind === 'look'
+            ? bulkAiEffectsConfirm?.existingCount === 0
+              ? `AI Look will generate random custom look settings for all eligible images in the editor (${bulkAiEffectsConfirm?.eligibleIndices.length ?? 0}). Do you want to continue?`
+              : bulkAiEffectsConfirm?.uneditedIndices.length
+                ? `Some eligible images already have custom look settings (${bulkAiEffectsConfirm?.existingCount ?? 0}). Apply AI look to every eligible image, or only to the ones without custom look (${bulkAiEffectsConfirm?.uneditedCount ?? 0})?`
+                : 'Every eligible image already has custom look settings. This will replace all of them in the editor.'
+            : bulkAiEffectsConfirm?.existingCount === 0
+              ? `AI Motion will generate random custom motion settings for all eligible images in the editor (${bulkAiEffectsConfirm?.eligibleIndices.length ?? 0}). It will keep each image motion speed unchanged. Do you want to continue?`
+              : bulkAiEffectsConfirm?.uneditedIndices.length
+                ? `Some eligible images already have custom motion settings (${bulkAiEffectsConfirm?.existingCount ?? 0}). Apply AI motion to every eligible image, or only to the ones without custom motion (${bulkAiEffectsConfirm?.uneditedCount ?? 0})?`
+                : 'Every eligible image already has custom motion settings. This will replace all of them in the editor.'
+        }
+        confirmText="Apply to all eligible images"
+        cancelText={
+          bulkAiEffectsConfirm &&
+          bulkAiEffectsConfirm.existingCount > 0 &&
+          bulkAiEffectsConfirm.uneditedIndices.length > 0
+            ? bulkAiEffectsConfirm?.kind === 'look'
+              ? 'Apply only to images without custom look'
+              : 'Apply only to images without custom motion'
+            : 'Cancel'
+        }
+        variant="info"
+        isLoading={Boolean(isApplyingBulkAiEffect)}
+      />
+
       <AlertDialog
         isOpen={Boolean(generateAllImagesConfirm)}
         onClose={() => setGenerateAllImagesConfirm(null)}

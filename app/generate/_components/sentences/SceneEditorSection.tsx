@@ -37,6 +37,10 @@ type SceneEditorSectionProps = {
   sceneDurationSecondsByIndex: Array<number | null>;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+  isApplyingBulkLookEffects?: boolean;
+  onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
+  isApplyingBulkMotionEffects?: boolean;
+  onGenerateBulkMotionEffects?: (() => void) | (() => Promise<void>);
 
   onSelectVideoFromLibrary?: (index: number) => void;
 
@@ -72,10 +76,46 @@ type SceneEditorSectionProps = {
     title: string,
     settings: ImageFilterSettings,
   ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onUpdateImageFilterPreset: (
+    presetId: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onDeleteImageFilterPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveMotionEffectPreset: (
     title: string,
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onUpdateMotionEffectPreset: (
+    presetId: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onGenerateSingleImageLookWithAi: (
+    sentenceId: string,
+    params: {
+      visualEffect: SentenceItem['visualEffect'] | null;
+      customImageFilterId: string | null;
+      imageFilterSettings: ImageFilterSettings;
+    },
+  ) => Promise<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    customImageFilterId: null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>;
+  onGenerateSingleImageMotionWithAi: (
+    sentenceId: string,
+    params: {
+      imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+      customMotionEffectId: string | null;
+      imageMotionSettings: ImageMotionSettings;
+      imageMotionSpeed: number;
+    },
+  ) => Promise<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>;
 
   onSentenceVisualEffectChange: (
     index: number,
@@ -211,10 +251,46 @@ type SentenceRowProps = {
     title: string,
     settings: ImageFilterSettings,
   ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onUpdateImageFilterPreset: (
+    presetId: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onDeleteImageFilterPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveMotionEffectPreset: (
     title: string,
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onUpdateMotionEffectPreset: (
+    presetId: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onGenerateSingleImageLookWithAi: (
+    sentenceId: string,
+    params: {
+      visualEffect: SentenceItem['visualEffect'] | null;
+      customImageFilterId: string | null;
+      imageFilterSettings: ImageFilterSettings;
+    },
+  ) => Promise<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    customImageFilterId: null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>;
+  onGenerateSingleImageMotionWithAi: (
+    sentenceId: string,
+    params: {
+      imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+      customMotionEffectId: string | null;
+      imageMotionSettings: ImageMotionSettings;
+      imageMotionSpeed: number;
+    },
+  ) => Promise<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>;
   onSentenceVisualEffectChange: (
     index: number,
     value: NonNullable<SentenceItem['visualEffect']> | null,
@@ -320,7 +396,13 @@ const SentenceRow = memo(function SentenceRow({
   isLoadingMotionEffectPresets,
   onSentencePatch,
   onSaveImageFilterPreset,
+  onUpdateImageFilterPreset,
+  onDeleteImageFilterPreset,
   onSaveMotionEffectPreset,
+  onUpdateMotionEffectPreset,
+  onDeleteMotionEffectPreset,
+  onGenerateSingleImageLookWithAi,
+  onGenerateSingleImageMotionWithAi,
   onSentenceVisualEffectChange,
   onSentenceImageMotionEffectChange,
   onSentenceImageMotionSpeedChange,
@@ -398,7 +480,13 @@ const SentenceRow = memo(function SentenceRow({
           isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
           onSentencePatch={(patch) => onSentencePatch(index, patch)}
           onSaveImageFilterPreset={onSaveImageFilterPreset}
+          onUpdateImageFilterPreset={onUpdateImageFilterPreset}
+          onDeleteImageFilterPreset={onDeleteImageFilterPreset}
           onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+          onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
+          onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+          onGenerateSingleImageLookWithAi={onGenerateSingleImageLookWithAi}
+          onGenerateSingleImageMotionWithAi={onGenerateSingleImageMotionWithAi}
           onVisualEffectChange={(value) =>
             onSentenceVisualEffectChange(index, value)
           }
@@ -519,12 +607,12 @@ const SentenceRow = memo(function SentenceRow({
                       onTransitionToNextChange(
                         index,
                         nextValue as
-                          | 'none'
-                          | 'glitch'
-                          | 'whip'
-                          | 'flash'
-                          | 'fade'
-                          | 'chromaLeak',
+                        | 'none'
+                        | 'glitch'
+                        | 'whip'
+                        | 'flash'
+                        | 'fade'
+                        | 'chromaLeak',
                       );
                     }}
                   >
@@ -624,6 +712,10 @@ export function SceneEditorSection({
   sceneDurationSecondsByIndex,
   isGeneratingAllImages,
   onGenerateAllImages,
+  isApplyingBulkLookEffects = false,
+  onGenerateBulkLookEffects,
+  isApplyingBulkMotionEffects = false,
+  onGenerateBulkMotionEffects,
 
   onSelectVideoFromLibrary,
 
@@ -650,7 +742,13 @@ export function SceneEditorSection({
   isLoadingMotionEffectPresets = false,
   onSentencePatch,
   onSaveImageFilterPreset,
+  onUpdateImageFilterPreset,
+  onDeleteImageFilterPreset,
   onSaveMotionEffectPreset,
+  onUpdateMotionEffectPreset,
+  onDeleteMotionEffectPreset,
+  onGenerateSingleImageLookWithAi,
+  onGenerateSingleImageMotionWithAi,
   onSentenceVisualEffectChange,
   onSentenceImageMotionEffectChange,
   onSentenceImageMotionSpeedChange,
@@ -716,13 +814,13 @@ export function SceneEditorSection({
       sentences.filter((sentence) =>
         Boolean(
           sentence.image ||
-            sentence.imageUrl ||
-            sentence.video ||
-            sentence.videoUrl ||
-            sentence.startImage ||
-            sentence.startImageUrl ||
-            sentence.endImage ||
-            sentence.endImageUrl,
+          sentence.imageUrl ||
+          sentence.video ||
+          sentence.videoUrl ||
+          sentence.startImage ||
+          sentence.startImageUrl ||
+          sentence.endImage ||
+          sentence.endImageUrl,
         ),
       ).length,
     [sentences],
@@ -732,27 +830,30 @@ export function SceneEditorSection({
     <div className="space-y-6">
       {/* Header Section */}
       <div className="bg-linear-to-br from-indigo-50 via-purple-50/40 to-white rounded-2xl p-6 border border-indigo-100/60 shadow-sm">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-linear-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg">
-              <Images className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h4 className="text-base font-bold text-gray-900 mb-0.5">Scene Editor</h4>
-              <p className="text-xs text-gray-600">Craft your story with visuals for each sentence</p>
-            </div>
-            <div className="ml-4 px-4 py-2 bg-white/80 backdrop-blur-sm rounded-xl border border-indigo-200 shadow-sm">
-              <div className="flex items-center gap-2.5">
-                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-sm"></div>
-                <span className="text-sm font-bold text-gray-700">{completeCount}</span>
-                <span className="text-xs text-gray-500 font-medium">of</span>
-                <span className="text-sm font-bold text-gray-700">{sentences.length}</span>
-                <span className="text-xs text-gray-500 font-medium">complete</span>
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex min-w-0 flex-wrap items-center gap-4">
+              <div className="p-3 bg-linear-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg">
+                <Images className="h-5 w-5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-base font-bold text-gray-900 mb-0.5">Scene Editor</h4>
+                <p className="text-xs text-gray-600">Craft your story with visuals for each sentence</p>
+              </div>
+              <div className="px-4 py-2 bg-white/80 backdrop-blur-sm rounded-xl border border-indigo-200 shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-sm"></div>
+                  <span className="text-sm font-bold text-gray-700">{completeCount}</span>
+                  <span className="text-xs text-gray-500 font-medium">of</span>
+                  <span className="text-sm font-bold text-gray-700">{sentences.length}</span>
+                  <span className="text-xs text-gray-500 font-medium">complete</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex w-full flex-wrap items-stretch gap-3">
+
             <Button
               type="button"
               size="sm"
@@ -827,6 +928,49 @@ export function SceneEditorSection({
                 </>
               )}
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onGenerateBulkLookEffects}
+              disabled={!onGenerateBulkLookEffects || isApplyingBulkLookEffects}
+              className="gap-2 h-10 px-4 border-fuchsia-200 bg-white text-fuchsia-700 hover:bg-fuchsia-50 hover:border-fuchsia-300 shadow-sm hover:shadow transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+              title="Use AI to apply random look settings to eligible image scenes"
+            >
+              {isApplyingBulkLookEffects ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm font-semibold">Applying Look...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  <span className="text-sm font-semibold">AI Look</span>
+                </>
+              )}
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onGenerateBulkMotionEffects}
+              disabled={!onGenerateBulkMotionEffects || isApplyingBulkMotionEffects}
+              className="gap-2 h-10 px-4 border-sky-200 bg-white text-sky-700 hover:bg-sky-50 hover:border-sky-300 shadow-sm hover:shadow transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+              title="Use AI to apply random motion settings to eligible image scenes"
+            >
+              {isApplyingBulkMotionEffects ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm font-semibold">Applying Motion...</span>
+                </>
+              ) : (
+                <>
+                  <Clapperboard className="h-4 w-4" />
+                  <span className="text-sm font-semibold">AI Motion</span>
+                </>
+              )}
+            </Button>
           </div>
         </div>
       </div>
@@ -884,7 +1028,13 @@ export function SceneEditorSection({
               isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
               onSentencePatch={onSentencePatch}
               onSaveImageFilterPreset={onSaveImageFilterPreset}
+              onUpdateImageFilterPreset={onUpdateImageFilterPreset}
+              onDeleteImageFilterPreset={onDeleteImageFilterPreset}
               onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+              onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
+              onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+              onGenerateSingleImageLookWithAi={onGenerateSingleImageLookWithAi}
+              onGenerateSingleImageMotionWithAi={onGenerateSingleImageMotionWithAi}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}
               onSentenceImageMotionEffectChange={onSentenceImageMotionEffectChange}
               onSentenceImageMotionSpeedChange={onSentenceImageMotionSpeedChange}

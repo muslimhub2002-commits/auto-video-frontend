@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import {
   Select,
   SelectContent,
@@ -10,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Clock3, Save, SlidersHorizontal, Sparkles, Timer, X } from 'lucide-react';
+import { Clock3, Loader2, Save, SlidersHorizontal, Sparkles, Timer, Trash2, Wand2, X } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import {
@@ -35,6 +36,7 @@ import {
   resolveMotionEffectFromSettings,
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
+import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
 
 const LOOK_EFFECT_VALUES = [
   'none',
@@ -70,6 +72,15 @@ type ImageEffectsDetailModalProps = {
   customMotionEffectId: string | null | undefined;
   imageFilterSettings: Record<string, unknown> | null | undefined;
   imageMotionSettings: Record<string, unknown> | null | undefined;
+  retainedTemporaryLook?: {
+    visualEffect: SentenceItem['visualEffect'] | null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null;
+  retainedTemporaryMotion?: {
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   onClose: () => void;
@@ -86,10 +97,40 @@ type ImageEffectsDetailModalProps = {
     title: string,
     settings: ImageFilterSettings,
   ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onUpdateImageFilterPreset: (
+    presetId: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onDeleteImageFilterPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveMotionEffectPreset: (
     title: string,
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onUpdateMotionEffectPreset: (
+    presetId: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onGenerateLookWithAi: (params: {
+    visualEffect: SentenceItem['visualEffect'] | null;
+    customImageFilterId: string | null;
+    imageFilterSettings: ImageFilterSettings;
+  }) => Promise<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    customImageFilterId: null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>;
+  onGenerateMotionWithAi: (params: {
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: string | null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  }) => Promise<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>;
 };
 
 function RangeField(props: {
@@ -196,12 +237,20 @@ export function ImageEffectsDetailModal({
   customMotionEffectId,
   imageFilterSettings,
   imageMotionSettings,
+  retainedTemporaryLook,
+  retainedTemporaryMotion,
   imageFilterPresets,
   motionEffectPresets,
   onClose,
   onApply,
   onSaveImageFilterPreset,
+  onUpdateImageFilterPreset,
+  onDeleteImageFilterPreset,
   onSaveMotionEffectPreset,
+  onUpdateMotionEffectPreset,
+  onDeleteMotionEffectPreset,
+  onGenerateLookWithAi,
+  onGenerateMotionWithAi,
 }: ImageEffectsDetailModalProps) {
   const incomingImageMotionSpeed = resolveImageMotionSpeed(
     imageMotionSpeed,
@@ -213,6 +262,15 @@ export function ImageEffectsDetailModal({
   const [motionSaveTitle, setMotionSaveTitle] = useState('');
   const [isSavingLookPreset, setIsSavingLookPreset] = useState(false);
   const [isSavingMotionPreset, setIsSavingMotionPreset] = useState(false);
+  const [isOverridingLookPreset, setIsOverridingLookPreset] = useState(false);
+  const [isOverridingMotionPreset, setIsOverridingMotionPreset] = useState(false);
+  const [isDeletingLookPreset, setIsDeletingLookPreset] = useState(false);
+  const [isDeletingMotionPreset, setIsDeletingMotionPreset] = useState(false);
+  const [isGeneratingLookWithAi, setIsGeneratingLookWithAi] = useState(false);
+  const [isGeneratingMotionWithAi, setIsGeneratingMotionWithAi] = useState(false);
+  const [lookActionError, setLookActionError] = useState<string | null>(null);
+  const [motionActionError, setMotionActionError] = useState<string | null>(null);
+  const [deletePresetKind, setDeletePresetKind] = useState<DetailTab | null>(null);
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isClosing, setIsClosing] = useState(false);
   const [draftVisualEffect, setDraftVisualEffect] = useState<SentenceItem['visualEffect'] | null>(
@@ -242,6 +300,15 @@ export function ImageEffectsDetailModal({
         isShortVideo,
       ),
   );
+  const [retainedDraftTemporaryLook, setRetainedDraftTemporaryLook] = useState<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>(retainedTemporaryLook ?? null);
+  const [retainedDraftTemporaryMotion, setRetainedDraftTemporaryMotion] = useState<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>(retainedTemporaryMotion ?? null);
 
   const resolvedLook = useMemo(
     () => normalizeImageFilterSettings(draftImageFilterSettings, draftVisualEffect ?? null),
@@ -257,6 +324,72 @@ export function ImageEffectsDetailModal({
       ),
     [draftImageMotionEffect, draftImageMotionSettings, draftImageMotionSpeed, isShortVideo],
   );
+  const selectedLookPreset = useMemo(
+    () => imageFilterPresets.find((item) => item.id === draftCustomImageFilterId) ?? null,
+    [draftCustomImageFilterId, imageFilterPresets],
+  );
+  const selectedMotionPreset = useMemo(
+    () => motionEffectPresets.find((item) => item.id === draftCustomMotionEffectId) ?? null,
+    [draftCustomMotionEffectId, motionEffectPresets],
+  );
+  const selectedLookPresetEffect = useMemo(
+    () =>
+      selectedLookPreset
+        ? resolveVisualEffectFromSettings(selectedLookPreset.settings, draftVisualEffect ?? null)
+        : null,
+    [draftVisualEffect, selectedLookPreset],
+  );
+  const selectedMotionPresetEffect = useMemo(
+    () =>
+      selectedMotionPreset
+        ? resolveMotionEffectFromSettings(
+            selectedMotionPreset.settings,
+            draftImageMotionEffect ?? 'default',
+          )
+        : 'default',
+    [draftImageMotionEffect, selectedMotionPreset],
+  );
+  const selectedLookPresetSettings = useMemo(
+    () =>
+      selectedLookPreset
+        ? normalizeImageFilterSettings(selectedLookPreset.settings, selectedLookPresetEffect)
+        : null,
+    [selectedLookPreset, selectedLookPresetEffect],
+  );
+  const selectedMotionPresetSettings = useMemo(
+    () =>
+      selectedMotionPreset
+        ? normalizeImageMotionSettings(
+            selectedMotionPreset.settings,
+            selectedMotionPresetEffect,
+            draftImageMotionSpeed,
+            isShortVideo,
+          )
+        : null,
+    [draftImageMotionSpeed, isShortVideo, selectedMotionPreset, selectedMotionPresetEffect],
+  );
+  const isLookDirtyFromSelectedPreset = Boolean(
+    selectedLookPreset &&
+      ((selectedLookPresetEffect ?? null) !== (draftVisualEffect ?? null) ||
+        JSON.stringify(selectedLookPresetSettings) !== JSON.stringify(resolvedLook)),
+  );
+  const isMotionDirtyFromSelectedPreset = Boolean(
+    selectedMotionPreset &&
+      (selectedMotionPresetEffect !== (draftImageMotionEffect ?? 'default') ||
+        JSON.stringify(selectedMotionPresetSettings) !== JSON.stringify(resolvedMotion)),
+  );
+  const canOverrideLookPreset = Boolean(selectedLookPreset && isLookDirtyFromSelectedPreset);
+  const canOverrideMotionPreset = Boolean(selectedMotionPreset && isMotionDirtyFromSelectedPreset);
+  const trimmedLookSaveTitle = lookSaveTitle.trim();
+  const trimmedMotionSaveTitle = motionSaveTitle.trim();
+  const canSaveLookAsNew = (draftVisualEffect ?? null) !== null;
+  const canSaveMotionAsNew = true;
+  const isLookSaveTitleValid =
+    trimmedLookSaveTitle.length > 0 &&
+    (!selectedLookPreset || trimmedLookSaveTitle !== selectedLookPreset.title.trim());
+  const isMotionSaveTitleValid =
+    trimmedMotionSaveTitle.length > 0 &&
+    (!selectedMotionPreset || trimmedMotionSaveTitle !== selectedMotionPreset.title.trim());
   const [debouncedPreview, setDebouncedPreview] = useState<DebouncedPreviewState>(() => ({
     visualEffect: visualEffect ?? null,
     imageMotionEffect: imageMotionEffect ?? 'default',
@@ -302,8 +435,13 @@ export function ImageEffectsDetailModal({
         isShortVideo,
       ),
     );
+    setRetainedDraftTemporaryLook(retainedTemporaryLook ?? null);
+    setRetainedDraftTemporaryMotion(retainedTemporaryMotion ?? null);
     setLookSaveTitle('');
     setMotionSaveTitle('');
+    setLookActionError(null);
+    setMotionActionError(null);
+    setDeletePresetKind(null);
     setDebouncedPreview((prev) => ({
       visualEffect: visualEffect ?? null,
       imageMotionEffect: imageMotionEffect ?? 'default',
@@ -327,7 +465,40 @@ export function ImageEffectsDetailModal({
     incomingImageMotionSpeed,
     isShortVideo,
     isOpen,
+    retainedTemporaryLook,
+    retainedTemporaryMotion,
     visualEffect,
+  ]);
+
+  useEffect(() => {
+    if (!draftCustomImageFilterId && draftImageFilterSettings?.presetKey === 'custom') {
+      setRetainedDraftTemporaryLook({
+        visualEffect:
+          resolveVisualEffectFromSettings(draftImageFilterSettings, draftVisualEffect ?? null) ??
+          draftVisualEffect ??
+          null,
+        imageFilterSettings: resolvedLook,
+      });
+    }
+  }, [draftCustomImageFilterId, draftImageFilterSettings, draftVisualEffect, resolvedLook]);
+
+  useEffect(() => {
+    if (!draftCustomMotionEffectId && draftImageMotionSettings?.presetKey === 'custom') {
+      setRetainedDraftTemporaryMotion({
+        imageMotionEffect: resolveMotionEffectFromSettings(
+          draftImageMotionSettings,
+          draftImageMotionEffect ?? 'default',
+        ),
+        imageMotionSettings: resolvedMotion,
+        imageMotionSpeed: draftImageMotionSpeed,
+      });
+    }
+  }, [
+    draftCustomMotionEffectId,
+    draftImageMotionEffect,
+    draftImageMotionSettings,
+    draftImageMotionSpeed,
+    resolvedMotion,
   ]);
 
   useEffect(() => {
@@ -371,10 +542,14 @@ export function ImageEffectsDetailModal({
 
   const lookSelectValue = draftCustomImageFilterId
     ? `custom:${draftCustomImageFilterId}`
+    : draftImageFilterSettings?.presetKey === 'custom'
+      ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
     : `builtin:${resolveVisualEffectFromSettings(draftImageFilterSettings, draftVisualEffect ?? null)}`;
 
   const motionSelectValue = draftCustomMotionEffectId
     ? `custom:${draftCustomMotionEffectId}`
+    : draftImageMotionSettings?.presetKey === 'custom'
+      ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
     : `builtin:${resolveMotionEffectFromSettings(draftImageMotionSettings, draftImageMotionEffect ?? 'default')}`;
   const isBuiltinDefaultScaleMotion =
     !draftCustomMotionEffectId &&
@@ -387,6 +562,17 @@ export function ImageEffectsDetailModal({
   const handleLookPresetChange = (value: string) => {
     if (value.startsWith('custom:')) {
       const presetId = value.slice('custom:'.length);
+      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) {
+        if (!retainedDraftTemporaryLook) return;
+
+        setDraftVisualEffect(retainedDraftTemporaryLook.visualEffect);
+        setDraftCustomImageFilterId(null);
+        setDraftImageFilterSettings({
+          ...retainedDraftTemporaryLook.imageFilterSettings,
+          presetKey: 'custom',
+        });
+        return;
+      }
       const preset = imageFilterPresets.find((item) => item.id === presetId);
       if (!preset) return;
       const settings = normalizeImageFilterSettings(preset.settings, visualEffect ?? null);
@@ -406,6 +592,18 @@ export function ImageEffectsDetailModal({
   const handleMotionPresetChange = (value: string) => {
     if (value.startsWith('custom:')) {
       const presetId = value.slice('custom:'.length);
+      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) {
+        if (!retainedDraftTemporaryMotion) return;
+
+        setDraftImageMotionEffect(retainedDraftTemporaryMotion.imageMotionEffect);
+        setDraftCustomMotionEffectId(null);
+        setDraftImageMotionSettings({
+          ...retainedDraftTemporaryMotion.imageMotionSettings,
+          presetKey: 'custom',
+        });
+        setDraftImageMotionSpeed(retainedDraftTemporaryMotion.imageMotionSpeed);
+        return;
+      }
       const preset = motionEffectPresets.find((item) => item.id === presetId);
       if (!preset) return;
       const settings = normalizeImageMotionSettings(
@@ -435,27 +633,25 @@ export function ImageEffectsDetailModal({
     const nextSettings: ImageFilterSettings = {
       ...resolvedLook,
       ...patch,
-      presetKey:
-        draftImageFilterSettings?.presetKey === 'custom' ? 'custom' : resolvedLook.presetKey,
+      presetKey: 'custom',
     };
     setDraftVisualEffect(resolveVisualEffectFromSettings(nextSettings, draftVisualEffect ?? null));
-    setDraftCustomImageFilterId(null);
     setDraftImageFilterSettings(nextSettings);
+    setLookActionError(null);
   };
 
   const updateMotionSettings = (patch: Partial<ImageMotionSettings>) => {
     const nextSettings: ImageMotionSettings = {
       ...resolvedMotion,
       ...patch,
-      presetKey:
-        draftImageMotionSettings?.presetKey === 'custom' ? 'custom' : resolvedMotion.presetKey,
+      presetKey: 'custom',
     };
     setDraftImageMotionEffect(
       resolveMotionEffectFromSettings(nextSettings, draftImageMotionEffect ?? 'default'),
     );
-    setDraftCustomMotionEffectId(null);
     setDraftImageMotionSettings(nextSettings);
     setDraftImageMotionSpeed(nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo));
+    setMotionActionError(null);
   };
 
   const updateAllEndValueModes = (value: 'loop' | 'continue') => {
@@ -469,39 +665,186 @@ export function ImageEffectsDetailModal({
   };
 
   const handleSaveLookPreset = async () => {
-    const title = lookSaveTitle.trim();
-    if (!title || isSavingLookPreset) return;
+    if (!isLookSaveTitleValid || isSavingLookPreset) return;
     setIsSavingLookPreset(true);
-    const saved = await onSaveImageFilterPreset(title, resolvedLook);
-    if (saved) {
-      setDraftCustomImageFilterId(saved.id);
-      setDraftImageFilterSettings({ ...resolvedLook, presetKey: 'custom' });
-      setLookSaveTitle('');
+    setLookActionError(null);
+    try {
+      const saved = await onSaveImageFilterPreset(trimmedLookSaveTitle, resolvedLook);
+      if (saved) {
+        setDraftCustomImageFilterId(saved.id);
+        setDraftImageFilterSettings({ ...resolvedLook, presetKey: 'custom' });
+        setLookSaveTitle('');
+      }
+    } catch (error) {
+      setLookActionError(error instanceof Error ? error.message : 'Failed to save look preset.');
     }
     setIsSavingLookPreset(false);
   };
 
   const handleSaveMotionPreset = async () => {
-    const title = motionSaveTitle.trim();
-    if (!title || isSavingMotionPreset) return;
+    if (!isMotionSaveTitleValid || isSavingMotionPreset) return;
     setIsSavingMotionPreset(true);
-    const saved = await onSaveMotionEffectPreset(title, resolvedMotion);
-    if (saved) {
-      setDraftCustomMotionEffectId(saved.id);
-      setDraftImageMotionSettings({ ...resolvedMotion, presetKey: 'custom' });
-      setMotionSaveTitle('');
+    setMotionActionError(null);
+    try {
+      const saved = await onSaveMotionEffectPreset(trimmedMotionSaveTitle, resolvedMotion);
+      if (saved) {
+        setDraftCustomMotionEffectId(saved.id);
+        setDraftImageMotionSettings({ ...resolvedMotion, presetKey: 'custom' });
+        setMotionSaveTitle('');
+      }
+    } catch (error) {
+      setMotionActionError(error instanceof Error ? error.message : 'Failed to save motion preset.');
     }
     setIsSavingMotionPreset(false);
   };
 
+  const handleOverrideLookPreset = async () => {
+    if (!selectedLookPreset || !canOverrideLookPreset || isOverridingLookPreset) return;
+    setIsOverridingLookPreset(true);
+    setLookActionError(null);
+    try {
+      const saved = await onUpdateImageFilterPreset(selectedLookPreset.id, resolvedLook);
+      if (saved) {
+        setDraftCustomImageFilterId(saved.id);
+        setDraftImageFilterSettings({ ...resolvedLook, presetKey: 'custom' });
+      }
+    } catch (error) {
+      setLookActionError(error instanceof Error ? error.message : 'Failed to override look preset.');
+    }
+    setIsOverridingLookPreset(false);
+  };
+
+  const handleOverrideMotionPreset = async () => {
+    if (!selectedMotionPreset || !canOverrideMotionPreset || isOverridingMotionPreset) return;
+    setIsOverridingMotionPreset(true);
+    setMotionActionError(null);
+    try {
+      const saved = await onUpdateMotionEffectPreset(selectedMotionPreset.id, resolvedMotion);
+      if (saved) {
+        setDraftCustomMotionEffectId(saved.id);
+        setDraftImageMotionSettings({ ...resolvedMotion, presetKey: 'custom' });
+      }
+    } catch (error) {
+      setMotionActionError(
+        error instanceof Error ? error.message : 'Failed to override motion preset.',
+      );
+    }
+    setIsOverridingMotionPreset(false);
+  };
+
+  const handleDeleteLookPreset = async () => {
+    if (!selectedLookPreset || isDeletingLookPreset) return;
+    setIsDeletingLookPreset(true);
+    setLookActionError(null);
+    try {
+      const deleted = await onDeleteImageFilterPreset(selectedLookPreset.id);
+      if (deleted) {
+        setDraftVisualEffect(null);
+        setDraftCustomImageFilterId(null);
+        setDraftImageFilterSettings(getDefaultImageFilterSettings(null));
+        setRetainedDraftTemporaryLook(null);
+        setLookSaveTitle('');
+        setDeletePresetKind(null);
+      }
+    } catch (error) {
+      setLookActionError(error instanceof Error ? error.message : 'Failed to delete look preset.');
+    }
+    setIsDeletingLookPreset(false);
+  };
+
+  const handleDeleteMotionPreset = async () => {
+    if (!selectedMotionPreset || isDeletingMotionPreset) return;
+    setIsDeletingMotionPreset(true);
+    setMotionActionError(null);
+    try {
+      const deleted = await onDeleteMotionEffectPreset(selectedMotionPreset.id);
+      if (deleted) {
+        const defaultSpeed = getDefaultImageMotionSpeed(isShortVideo);
+        setDraftImageMotionEffect('default');
+        setDraftCustomMotionEffectId(null);
+        setDraftImageMotionSpeed(defaultSpeed);
+        setDraftImageMotionSettings(
+          getDefaultImageMotionSettings('default', defaultSpeed, isShortVideo),
+        );
+        setRetainedDraftTemporaryMotion(null);
+        setMotionSaveTitle('');
+        setDeletePresetKind(null);
+      }
+    } catch (error) {
+      setMotionActionError(
+        error instanceof Error ? error.message : 'Failed to delete motion preset.',
+      );
+    }
+    setIsDeletingMotionPreset(false);
+  };
+
+  const handleGenerateLookWithAi = async () => {
+    if (isGeneratingLookWithAi) return;
+    setIsGeneratingLookWithAi(true);
+    setLookActionError(null);
+    try {
+      const generated = await onGenerateLookWithAi({
+        visualEffect: draftVisualEffect,
+        customImageFilterId: draftCustomImageFilterId,
+        imageFilterSettings: resolvedLook,
+      });
+
+      if (generated) {
+        setDraftVisualEffect(generated.visualEffect);
+        setDraftCustomImageFilterId(null);
+        setDraftImageFilterSettings({ ...generated.imageFilterSettings, presetKey: 'custom' });
+      }
+    } catch (error) {
+      setLookActionError(error instanceof Error ? error.message : 'Failed to generate AI look.');
+    }
+    setIsGeneratingLookWithAi(false);
+  };
+
+  const handleGenerateMotionWithAi = async () => {
+    if (isGeneratingMotionWithAi) return;
+    setIsGeneratingMotionWithAi(true);
+    setMotionActionError(null);
+    try {
+      const generated = await onGenerateMotionWithAi({
+        imageMotionEffect: draftImageMotionEffect,
+        customMotionEffectId: draftCustomMotionEffectId,
+        imageMotionSettings: resolvedMotion,
+        imageMotionSpeed: draftImageMotionSpeed,
+      });
+
+      if (generated) {
+        setDraftImageMotionEffect(generated.imageMotionEffect);
+        setDraftCustomMotionEffectId(null);
+        setDraftImageMotionSettings({ ...generated.imageMotionSettings, presetKey: 'custom' });
+        setDraftImageMotionSpeed(generated.imageMotionSpeed);
+      }
+    } catch (error) {
+      setMotionActionError(
+        error instanceof Error ? error.message : 'Failed to generate AI motion.',
+      );
+    }
+    setIsGeneratingMotionWithAi(false);
+  };
+
   const handleApply = () => {
+    const nextCustomImageFilterId =
+      draftCustomImageFilterId && !isLookDirtyFromSelectedPreset ? draftCustomImageFilterId : null;
+    const nextCustomMotionEffectId =
+      draftCustomMotionEffectId && !isMotionDirtyFromSelectedPreset
+        ? draftCustomMotionEffectId
+        : null;
+
     onApply({
       visualEffect: draftVisualEffect,
-      customImageFilterId: draftCustomImageFilterId,
-      imageFilterSettings: resolvedLook,
+      customImageFilterId: nextCustomImageFilterId,
+      imageFilterSettings:
+        nextCustomImageFilterId ? resolvedLook : { ...resolvedLook, presetKey: 'custom' },
       imageMotionEffect: draftImageMotionEffect,
-      customMotionEffectId: draftCustomMotionEffectId,
-      imageMotionSettings: resolvedMotion,
+      customMotionEffectId: nextCustomMotionEffectId,
+      imageMotionSettings:
+        nextCustomMotionEffectId
+          ? resolvedMotion
+          : { ...resolvedMotion, presetKey: 'custom' },
       imageMotionSpeed:
         resolvedMotion.speed ?? draftImageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
     });
@@ -621,9 +964,23 @@ export function ImageEffectsDetailModal({
             {currentTab === 'visual' ? (
               <>
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <Sparkles className="h-4 w-4 text-indigo-600" />
-                    Look preset
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-indigo-600" />
+                      Look preset
+                    </div>
+                    {selectedLookPreset ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                        onClick={() => setDeletePresetKind('visual')}
+                        disabled={isDeletingLookPreset || isOverridingLookPreset || isSavingLookPreset}
+                      >
+                        {isDeletingLookPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    ) : null}
                   </div>
                   <Select value={lookSelectValue} onValueChange={handleLookPresetChange}>
                     <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
@@ -635,6 +992,11 @@ export function ImageEffectsDetailModal({
                           {value === 'none' ? 'None' : getVisualEffectLabel(value)}
                         </SelectItem>
                       ))}
+                      {retainedDraftTemporaryLook ? (
+                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                          Custom
+                        </SelectItem>
+                      ) : null}
                       {imageFilterPresets.map((preset) => (
                         <SelectItem key={preset.id} value={`custom:${preset.id}`}>
                           {preset.title}
@@ -642,6 +1004,16 @@ export function ImageEffectsDetailModal({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGenerateLookWithAi}
+                    disabled={isGeneratingLookWithAi}
+                    className="h-11 rounded-xl border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                  >
+                    {isGeneratingLookWithAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                    Generate with AI
+                  </Button>
                 </div>
 
                 <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -662,32 +1034,71 @@ export function ImageEffectsDetailModal({
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Save className="h-4 w-4 text-indigo-600" />
-                    Save custom look
+                    Output actions
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={lookSaveTitle}
-                      onChange={(e) => setLookSaveTitle(e.target.value)}
-                      placeholder="Preset title"
-                      className="h-11 rounded-xl border-slate-200"
-                    />
-                    <Button
-                      type="button"
-                      onClick={handleSaveLookPreset}
-                      disabled={!lookSaveTitle.trim() || isSavingLookPreset}
-                      className="h-11 rounded-xl bg-indigo-600 px-4 text-white hover:bg-indigo-700"
-                    >
-                      {isSavingLookPreset ? 'Saving' : 'Save'}
-                    </Button>
+                  <div className="space-y-2 text-sm text-slate-600">
+                    <p>Apply updates only this image in the editor.</p>
+                    <p>Save as new preset creates a reusable look preset with a different title.</p>
+                    {selectedLookPreset ? (
+                      <p>Override preset updates {selectedLookPreset.title} in your preset library.</p>
+                    ) : null}
                   </div>
+                  {lookActionError ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {lookActionError}
+                    </div>
+                  ) : null}
+                  {canSaveLookAsNew ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={lookSaveTitle}
+                        onChange={(e) => setLookSaveTitle(e.target.value)}
+                        placeholder={selectedLookPreset ? 'New preset title' : 'Preset title'}
+                        className="h-11 rounded-xl border-slate-200"
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleSaveLookPreset}
+                        disabled={!isLookSaveTitleValid || isSavingLookPreset}
+                        className="h-11 rounded-xl bg-indigo-600 px-4 text-white hover:bg-indigo-700"
+                      >
+                        {isSavingLookPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        Save as new preset
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleOverrideLookPreset}
+                    disabled={!canOverrideLookPreset || isOverridingLookPreset}
+                    className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  >
+                    {isOverridingLookPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Override preset
+                  </Button>
                 </div>
               </>
             ) : (
               <>
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <Timer className="h-4 w-4 text-sky-600" />
-                    Motion preset
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                    <div className="flex items-center gap-2">
+                      <Timer className="h-4 w-4 text-sky-600" />
+                      Motion preset
+                    </div>
+                    {selectedMotionPreset ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                        onClick={() => setDeletePresetKind('motion')}
+                        disabled={isDeletingMotionPreset || isOverridingMotionPreset || isSavingMotionPreset}
+                      >
+                        {isDeletingMotionPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    ) : null}
                   </div>
                   <Select value={motionSelectValue} onValueChange={handleMotionPresetChange}>
                     <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
@@ -699,6 +1110,11 @@ export function ImageEffectsDetailModal({
                           {getImageMotionEffectLabel(value)}
                         </SelectItem>
                       ))}
+                      {retainedDraftTemporaryMotion ? (
+                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                          Custom
+                        </SelectItem>
+                      ) : null}
                       {motionEffectPresets.map((preset) => (
                         <SelectItem key={preset.id} value={`custom:${preset.id}`}>
                           {preset.title}
@@ -706,6 +1122,16 @@ export function ImageEffectsDetailModal({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGenerateMotionWithAi}
+                    disabled={isGeneratingMotionWithAi}
+                    className="h-11 rounded-xl border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                  >
+                    {isGeneratingMotionWithAi ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    Generate with AI
+                  </Button>
                 </div>
 
                 <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -738,30 +1164,81 @@ export function ImageEffectsDetailModal({
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Save className="h-4 w-4 text-sky-600" />
-                    <span className='capitalize'>Save custom motion</span>
+                    Output actions
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={motionSaveTitle}
-                      onChange={(e) => setMotionSaveTitle(e.target.value)}
-                      placeholder="Preset title"
-                      className="h-11 rounded-xl border-slate-200"
-                    />
-                    <Button
-                      type="button"
-                      onClick={handleSaveMotionPreset}
-                      disabled={!motionSaveTitle.trim() || isSavingMotionPreset}
-                      className="h-11 rounded-xl bg-sky-600 px-4 text-white hover:bg-sky-700"
-                    >
-                      {isSavingMotionPreset ? 'Saving' : 'Save'}
-                    </Button>
+                  <div className="space-y-2 text-sm text-slate-600">
+                    <p>Apply updates only this image in the editor.</p>
+                    <p>Save as new preset creates a reusable motion preset with a different title.</p>
+                    {selectedMotionPreset ? (
+                      <p>Override preset updates {selectedMotionPreset.title} in your preset library.</p>
+                    ) : null}
                   </div>
+                  {motionActionError ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {motionActionError}
+                    </div>
+                  ) : null}
+                  {canSaveMotionAsNew ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={motionSaveTitle}
+                        onChange={(e) => setMotionSaveTitle(e.target.value)}
+                        placeholder={selectedMotionPreset ? 'New preset title' : 'Preset title'}
+                        className="h-11 rounded-xl border-slate-200"
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleSaveMotionPreset}
+                        disabled={!isMotionSaveTitleValid || isSavingMotionPreset}
+                        className="h-11 rounded-xl bg-sky-600 px-4 text-white hover:bg-sky-700"
+                      >
+                        {isSavingMotionPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        Save as new preset
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleOverrideMotionPreset}
+                    disabled={!canOverrideMotionPreset || isOverridingMotionPreset}
+                    className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  >
+                    {isOverridingMotionPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Override preset
+                  </Button>
                 </div>
               </>
             )}
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        isOpen={deletePresetKind !== null}
+        onClose={() => setDeletePresetKind(null)}
+        onCancel={() => setDeletePresetKind(null)}
+        onConfirm={() => {
+          if (deletePresetKind === 'visual') {
+            void handleDeleteLookPreset();
+            return;
+          }
+
+          if (deletePresetKind === 'motion') {
+            void handleDeleteMotionPreset();
+          }
+        }}
+        variant="danger"
+        title={deletePresetKind === 'visual' ? 'Delete look preset?' : 'Delete motion preset?'}
+        description={
+          deletePresetKind === 'visual'
+            ? 'This deletes the selected look preset from your library and resets this image to the built-in none look.'
+            : 'This deletes the selected motion preset from your library and resets this image to the built-in default motion.'
+        }
+        confirmText={deletePresetKind === 'visual' ? 'Delete look preset' : 'Delete motion preset'}
+        cancelText="Cancel"
+        isLoading={isDeletingLookPreset || isDeletingMotionPreset}
+      />
     </div>
   );
 }

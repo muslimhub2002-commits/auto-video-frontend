@@ -82,6 +82,7 @@ import {
   type ImageMotionSettings,
   type MotionEffectPresetDto,
 } from './ImageEffectPreview';
+import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
 import {
   DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
@@ -406,10 +407,46 @@ type SentenceEditorCardProps = {
     title: string,
     settings: ImageFilterSettings,
   ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onUpdateImageFilterPreset: (
+    presetId: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onDeleteImageFilterPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveMotionEffectPreset: (
     title: string,
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onUpdateMotionEffectPreset: (
+    presetId: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onGenerateSingleImageLookWithAi: (
+    sentenceId: string,
+    params: {
+      visualEffect: SentenceItem['visualEffect'] | null;
+      customImageFilterId: string | null;
+      imageFilterSettings: ImageFilterSettings;
+    },
+  ) => Promise<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    customImageFilterId: null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>;
+  onGenerateSingleImageMotionWithAi: (
+    sentenceId: string,
+    params: {
+      imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+      customMotionEffectId: string | null;
+      imageMotionSettings: ImageMotionSettings;
+      imageMotionSpeed: number;
+    },
+  ) => Promise<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>;
 
   onVisualEffectChange: (
     value: NonNullable<SentenceItem['visualEffect']> | null,
@@ -502,7 +539,13 @@ function SentenceEditorCardComponent({
   isLoadingMotionEffectPresets,
   onSentencePatch,
   onSaveImageFilterPreset,
+  onUpdateImageFilterPreset,
+  onDeleteImageFilterPreset,
   onSaveMotionEffectPreset,
+  onUpdateMotionEffectPreset,
+  onDeleteMotionEffectPreset,
+  onGenerateSingleImageLookWithAi,
+  onGenerateSingleImageMotionWithAi,
 
   onVisualEffectChange,
   onImageMotionEffectChange,
@@ -1038,10 +1081,93 @@ function SentenceEditorCardComponent({
     },
     [isShortVideo, item.imageMotionEffect, item.imageMotionSettings, item.imageMotionSpeed],
   );
+  const [retainedTemporaryLook, setRetainedTemporaryLook] = useState<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>(() =>
+    !item.customImageFilterId && item.imageFilterSettings?.presetKey === 'custom'
+      ? {
+          visualEffect:
+            resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ??
+            item.visualEffect ??
+            null,
+          imageFilterSettings: normalizeImageFilterSettings(
+            item.imageFilterSettings,
+            item.visualEffect ?? null,
+          ),
+        }
+      : null,
+  );
+  const [retainedTemporaryMotion, setRetainedTemporaryMotion] = useState<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>(() => {
+    const resolvedSpeed = resolveImageMotionSpeed(
+      item.imageMotionSpeed,
+      item.imageMotionSettings,
+      isShortVideo,
+    );
+
+    return !item.customMotionEffectId && item.imageMotionSettings?.presetKey === 'custom'
+      ? {
+          imageMotionEffect: resolveMotionEffectFromSettings(
+            item.imageMotionSettings,
+            item.imageMotionEffect ?? 'default',
+          ),
+          imageMotionSettings: normalizeImageMotionSettings(
+            item.imageMotionSettings,
+            item.imageMotionEffect ?? 'default',
+            resolvedSpeed,
+            isShortVideo,
+          ),
+          imageMotionSpeed: resolvedSpeed,
+        }
+      : null;
+  });
+
+  useEffect(() => {
+    if (!item.customImageFilterId && item.imageFilterSettings?.presetKey === 'custom') {
+      setRetainedTemporaryLook({
+        visualEffect:
+          resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ??
+          item.visualEffect ??
+          null,
+        imageFilterSettings: resolvedImageFilterSettings,
+      });
+    }
+  }, [item.customImageFilterId, item.imageFilterSettings, item.visualEffect, resolvedImageFilterSettings]);
+
+  useEffect(() => {
+    if (!item.customMotionEffectId && item.imageMotionSettings?.presetKey === 'custom') {
+      setRetainedTemporaryMotion({
+        imageMotionEffect: resolveMotionEffectFromSettings(
+          item.imageMotionSettings,
+          item.imageMotionEffect ?? 'default',
+        ),
+        imageMotionSettings: resolvedImageMotionSettings,
+        imageMotionSpeed: resolveImageMotionSpeed(
+          item.imageMotionSpeed,
+          item.imageMotionSettings,
+          isShortVideo,
+        ),
+      });
+    }
+  }, [
+    isShortVideo,
+    item.customMotionEffectId,
+    item.imageMotionEffect,
+    item.imageMotionSettings,
+    item.imageMotionSpeed,
+    resolvedImageMotionSettings,
+  ]);
+
   const quickLookSelectValue = useMemo(
     () =>
       item.customImageFilterId
         ? `custom:${item.customImageFilterId}`
+        : item.imageFilterSettings?.presetKey === 'custom'
+          ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
         : `builtin:${resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ?? 'none'}`,
     [item.customImageFilterId, item.imageFilterSettings, item.visualEffect],
   );
@@ -1049,6 +1175,8 @@ function SentenceEditorCardComponent({
     () =>
       item.customMotionEffectId
         ? `custom:${item.customMotionEffectId}`
+        : item.imageMotionSettings?.presetKey === 'custom'
+          ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
         : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`,
     [item.customMotionEffectId, item.imageMotionEffect, item.imageMotionSettings],
   );
@@ -1093,6 +1221,19 @@ function SentenceEditorCardComponent({
   const handleLookPresetSelect = (value: string) => {
     if (value.startsWith('custom:')) {
       const presetId = value.slice('custom:'.length);
+      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) {
+        if (!retainedTemporaryLook) return;
+
+        onSentencePatch({
+          visualEffect: retainedTemporaryLook.visualEffect,
+          customImageFilterId: null,
+          imageFilterSettings: {
+            ...retainedTemporaryLook.imageFilterSettings,
+            presetKey: 'custom',
+          },
+        });
+        return;
+      }
       const preset = imageFilterPresets.find((item) => item.id === presetId);
       if (!preset) return;
 
@@ -1117,6 +1258,20 @@ function SentenceEditorCardComponent({
   const handleMotionPresetSelect = (value: string) => {
     if (value.startsWith('custom:')) {
       const presetId = value.slice('custom:'.length);
+      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) {
+        if (!retainedTemporaryMotion) return;
+
+        onSentencePatch({
+          imageMotionEffect: retainedTemporaryMotion.imageMotionEffect,
+          customMotionEffectId: null,
+          imageMotionSettings: {
+            ...retainedTemporaryMotion.imageMotionSettings,
+            presetKey: 'custom',
+          },
+          imageMotionSpeed: retainedTemporaryMotion.imageMotionSpeed,
+        });
+        return;
+      }
       const preset = motionEffectPresets.find((item) => item.id === presetId);
       if (!preset) return;
 
@@ -1289,6 +1444,11 @@ function SentenceEditorCardComponent({
                         {getVisualEffectLabel(value)}
                       </SelectItem>
                     ))}
+                    {retainedTemporaryLook ? (
+                      <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                        Custom
+                      </SelectItem>
+                    ) : null}
                     {imageFilterPresets.map((preset) => (
                       <SelectItem key={preset.id} value={`custom:${preset.id}`}>
                         {preset.title}
@@ -1321,6 +1481,11 @@ function SentenceEditorCardComponent({
                         {getImageMotionEffectLabel(value)}
                       </SelectItem>
                     ))}
+                    {retainedTemporaryMotion ? (
+                      <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                        Custom
+                      </SelectItem>
+                    ) : null}
                     {motionEffectPresets.map((preset) => (
                       <SelectItem key={preset.id} value={`custom:${preset.id}`}>
                         {preset.title}
@@ -3146,6 +3311,8 @@ function SentenceEditorCardComponent({
           customMotionEffectId={item.customMotionEffectId ?? null}
           imageFilterSettings={item.imageFilterSettings ?? null}
           imageMotionSettings={item.imageMotionSettings ?? null}
+          retainedTemporaryLook={retainedTemporaryLook}
+          retainedTemporaryMotion={retainedTemporaryMotion}
           imageFilterPresets={imageFilterPresets}
           motionEffectPresets={motionEffectPresets}
           onClose={() => setIsImageEffectsDetailModalOpen(false)}
@@ -3169,7 +3336,13 @@ function SentenceEditorCardComponent({
             });
           }}
           onSaveImageFilterPreset={onSaveImageFilterPreset}
+          onUpdateImageFilterPreset={onUpdateImageFilterPreset}
+          onDeleteImageFilterPreset={onDeleteImageFilterPreset}
           onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+          onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
+          onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+          onGenerateLookWithAi={(params) => onGenerateSingleImageLookWithAi(item.id, params)}
+          onGenerateMotionWithAi={(params) => onGenerateSingleImageMotionWithAi(item.id, params)}
         />
       </div>
     </div>

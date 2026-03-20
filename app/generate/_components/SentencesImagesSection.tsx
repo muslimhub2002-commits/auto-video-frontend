@@ -39,7 +39,7 @@ import { AddSuspenseSceneModal } from './sentences/AddSuspenseSceneModal';
 import { GenerateTestVideoModal } from './sentences/GenerateTestVideoModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
 import { SceneEditorSection } from './sentences/SceneEditorSection';
-import { DEFAULT_IMAGE_MOTION_SPEED } from './sentences/ImageEffectPreview';
+import { getDefaultImageMotionSpeed } from './sentences/ImageEffectPreview';
 import type { TestVideoVoiceMode } from './sentences/test-video.types';
 import type {
   ImageFilterPresetDto,
@@ -84,6 +84,10 @@ type SentencesImagesSectionProps = {
   shortsValidationError?: string | null;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+  isApplyingBulkLookEffects?: boolean;
+  onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
+  isApplyingBulkMotionEffects?: boolean;
+  onGenerateBulkMotionEffects?: (() => void) | (() => Promise<void>);
 
   imageAspectRatio: '16:9' | '9:16' | '1:1';
   onImageAspectRatioChange: (value: '16:9' | '9:16' | '1:1') => void;
@@ -104,10 +108,46 @@ type SentencesImagesSectionProps = {
     title: string,
     settings: ImageFilterSettings,
   ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onUpdateImageFilterPreset: (
+    presetId: string,
+    settings: ImageFilterSettings,
+  ) => Promise<ImageFilterPresetDto | null> | ImageFilterPresetDto | null;
+  onDeleteImageFilterPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveMotionEffectPreset: (
     title: string,
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onUpdateMotionEffectPreset: (
+    presetId: string,
+    settings: ImageMotionSettings,
+  ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
+  onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onGenerateSingleImageLookWithAi: (
+    sentenceId: string,
+    params: {
+      visualEffect: SentenceItem['visualEffect'] | null;
+      customImageFilterId: string | null;
+      imageFilterSettings: ImageFilterSettings;
+    },
+  ) => Promise<{
+    visualEffect: SentenceItem['visualEffect'] | null;
+    customImageFilterId: null;
+    imageFilterSettings: ImageFilterSettings;
+  } | null>;
+  onGenerateSingleImageMotionWithAi: (
+    sentenceId: string,
+    params: {
+      imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+      customMotionEffectId: string | null;
+      imageMotionSettings: ImageMotionSettings;
+      imageMotionSpeed: number;
+    },
+  ) => Promise<{
+    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+    customMotionEffectId: null;
+    imageMotionSettings: ImageMotionSettings;
+    imageMotionSpeed: number;
+  } | null>;
   onSentenceVisualEffectChange: (
     index: number,
     value:
@@ -223,6 +263,10 @@ export function SentencesImagesSection({
   sceneDurationSecondsByIndex,
   isGeneratingAllImages,
   onGenerateAllImages,
+  isApplyingBulkLookEffects = false,
+  onGenerateBulkLookEffects,
+  isApplyingBulkMotionEffects = false,
+  onGenerateBulkMotionEffects,
 
   isLongForm = false,
   shortsTabs = [],
@@ -250,7 +294,13 @@ export function SentencesImagesSection({
   isLoadingMotionEffectPresets = false,
   onSentencePatch,
   onSaveImageFilterPreset,
+  onUpdateImageFilterPreset,
+  onDeleteImageFilterPreset,
   onSaveMotionEffectPreset,
+  onUpdateMotionEffectPreset,
+  onDeleteMotionEffectPreset,
+  onGenerateSingleImageLookWithAi,
+  onGenerateSingleImageMotionWithAi,
   onSentenceVisualEffectChange,
   onSentenceImageMotionEffectChange,
   onSentenceImageMotionSpeedChange,
@@ -607,6 +657,10 @@ export function SentencesImagesSection({
               sceneDurationSecondsByIndex={sceneDurationSecondsByIndex}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
+              isApplyingBulkLookEffects={isApplyingBulkLookEffects}
+              onGenerateBulkLookEffects={onGenerateBulkLookEffects}
+              isApplyingBulkMotionEffects={isApplyingBulkMotionEffects}
+              onGenerateBulkMotionEffects={onGenerateBulkMotionEffects}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
               videoModel={videoModel}
 
@@ -632,7 +686,13 @@ export function SentencesImagesSection({
               isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
               onSentencePatch={onSentencePatch}
               onSaveImageFilterPreset={onSaveImageFilterPreset}
+              onUpdateImageFilterPreset={onUpdateImageFilterPreset}
+              onDeleteImageFilterPreset={onDeleteImageFilterPreset}
               onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+              onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
+              onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+              onGenerateSingleImageLookWithAi={onGenerateSingleImageLookWithAi}
+              onGenerateSingleImageMotionWithAi={onGenerateSingleImageMotionWithAi}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}
               onSentenceImageMotionEffectChange={onSentenceImageMotionEffectChange}
               onSentenceImageMotionSpeedChange={onSentenceImageMotionSpeedChange}
@@ -697,7 +757,7 @@ export function SentencesImagesSection({
                 setPreviewVisualEffect(effect ?? null);
                 setPreviewImageMotionEffect(imageMotionEffect ?? 'default');
                 setPreviewImageMotionSpeed(
-                  imageMotionSpeed ?? DEFAULT_IMAGE_MOTION_SPEED,
+                  imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
                 );
                 setPreviewImageFilterSettings(imageFilterSettings ?? null);
                 setPreviewImageMotionSettings(imageMotionSettings ?? null);
