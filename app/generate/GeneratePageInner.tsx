@@ -981,6 +981,7 @@ export function GeneratePageInner() {
   const [addSubtitles, setAddSubtitles] = useState(true);
   const [enableGlitchTransitions, setEnableGlitchTransitions] = useState(true);
   const [enableZoomRotateTransitions, setEnableZoomRotateTransitions] = useState(true);
+  const [enableLongFormSubscribeOverlay, setEnableLongFormSubscribeOverlay] = useState(true);
 
   // Long-form only: split into multiple short scripts (tabs)
   type TabKey = 'full' | `short-${number}`;
@@ -1017,6 +1018,9 @@ export function GeneratePageInner() {
   const isShortsTabActive = isLongForm && activeShortTabIndex !== null;
   const effectiveIsShort = isShortsTabActive ? true : isLongForm ? false : isShort;
   const effectiveAspectRatio = effectiveIsShort ? '9:16' : '16:9';
+  const effectiveEnableLongFormSubscribeOverlay =
+    isLongForm && enableLongFormSubscribeOverlay;
+  const previousIsLongFormRef = useRef(isLongForm);
 
   useEffect(() => {
     if (hasTouchedImageAspectRatio) return;
@@ -1041,6 +1045,13 @@ export function GeneratePageInner() {
     if (!isShort) return;
     setIsShort(false);
   }, [isLongForm, isShort]);
+
+  useEffect(() => {
+    if (previousIsLongFormRef.current === isLongForm) return;
+    previousIsLongFormRef.current = isLongForm;
+    setEnableLongFormSubscribeOverlay(isLongForm);
+  }, [isLongForm]);
+
   const {
     videoJobId,
     videoJobStatus,
@@ -1790,6 +1801,10 @@ export function GeneratePageInner() {
       form.append('addSubtitles', addSubtitles ? 'true' : 'false');
       form.append('enableGlitchTransitions', enableGlitchTransitions ? 'true' : 'false');
       form.append('enableZoomRotateTransitions', enableZoomRotateTransitions ? 'true' : 'false');
+      form.append(
+        'enableLongFormSubscribeOverlay',
+        effectiveEnableLongFormSubscribeOverlay ? 'true' : 'false',
+      );
 
       const imageUploads = await prepareImageUploadsForRender(selectedSentences);
       imageUploads.forEach((file) => form.append('images', file));
@@ -3392,6 +3407,7 @@ export function GeneratePageInner() {
           addSubtitles,
           enableGlitchTransitions,
           enableZoomRotateTransitions,
+          enableLongFormSubscribeOverlay: effectiveEnableLongFormSubscribeOverlay,
           ...(backgroundMusicSrc ? { backgroundMusicSrc } : {}),
           ...(normalizedBackgroundMusicVolume !== 1
             ? { backgroundMusicVolume: normalizedBackgroundMusicVolume }
@@ -3422,6 +3438,10 @@ export function GeneratePageInner() {
         fallbackForm.append(
           'enableZoomRotateTransitions',
           enableZoomRotateTransitions ? 'true' : 'false',
+        );
+        fallbackForm.append(
+          'enableLongFormSubscribeOverlay',
+          effectiveEnableLongFormSubscribeOverlay ? 'true' : 'false',
         );
         if (backgroundMusicSrc) {
           fallbackForm.append('backgroundMusicSrc', backgroundMusicSrc);
@@ -7530,7 +7550,8 @@ export function GeneratePageInner() {
               </Accordion>
               <RenderSettingsSection
                 isShort={isShortsTabActive ? true : isShort}
-                onIsShortChange={isShortsTabActive ? ((_value: boolean) => { }) : setIsShort}
+                isLongForm={isLongForm}
+                onIsShortChange={isShortsTabActive ? (() => { }) : setIsShort}
                 disableIsShort={isLongForm || isShortsTabActive}
                 useLowerFps={useLowerFps}
                 onUseLowerFpsChange={setUseLowerFps}
@@ -7538,6 +7559,8 @@ export function GeneratePageInner() {
                 onUseLowerResolutionChange={setUseLowerResolution}
                 addSubtitles={addSubtitles}
                 onAddSubtitlesChange={setAddSubtitles}
+                enableLongFormSubscribeOverlay={effectiveEnableLongFormSubscribeOverlay}
+                onEnableLongFormSubscribeOverlayChange={setEnableLongFormSubscribeOverlay}
               />
 
               {/* Generate Button */}

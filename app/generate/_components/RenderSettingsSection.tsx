@@ -2,6 +2,7 @@
 
 type RenderSettingsSectionProps = {
     isShort: boolean;
+    isLongForm: boolean;
     onIsShortChange: (value: boolean) => void;
     disableIsShort?: boolean;
     useLowerFps: boolean;
@@ -10,10 +11,13 @@ type RenderSettingsSectionProps = {
     onUseLowerResolutionChange: (value: boolean) => void;
     addSubtitles: boolean;
     onAddSubtitlesChange: (value: boolean) => void;
+    enableLongFormSubscribeOverlay: boolean;
+    onEnableLongFormSubscribeOverlayChange: (value: boolean) => void;
 };
 
 export function RenderSettingsSection({
     isShort,
+    isLongForm,
     onIsShortChange,
     disableIsShort = false,
     useLowerFps,
@@ -22,6 +26,8 @@ export function RenderSettingsSection({
     onUseLowerResolutionChange,
     addSubtitles,
     onAddSubtitlesChange,
+    enableLongFormSubscribeOverlay,
+    onEnableLongFormSubscribeOverlayChange,
 }: RenderSettingsSectionProps) {
     return (
         <div className="px-6 pb-5 pt-5 border-t border-gray-200 bg-linear-to-br from-gray-50 to-white">
@@ -116,6 +122,40 @@ export function RenderSettingsSection({
                             </span>
                         </div>
                         <p className="text-xs text-gray-500 mt-1">Reveal subtitle words progressively at the bottom of each scene</p>
+                    </div>
+                </label>
+                <label
+                    className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white transition-all duration-300 group ${enableLongFormSubscribeOverlay && isLongForm
+                            ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                            : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                        } ${isLongForm ? 'cursor-pointer' : 'opacity-60 cursor-not-allowed'}`}
+                >
+                    <div className="relative mt-0.5">
+                        <input
+                            type="checkbox"
+                            className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500 disabled:cursor-not-allowed"
+                            checked={enableLongFormSubscribeOverlay}
+                            disabled={!isLongForm}
+                            onChange={(e) => onEnableLongFormSubscribeOverlayChange(e.target.checked)}
+                        />
+                        <div
+                            className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${enableLongFormSubscribeOverlay && isLongForm ? 'animate-ping' : ''
+                                }`}
+                            style={{ animationIterationCount: 1, animationDuration: '0.5s' }}
+                        ></div>
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">
+                                Long-form Subscribe Overlay
+                            </span>
+                            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">
+                                2:30 interval
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Show subscribe_long_form.mp4 in the top-left every 2:30 on 16:9 renders
+                        </p>
                     </div>
                 </label>
                 {/* Lower FPS Option */}
