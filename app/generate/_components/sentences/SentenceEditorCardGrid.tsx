@@ -475,6 +475,7 @@ type SentenceEditorCardProps = {
     e: ChangeEvent<HTMLInputElement>,
     slot?: 'primary' | 'secondary',
   ) => void;
+  onSentenceVideoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onSentenceFrameImageUpload: (which: 'start' | 'end', e: ChangeEvent<HTMLInputElement>) => void;
 
   onGenerateSentenceImage: (
@@ -574,6 +575,7 @@ function SentenceEditorCardComponent({
   onSentenceMediaModeChange,
 
   onSentenceImageUpload,
+  onSentenceVideoUpload,
   onSentenceFrameImageUpload,
 
   onGenerateSentenceImage,
@@ -1730,11 +1732,10 @@ function SentenceEditorCardComponent({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={item.videoUrl === '/subscribe.mp4'}
                   onClick={onRequestDelete}
                   variant="outline"
-                  className="gap-2 h-8 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                  title={item.videoUrl === '/subscribe.mp4' ? 'This scene cannot be deleted' : 'Delete this sentence and its media'}
+                  className="gap-2 h-8 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+                  title="Delete this sentence and its media"
                 >
                   <Trash2 className="h-4 w-4" />
                   <span className="text-xs font-semibold">Delete</span>
@@ -2395,7 +2396,7 @@ function SentenceEditorCardComponent({
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2">
                     <Button
                       type="button"
                       size="sm"
@@ -2525,6 +2526,13 @@ function SentenceEditorCardComponent({
             {/* Video inputs */}
             {mediaMode === 'frames' && (
               <div className="space-y-4">
+                <input
+                  type="file"
+                  id={`sentence-video-upload-${item.id}`}
+                  accept="video/*"
+                  onChange={(e) => onSentenceVideoUpload(e)}
+                  className="hidden"
+                />
                 {effectiveVideoGenerationMode === 'frames' ? (
                   !hasAnyVideo ? (
                     <>
@@ -3011,12 +3019,12 @@ function SentenceEditorCardComponent({
                         />
                       </ImageEffectPreview>
 
-                      {item.videoUrl && item.videoUrl !== '/subscribe.mp4' ? (
+                      {item.video || (item.videoUrl && item.videoUrl !== '/subscribe.mp4') ? (
                         <button
                           type="button"
                           onClick={() => onRemoveGeneratedVideo?.()}
                           className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
-                          title="Remove generated video"
+                          title="Remove video"
                         >
                           <X className="h-4 w-4" />
                         </button>
@@ -3040,6 +3048,20 @@ function SentenceEditorCardComponent({
                             <span className="text-xs font-bold">Video Library</span>
                           </Button>
                         ) : null}
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById(`sentence-video-upload-${item.id}`)?.click();
+                          }}
+                          className="h-9 w-full gap-2 border-2 border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                        >
+                          <Upload className="h-4 w-4" />
+                          <span className="text-xs font-bold">Upload Video</span>
+                        </Button>
 
                         <div className="flex items-center gap-2">
                           <div className="relative" ref={videoModeMenuRef}>
@@ -3159,6 +3181,22 @@ function SentenceEditorCardComponent({
                       >
                         <VideoIcon className="h-4 w-4" />
                         <span className="text-xs font-bold">Video Library</span>
+                      </Button>
+                    ) : null}
+
+                    {!isSubscribeClip ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          document.getElementById(`sentence-video-upload-${item.id}`)?.click();
+                        }}
+                        className="h-9 w-full gap-2 border-2 border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                      >
+                        <Upload className="h-4 w-4" />
+                        <span className="text-xs font-bold">Upload Video</span>
                       </Button>
                     ) : null}
 

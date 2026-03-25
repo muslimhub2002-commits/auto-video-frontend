@@ -170,6 +170,10 @@ type SceneEditorSectionProps = {
     e: React.ChangeEvent<HTMLInputElement>,
     slot?: 'primary' | 'secondary',
   ) => void;
+  onSentenceVideoUpload: (
+    index: number,
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => void;
   onSentenceFrameImageUpload: (
     index: number,
     which: 'start' | 'end',
@@ -326,6 +330,10 @@ type SentenceRowProps = {
     e: React.ChangeEvent<HTMLInputElement>,
     slot?: 'primary' | 'secondary',
   ) => void;
+  onSentenceVideoUpload: (
+    index: number,
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => void;
   onSentenceFrameImageUpload: (
     index: number,
     which: 'start' | 'end',
@@ -440,6 +448,7 @@ const SentenceRow = memo(function SentenceRow({
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
+  onSentenceVideoUpload,
   onSentenceFrameImageUpload,
   onGenerateSentenceImage,
   onGenerateSentenceReferenceImage,
@@ -539,6 +548,7 @@ const SentenceRow = memo(function SentenceRow({
           onSentenceTextChange={(next) => onSentenceTextChange(index, next)}
           onSentenceMediaModeChange={(mode) => onSentenceMediaModeChange(index, mode)}
           onSentenceImageUpload={(event, slot) => onSentenceImageUpload(index, event, slot)}
+          onSentenceVideoUpload={(event) => onSentenceVideoUpload(index, event)}
           onSentenceFrameImageUpload={(which, event) =>
             onSentenceFrameImageUpload(index, which, event)
           }
@@ -615,7 +625,7 @@ const SentenceRow = memo(function SentenceRow({
         />
       </div>
 
-      {index < sentenceCount - 1 ? (
+      {index < sentenceCount  ? (
         <div className="relative py-3">
           <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-200" />
           <div className="relative flex items-center justify-center gap-2">
@@ -809,6 +819,7 @@ export function SceneEditorSection({
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
+  onSentenceVideoUpload,
   onSentenceFrameImageUpload,
 
   onGenerateSentenceImage,
@@ -1079,6 +1090,7 @@ export function SceneEditorSection({
               onSentenceTextChange={onSentenceTextChange}
               onSentenceMediaModeChange={onSentenceMediaModeChange}
               onSentenceImageUpload={onSentenceImageUpload}
+              onSentenceVideoUpload={onSentenceVideoUpload}
               onSentenceFrameImageUpload={onSentenceFrameImageUpload}
               onGenerateSentenceImage={onGenerateSentenceImage}
               onGenerateSentenceReferenceImage={onGenerateSentenceReferenceImage}

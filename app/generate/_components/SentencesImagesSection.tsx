@@ -193,6 +193,10 @@ type SentencesImagesSectionProps = {
     e: ChangeEvent<HTMLInputElement>,
     slot?: 'primary' | 'secondary',
   ) => void;
+  onSentenceVideoUpload: (
+    index: number,
+    e: ChangeEvent<HTMLInputElement>,
+  ) => void;
   onSentenceFrameImageUpload: (
     index: number,
     which: 'start' | 'end',
@@ -327,6 +331,7 @@ export function SentencesImagesSection({
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
+  onSentenceVideoUpload,
   onAddSentenceImageSlot,
   onSentenceFrameImageUpload,
   onGenerateSentenceImage,
@@ -735,6 +740,7 @@ export function SentencesImagesSection({
               onSentenceTextChange={onSentenceTextChange}
               onSentenceMediaModeChange={onSentenceMediaModeChange}
               onSentenceImageUpload={onSentenceImageUpload}
+              onSentenceVideoUpload={onSentenceVideoUpload}
               onAddSentenceImageSlot={onAddSentenceImageSlot}
               onSentenceFrameImageUpload={onSentenceFrameImageUpload}
               onGenerateSentenceImage={onGenerateSentenceImage}

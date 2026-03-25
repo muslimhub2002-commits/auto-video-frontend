@@ -1197,36 +1197,8 @@ export function GeneratePageInner() {
     return ranges;
   };
 
-  const createShortsCtaSentenceItem = (): SentenceItem => {
-    const now = Date.now();
-    return {
-      id: `${now}-shorts-cta`,
-      text: getShortsCtaSentence(scriptLanguage),
-      mediaMode: 'frames',
-      sceneTab: 'video',
-      image: null,
-      imageUrl: null,
-      secondaryImage: null,
-      secondaryImageUrl: null,
-      secondaryImagePrompt: null,
-      secondarySavedImageId: null,
-      isGeneratingSecondaryImage: false,
-      hasSecondaryImageSlot: false,
-      video: null,
-      videoUrl: '/subscribe.mp4',
-      imagePrompt: null,
-      isGeneratingImage: false,
-      isSavingImage: false,
-      savedImageId: null,
-      isFromLibrary: false,
-      isSuspense: false,
-    };
-  };
-
   const normalizeShortTabSentences = (items: SentenceItem[]): SentenceItem[] => {
-    const story = (items ?? []).filter((s) => !isSubscribeLikeSentence(s.text));
-    if (story.length === 0) return [createShortsCtaSentenceItem()];
-    return [...story, createShortsCtaSentenceItem()];
+    return Array.isArray(items) ? items : [];
   };
 
   const validateShortRanges = (
@@ -1276,12 +1248,11 @@ export function GeneratePageInner() {
       const range = ranges[i];
       const base = storySentences.slice(range.start, range.end + 1);
       const cloned = base.map((s) => ({ ...s }));
-      const withCta = [...cloned, createShortsCtaSentenceItem()];
 
       const existingScriptId = null;
       tabSnapshotsRef.current[tabKeyForIndex(i)] = {
         scriptId: existingScriptId,
-        sentences: withCta,
+        sentences: cloned,
         voiceOver: null,
         voiceDuration: null,
         savedVoiceId: null,
@@ -1970,32 +1941,6 @@ export function GeneratePageInner() {
         };
       });
 
-    // Ensure subscribe sentence exists at the end (same rule as splitting)
-    const hasSubscribe = restored.some((s) => isSubscribeCtaSentence(s.text || ''));
-    if (!hasSubscribe) {
-      restored.push({
-        id: `${now}-subscribe`,
-        text: getSubscribeSentence(scriptLanguage),
-        mediaMode: 'frames',
-        sceneTab: 'video',
-        image: null,
-        imageUrl: null,
-        secondaryImage: null,
-        secondaryImageUrl: null,
-        secondaryImagePrompt: null,
-        secondarySavedImageId: null,
-        isGeneratingSecondaryImage: false,
-        hasSecondaryImageSlot: false,
-        video: null,
-        videoUrl: '/subscribe.mp4',
-        imagePrompt: null,
-        isGeneratingImage: false,
-        isSavingImage: false,
-        savedImageId: null,
-        isFromLibrary: false,
-        isSuspense: false,
-      });
-    }
     setSentences(restored);
 
     // Restore voice-over (download into File so render upload works)
@@ -3076,61 +3021,12 @@ export function GeneratePageInner() {
           .trim();
       };
 
-      const normalize = (value: string) => {
-        return String(value ?? '')
-          .toLowerCase()
-          .trim()
-          .replace(/[.!?]+$/u, '')
-          .replace(/&/g, 'and')
-          .replace(/\s+/g, ' ');
-      };
-
-      const shouldIncludeSubscribeInVoice = activeShortTabIndex === null;
-
       const sentenceTexts = (sentences || [])
         .map((s) => s.text)
         .filter(Boolean);
-
-      const subscribeSentence = getSubscribeSentence(scriptLanguage);
-      const shortsCtaSentence = getShortsCtaSentence(scriptLanguage);
-
-      const subscribeNorm = normalize(subscribeSentence);
-      const shortsCtaNorm = normalize(shortsCtaSentence);
-
-      // Shorts voice-overs should not include the old subscribe sentence,
-      // but SHOULD include the shorts CTA (“You can watch the full video…”).
-      let sentencesForVoice = shouldIncludeSubscribeInVoice
-        ? sentenceTexts
-        : sentenceTexts.filter((t) => !isSubscribeCtaSentence(t));
-
-      if (!shouldIncludeSubscribeInVoice) {
-        const hasShortsCta = sentencesForVoice.some((t) => normalize(t) === shortsCtaNorm);
-        if (!hasShortsCta) {
-          sentencesForVoice = [...sentencesForVoice, shortsCtaSentence];
-        }
-      }
-
-      let scriptForVoice =
+      const sentencesForVoice = sentenceTexts;
+      const scriptForVoice =
         sentencesForVoice.length > 0 ? mergeSentences(sentencesForVoice) : script;
-
-      // Legacy behavior for full videos: ensure the subscribe sentence exists at the end.
-      if (shouldIncludeSubscribeInVoice) {
-        const targetNorm = subscribeNorm;
-        const mergedNorm = normalize(
-          sentencesForVoice.length > 0 ? mergeSentences(sentencesForVoice) : scriptForVoice,
-        );
-
-        if (!mergedNorm.includes(targetNorm)) {
-          if (sentencesForVoice.length > 0) {
-            sentencesForVoice = [...sentencesForVoice, subscribeSentence];
-            scriptForVoice = mergeSentences(sentencesForVoice);
-          } else {
-            const base = String(scriptForVoice ?? '').trim();
-            const needsPunctuation = base && !/[.!?]$/u.test(base);
-            scriptForVoice = `${base}${needsPunctuation ? '.' : ''} ${subscribeSentence}`.trim();
-          }
-        }
-      }
 
       const response = await fetch(`${API_URL}/ai/generate-voice`, {
         method: 'POST',
@@ -4386,6 +4282,42 @@ export function GeneratePageInner() {
     );
   };
 
+  const handleSentenceVideoUpload = (
+    index: number,
+    e: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = '';
+
+    if (!file) return;
+
+    if (!String(file.type ?? '').startsWith('video/')) {
+      showAlert('Please choose a video file.', { type: 'warning' });
+      return;
+    }
+
+    setSentences((prev) =>
+      prev.map((item, i) =>
+        i === index
+          ? {
+            ...item,
+            mediaMode: 'frames',
+            sceneTab: 'video',
+            video: file,
+            videoUrl: null,
+            savedVideoId: null,
+            framesVideoUrl: null,
+            framesSavedVideoId: null,
+            textVideoUrl: null,
+            textSavedVideoId: null,
+            referenceVideoUrl: null,
+            referenceSavedVideoId: null,
+          }
+          : item,
+      ),
+    );
+  };
+
   const handleAddSentenceImageSlot = (index: number) => {
     setSentences((prev) =>
       prev.map((item, i) =>
@@ -5161,6 +5093,7 @@ export function GeneratePageInner() {
         // Keep the active-mode surface fields in sync.
         const activeMode = (next.videoGenerationMode ?? 'referenceImage') as NonNullable<SentenceItem['videoGenerationMode']>;
         if (activeMode === mode) {
+          next.video = null;
           next.videoUrl = null;
           next.savedVideoId = null;
         }
@@ -6627,21 +6560,39 @@ export function GeneratePageInner() {
           const local = params.localSentences?.[bs.index];
           if (!local) continue;
 
+          const localFile = local.video ?? null;
           const url = String(local.videoUrl ?? '').trim();
-          if (!url || url === '/subscribe.mp4') continue;
+          if ((!localFile && !url) || url === '/subscribe.mp4') continue;
 
           // If we already have a persisted video ID, skip.
           if (local.savedVideoId || bs.video?.id) continue;
 
           try {
-            const response = await api.post<{ id: string; video: string }>(
-              `/scripts/${encodeURIComponent(params.scriptId)}/sentences/${encodeURIComponent(bs.id)}/video`,
-              {
-                videoUrl: url,
-                video_type: videoModel,
-                video_size: 'portrait',
-              },
-            );
+            const endpoint = `/scripts/${encodeURIComponent(params.scriptId)}/sentences/${encodeURIComponent(bs.id)}/video`;
+            const response = localFile
+              ? await api.post<{ id: string; video: string }>(
+                endpoint,
+                (() => {
+                  const formData = new FormData();
+                  formData.append('video', localFile);
+                  formData.append('video_type', videoModel);
+                  formData.append('video_size', 'portrait');
+                  return formData;
+                })(),
+                {
+                  headers: {
+                    'Content-Type': 'multipart/form-data',
+                  },
+                },
+              )
+              : await api.post<{ id: string; video: string }>(
+                endpoint,
+                {
+                  videoUrl: url,
+                  video_type: videoModel,
+                  video_size: 'portrait',
+                },
+              );
 
             const saved = response.data;
             if (saved?.id) {
@@ -6712,8 +6663,7 @@ export function GeneratePageInner() {
           for (let i = 0; i < shortsCount; i += 1) {
             const snapKey = tabKeyForIndex(i);
             const snap = tabSnapshotsRef.current[snapKey];
-            const rawItems = snap?.sentences ?? [];
-            const items = rawItems.length ? rawItems : [createShortsCtaSentenceItem()];
+            const items = snap?.sentences ?? [];
 
             // Optionally attach a voice-over to the short if available
             let shortVoiceId = snap?.savedVoiceId ?? null;
@@ -6731,20 +6681,8 @@ export function GeneratePageInner() {
               }
             }
 
-            // Ensure CTA exists and is last.
             const withoutEmpty = items.filter((s) => String(s.text ?? '').trim());
-            const desiredShortsCta = getShortsCtaSentence(scriptLanguage);
-            const endsWithCta =
-              withoutEmpty.length > 0 &&
-              normalizeSentenceForMatch(
-                (withoutEmpty[withoutEmpty.length - 1].text || '').trim(),
-              ) === normalizeSentenceForMatch(desiredShortsCta);
-            const finalItems = endsWithCta
-              ? withoutEmpty
-              : [
-                ...withoutEmpty.filter((s) => !isSubscribeLikeSentence(s.text)),
-                createShortsCtaSentenceItem(),
-              ];
+            const finalItems = withoutEmpty;
 
             const shortSentencesPayload = await buildSentencePayload(
               finalItems,
@@ -6935,6 +6873,7 @@ export function GeneratePageInner() {
           // Preserve local generated videoUrl immediately after save, even before it's persisted.
           const mergedVideoUrl =
             s.videoUrl ?? (local?.videoUrl && local.videoUrl !== '/subscribe.mp4' ? local.videoUrl : null);
+          const mergedVideoFile = !s.videoUrl && !update ? (local?.video ?? null) : null;
 
           return update
             ? {
@@ -6944,6 +6883,7 @@ export function GeneratePageInner() {
             }
             : {
               ...s,
+              video: mergedVideoFile,
               videoUrl: mergedVideoUrl,
             };
         });
@@ -7637,6 +7577,7 @@ export function GeneratePageInner() {
                   onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                   onSentenceImageUpload={handleSentenceImageUpload}
+                  onSentenceVideoUpload={handleSentenceVideoUpload}
                   onAddSentenceImageSlot={handleAddSentenceImageSlot}
                   onRemoveSentenceImage={removeSentenceImage}
                   onSentenceFrameImageUpload={handleSentenceFrameImageUpload}
