@@ -87,6 +87,12 @@ export type SentenceItem = {
 
   image?: File | null;
   imageUrl?: string | null;
+  secondaryImage?: File | null;
+  secondaryImageUrl?: string | null;
+  secondaryImagePrompt?: string | null;
+  secondarySavedImageId?: string | null;
+  isGeneratingSecondaryImage?: boolean;
+  hasSecondaryImageSlot?: boolean;
   video?: File | null;
   videoUrl?: string | null;
   savedVideoId?: string | null;

@@ -165,14 +165,22 @@ type SceneEditorSectionProps = {
 
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
-  onSentenceImageUpload: (index: number, e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSentenceImageUpload: (
+    index: number,
+    e: React.ChangeEvent<HTMLInputElement>,
+    slot?: 'primary' | 'secondary',
+  ) => void;
   onSentenceFrameImageUpload: (
     index: number,
     which: 'start' | 'end',
     e: React.ChangeEvent<HTMLInputElement>,
   ) => void;
 
-  onGenerateSentenceImage: (index: number) => void | Promise<void>;
+  onGenerateSentenceImage: (
+    index: number,
+    promptOverride?: string,
+    slot?: 'primary' | 'secondary',
+  ) => void | Promise<void>;
   onGenerateSentenceReferenceImage?: (index: number) => void | Promise<void>;
   onGenerateSentenceFrameImage?: (index: number, which: 'start' | 'end') => void | Promise<void>;
 
@@ -197,8 +205,12 @@ type SceneEditorSectionProps = {
   ) => void;
   onRemoveSentenceReferenceImage: (index: number) => void;
 
-  onSelectFromLibrary: (index: number, which: 'single' | 'start' | 'end' | 'reference') => void;
-  onRemoveSentenceImage: (index: number) => void;
+  onSelectFromLibrary: (
+    index: number,
+    which: 'single' | 'secondary' | 'start' | 'end' | 'reference',
+  ) => void;
+  onAddSentenceImageSlot?: (index: number) => void;
+  onRemoveSentenceImage: (index: number, slot?: 'primary' | 'secondary') => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
 
   onPreviewImage: (
@@ -309,13 +321,21 @@ type SentenceRowProps = {
   onRequestDelete: (index: number) => void;
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
-  onSentenceImageUpload: (index: number, e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSentenceImageUpload: (
+    index: number,
+    e: React.ChangeEvent<HTMLInputElement>,
+    slot?: 'primary' | 'secondary',
+  ) => void;
   onSentenceFrameImageUpload: (
     index: number,
     which: 'start' | 'end',
     e: React.ChangeEvent<HTMLInputElement>,
   ) => void;
-  onGenerateSentenceImage: (index: number) => void | Promise<void>;
+  onGenerateSentenceImage: (
+    index: number,
+    promptOverride?: string,
+    slot?: 'primary' | 'secondary',
+  ) => void | Promise<void>;
   onGenerateSentenceReferenceImage?: (index: number) => void | Promise<void>;
   onGenerateSentenceFrameImage?: (index: number, which: 'start' | 'end') => void | Promise<void>;
   onGenerateSentenceVideo?: (index: number) => void | Promise<void>;
@@ -334,8 +354,12 @@ type SentenceRowProps = {
     e: React.ChangeEvent<HTMLInputElement>,
   ) => void;
   onRemoveSentenceReferenceImage: (index: number) => void;
-  onSelectFromLibrary: (index: number, which: 'single' | 'start' | 'end' | 'reference') => void;
-  onRemoveSentenceImage: (index: number) => void;
+  onSelectFromLibrary: (
+    index: number,
+    which: 'single' | 'secondary' | 'start' | 'end' | 'reference',
+  ) => void;
+  onAddSentenceImageSlot?: (index: number) => void;
+  onRemoveSentenceImage: (index: number, slot?: 'primary' | 'secondary') => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
   onPreviewImage: (
     url: string,
@@ -428,6 +452,7 @@ const SentenceRow = memo(function SentenceRow({
   onSentenceReferenceImageUpload,
   onRemoveSentenceReferenceImage,
   onSelectFromLibrary,
+  onAddSentenceImageSlot,
   onRemoveSentenceImage,
   onRemoveSentenceFrameImage,
   onPreviewImage,
@@ -513,11 +538,13 @@ const SentenceRow = memo(function SentenceRow({
           onRequestDelete={() => onRequestDelete(index)}
           onSentenceTextChange={(next) => onSentenceTextChange(index, next)}
           onSentenceMediaModeChange={(mode) => onSentenceMediaModeChange(index, mode)}
-          onSentenceImageUpload={(event) => onSentenceImageUpload(index, event)}
+          onSentenceImageUpload={(event, slot) => onSentenceImageUpload(index, event, slot)}
           onSentenceFrameImageUpload={(which, event) =>
             onSentenceFrameImageUpload(index, which, event)
           }
-          onGenerateSentenceImage={() => onGenerateSentenceImage(index)}
+          onGenerateSentenceImage={(promptOverride, slot) =>
+            onGenerateSentenceImage(index, promptOverride, slot)
+          }
           onGenerateSentenceReferenceImage={
             onGenerateSentenceReferenceImage
               ? () => onGenerateSentenceReferenceImage(index)
@@ -529,7 +556,10 @@ const SentenceRow = memo(function SentenceRow({
               : undefined
           }
           onSelectFromLibrary={(which) => onSelectFromLibrary(index, which)}
-          onRemoveSentenceImage={() => onRemoveSentenceImage(index)}
+          onAddSentenceImageSlot={
+            onAddSentenceImageSlot ? () => onAddSentenceImageSlot(index) : undefined
+          }
+          onRemoveSentenceImage={(slot) => onRemoveSentenceImage(index, slot)}
           onRemoveSentenceFrameImage={(which) =>
             onRemoveSentenceFrameImage(index, which)
           }
@@ -798,6 +828,7 @@ export function SceneEditorSection({
   onRemoveSentenceReferenceImage,
 
   onSelectFromLibrary,
+  onAddSentenceImageSlot,
   onRemoveSentenceImage,
   onRemoveSentenceFrameImage,
 
@@ -1063,6 +1094,7 @@ export function SceneEditorSection({
               onRemoveSentenceImage={onRemoveSentenceImage}
               onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
               onPreviewImage={onPreviewImage}
+              onAddSentenceImageSlot={onAddSentenceImageSlot}
               onTransitionToNextChange={onTransitionToNextChange}
               onOpenTransitionSoundEditor={onOpenTransitionSoundEditor}
               onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}

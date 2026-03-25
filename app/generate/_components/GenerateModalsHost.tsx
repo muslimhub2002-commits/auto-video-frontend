@@ -13,7 +13,7 @@ import { SoundEffectsLibraryModal, type SoundEffectDto } from './SoundEffectsLib
 type LibraryTarget =
   | {
       sentenceId: string;
-      which: 'single' | 'start' | 'end' | 'reference';
+      which: 'single' | 'secondary' | 'start' | 'end' | 'reference';
     }
   | null;
 
@@ -75,6 +75,7 @@ function selectedImageUrlFromTarget(sentences: SentenceItem[], libraryTarget: Li
   if (!sentence) return null;
 
   if (libraryTarget.which === 'single') return sentence.imageUrl ?? null;
+  if (libraryTarget.which === 'secondary') return sentence.secondaryImageUrl ?? null;
   if (libraryTarget.which === 'start') return sentence.startImageUrl ?? null;
   if (libraryTarget.which === 'end') return sentence.endImageUrl ?? null;
   return sentence.referenceImageUrl ?? null;

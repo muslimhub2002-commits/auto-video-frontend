@@ -188,13 +188,21 @@ type SentencesImagesSectionProps = {
   onInsertEmptySentenceAfter: (index: number) => string;
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
-  onSentenceImageUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
+  onSentenceImageUpload: (
+    index: number,
+    e: ChangeEvent<HTMLInputElement>,
+    slot?: 'primary' | 'secondary',
+  ) => void;
   onSentenceFrameImageUpload: (
     index: number,
     which: 'start' | 'end',
     e: ChangeEvent<HTMLInputElement>,
   ) => void;
-  onGenerateSentenceImage: (index: number, promptOverride?: string) => void | Promise<void>;
+  onGenerateSentenceImage: (
+    index: number,
+    promptOverride?: string,
+    slot?: 'primary' | 'secondary',
+  ) => void | Promise<void>;
   onGenerateSentenceReferenceImage?: (index: number) => void | Promise<void>;
   onGenerateSentenceFrameImage?: (
     index: number,
@@ -229,12 +237,13 @@ type SentencesImagesSectionProps = {
   onSelectVideoFromLibrary?: (index: number) => void;
   onSelectFromLibrary: (
     index: number,
-    which: 'single' | 'start' | 'end' | 'reference',
+    which: 'single' | 'secondary' | 'start' | 'end' | 'reference',
   ) => void;
   isGeneratingVideoBySentenceId: Record<string, boolean>;
   setIsGeneratingVideoBySentenceId: Dispatch<SetStateAction<Record<string, boolean>>>;
   onSaveSentenceImage?: (index: number) => void | Promise<void>;
-  onRemoveSentenceImage: (index: number) => void;
+  onAddSentenceImageSlot?: (index: number) => void;
+  onRemoveSentenceImage: (index: number, slot?: 'primary' | 'secondary') => void;
   onRemoveSentenceFrameImage: (index: number, which: 'start' | 'end') => void;
   onMergeSentenceIntoPrevious: (index: number) => void;
   onMergeSentenceIntoNext: (index: number) => void;
@@ -318,6 +327,7 @@ export function SentencesImagesSection({
   onSentenceTextChange,
   onSentenceMediaModeChange,
   onSentenceImageUpload,
+  onAddSentenceImageSlot,
   onSentenceFrameImageUpload,
   onGenerateSentenceImage,
   onGenerateSentenceReferenceImage,
@@ -725,6 +735,7 @@ export function SentencesImagesSection({
               onSentenceTextChange={onSentenceTextChange}
               onSentenceMediaModeChange={onSentenceMediaModeChange}
               onSentenceImageUpload={onSentenceImageUpload}
+              onAddSentenceImageSlot={onAddSentenceImageSlot}
               onSentenceFrameImageUpload={onSentenceFrameImageUpload}
               onGenerateSentenceImage={onGenerateSentenceImage}
               onGenerateSentenceReferenceImage={onGenerateSentenceReferenceImage}

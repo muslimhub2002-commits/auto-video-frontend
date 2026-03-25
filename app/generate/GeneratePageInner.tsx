@@ -98,6 +98,7 @@ type BackendSentenceDto = {
   motion_effect_id?: string | null;
   image_motion_settings?: Record<string, unknown> | null;
   image?: { id: string; image: string; prompt?: string | null } | null;
+  secondaryImage?: { id: string; image: string; prompt?: string | null } | null;
   startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   video?: { id: string; video: string } | null;
@@ -725,6 +726,7 @@ type ReferenceScriptPayload = {
 };
 
 type TransitionSoundDraftItem = NonNullable<SentenceItem['transitionSoundEffects']>;
+type SentenceImageSlot = 'primary' | 'secondary';
 
 export function GeneratePageInner() {
   type VoiceProvider = 'google' | 'elevenlabs';
@@ -930,7 +932,7 @@ export function GeneratePageInner() {
   const [libraryTarget, setLibraryTarget] = useState<
     | {
       sentenceId: string;
-      which: 'single' | 'start' | 'end' | 'reference';
+      which: 'single' | 'secondary' | 'start' | 'end' | 'reference';
     }
     | null
   >(null);
@@ -1204,6 +1206,12 @@ export function GeneratePageInner() {
       sceneTab: 'video',
       image: null,
       imageUrl: null,
+      secondaryImage: null,
+      secondaryImageUrl: null,
+      secondaryImagePrompt: null,
+      secondarySavedImageId: null,
+      isGeneratingSecondaryImage: false,
+      hasSecondaryImageSlot: false,
       video: null,
       videoUrl: '/subscribe.mp4',
       imagePrompt: null,
@@ -1501,6 +1509,9 @@ export function GeneratePageInner() {
         text,
         isSuspense: Boolean(s.isSuspense),
         mediaType: 'image' as const,
+        ...(String(s.secondaryImageUrl ?? '').trim()
+          ? { secondaryImageUrl: String(s.secondaryImageUrl ?? '').trim() }
+          : {}),
         imageEffectsMode: s.imageEffectsMode ?? 'quick',
         ...(transitionToNext ? { transitionToNext } : {}),
         ...(visualEffect ? { visualEffect } : {}),
@@ -1618,6 +1629,41 @@ export function GeneratePageInner() {
         throw new Error(
           `Missing image for sentence ${index + 1}. Please provide an image for every sentence on the Image tab.`,
         );
+      }
+
+      const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
+        resourceType: 'image',
+        folder: 'auto-video-generator/render-images',
+      });
+
+      return uploadedUrl;
+    });
+  };
+
+  const buildRenderSecondaryImageUrls = async (sourceSentences: SentenceItem[]) => {
+    return await mapWithConcurrency(sourceSentences, 4, async (sentence, index) => {
+      const text = String(sentence?.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) {
+        return null;
+      }
+
+      const tab = sentence.sceneTab ?? (sentence.mediaMode === 'frames' ? 'video' : 'image');
+      if (tab !== 'image') {
+        return null;
+      }
+
+      const currentUrl = String(sentence.secondaryImageUrl ?? '').trim();
+      if (currentUrl && !currentUrl.startsWith('data:')) {
+        return currentUrl;
+      }
+
+      let fileToUpload = sentence.secondaryImage ?? null;
+      if (!fileToUpload && currentUrl.startsWith('data:')) {
+        fileToUpload = dataUrlToFile(currentUrl, `sentence-${index + 1}-secondary.png`);
+      }
+
+      if (!fileToUpload) {
+        return null;
       }
 
       const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
@@ -1874,6 +1920,7 @@ export function GeneratePageInner() {
       text: string;
       index: number;
       image?: { id: string; image: string } | null;
+      secondaryImage?: { id: string; image: string } | null;
       video?: { id: string; video: string } | null;
       isSuspense?: boolean;
     };
@@ -1906,6 +1953,12 @@ export function GeneratePageInner() {
           sceneTab: isSubscribe ? 'video' : hasVideo ? 'video' : 'image',
           image: null,
           imageUrl: isSubscribe ? null : s.image?.image ?? null,
+          secondaryImage: null,
+          secondaryImageUrl: isSubscribe ? null : s.secondaryImage?.image ?? null,
+          secondaryImagePrompt: null,
+          secondarySavedImageId: isSubscribe ? null : s.secondaryImage?.id ?? null,
+          isGeneratingSecondaryImage: false,
+          hasSecondaryImageSlot: !isSubscribe && Boolean(s.secondaryImage?.image),
           video: null,
           videoUrl: isSubscribe ? '/subscribe.mp4' : s.video?.video ?? null,
           imagePrompt: null,
@@ -1927,6 +1980,12 @@ export function GeneratePageInner() {
         sceneTab: 'video',
         image: null,
         imageUrl: null,
+        secondaryImage: null,
+        secondaryImageUrl: null,
+        secondaryImagePrompt: null,
+        secondarySavedImageId: null,
+        isGeneratingSecondaryImage: false,
+        hasSecondaryImageSlot: false,
         video: null,
         videoUrl: '/subscribe.mp4',
         imagePrompt: null,
@@ -3386,6 +3445,7 @@ export function GeneratePageInner() {
       const sentencePayload = buildRenderSentencePayload(sentences);
       const audioUrl = await resolveRenderAudioUrl();
       const imageUrls = await buildRenderImageUrls(sentences);
+      const secondaryImageUrls = await buildRenderSecondaryImageUrls(sentences);
 
       let res = await fetch(`${API_URL}/videos/url`, {
         method: 'POST',
@@ -3396,6 +3456,7 @@ export function GeneratePageInner() {
           audioUrl,
           sentences: sentencePayload,
           imageUrls,
+          secondaryImageUrls,
           scriptLength,
           language: scriptLanguage,
           ...(voiceDuration && voiceDuration > 0
@@ -3951,6 +4012,12 @@ export function GeneratePageInner() {
         imageMotionSpeed: normalizeImageMotionSpeedValue(s.image_motion_speed),
         image: null,
         imageUrl: subscribeLike ? null : s.image?.image ?? null,
+        secondaryImage: null,
+        secondaryImageUrl: subscribeLike ? null : s.secondaryImage?.image ?? null,
+        secondaryImagePrompt: s.secondaryImage?.prompt ?? null,
+        secondarySavedImageId: s.secondaryImage?.id ?? null,
+        isGeneratingSecondaryImage: false,
+        hasSecondaryImageSlot: !subscribeLike && Boolean(s.secondaryImage?.image),
         startImage: null,
         startImageUrl: s.startFrameImage?.image ?? null,
         startImagePrompt: s.startFrameImage?.prompt ?? null,
@@ -4270,6 +4337,7 @@ export function GeneratePageInner() {
   const handleSentenceImageUpload = (
     index: number,
     e: ChangeEvent<HTMLInputElement>,
+    slot: SentenceImageSlot = 'primary',
   ) => {
     if (!e.target.files || !e.target.files[0]) return;
     const file = e.target.files[0];
@@ -4281,14 +4349,50 @@ export function GeneratePageInner() {
             ...item,
             mediaMode: 'single',
             sceneTab: isVideo ? 'video' : 'image',
-            image: isVideo ? null : file,
-            imageUrl: isVideo ? null : null,
+            image:
+              slot === 'primary' && !isVideo ? file : item.image ?? null,
+            imageUrl:
+              slot === 'primary' && !isVideo ? null : item.imageUrl ?? null,
+            secondaryImage:
+              slot === 'secondary' && !isVideo ? file : item.secondaryImage ?? null,
+            secondaryImageUrl:
+              slot === 'secondary' && !isVideo ? null : item.secondaryImageUrl ?? null,
             video: isVideo ? file : null,
             videoUrl: isVideo ? null : null,
             savedVideoId: null,
-            imagePrompt: isVideo ? null : item.imagePrompt,
-            savedImageId: null,
+            imagePrompt:
+              isVideo
+                ? null
+                : slot === 'primary'
+                  ? null
+                  : item.imagePrompt,
+            secondaryImagePrompt:
+              isVideo
+                ? null
+                : slot === 'secondary'
+                  ? null
+                  : item.secondaryImagePrompt ?? null,
+            savedImageId: slot === 'primary' ? null : item.savedImageId ?? null,
+            secondarySavedImageId:
+              slot === 'secondary' ? null : item.secondarySavedImageId ?? null,
+            hasSecondaryImageSlot:
+              slot === 'secondary'
+                ? true
+                : item.hasSecondaryImageSlot || Boolean(item.secondaryImage || item.secondaryImageUrl),
             isFromLibrary: false,
+          }
+          : item,
+      ),
+    );
+  };
+
+  const handleAddSentenceImageSlot = (index: number) => {
+    setSentences((prev) =>
+      prev.map((item, i) =>
+        i === index
+          ? {
+            ...item,
+            hasSecondaryImageSlot: true,
           }
           : item,
       ),
@@ -4400,44 +4504,83 @@ export function GeneratePageInner() {
     );
   };
 
-  const removeSentenceImage = (index: number) => {
+  const removeSentenceImage = (index: number, slot: SentenceImageSlot = 'primary') => {
     setSentences((prev) =>
       prev.map((item, i) =>
         i === index
-          ? {
-            ...item,
-            image: null,
-            imageUrl: null,
-            video: null,
-            videoUrl: null,
-            savedVideoId: null,
-            startImage: null,
-            startImageUrl: null,
-            startImagePrompt: null,
-            startSavedImageId: null,
-            endImage: null,
-            endImageUrl: null,
-            endImagePrompt: null,
-            endSavedImageId: null,
-            imagePrompt: null,
-            savedImageId: null,
-            isFromLibrary: false,
-            sceneTab: 'image',
-            mediaMode: 'single',
-          }
+          ? slot === 'secondary'
+            ? {
+              ...item,
+              secondaryImage: null,
+              secondaryImageUrl: null,
+              secondaryImagePrompt: null,
+              secondarySavedImageId: null,
+              isGeneratingSecondaryImage: false,
+              hasSecondaryImageSlot: false,
+            }
+            : item.secondaryImage || item.secondaryImageUrl
+              ? {
+                ...item,
+                image: item.secondaryImage ?? null,
+                imageUrl: item.secondaryImage ? null : item.secondaryImageUrl ?? null,
+                imagePrompt: item.secondaryImagePrompt ?? null,
+                savedImageId: item.secondarySavedImageId ?? null,
+                secondaryImage: null,
+                secondaryImageUrl: null,
+                secondaryImagePrompt: null,
+                secondarySavedImageId: null,
+                isGeneratingImage: false,
+                isGeneratingSecondaryImage: false,
+                hasSecondaryImageSlot: false,
+                isFromLibrary: Boolean(item.secondaryImageUrl),
+              }
+              : {
+                ...item,
+                image: null,
+                imageUrl: null,
+                secondaryImage: null,
+                secondaryImageUrl: null,
+                secondaryImagePrompt: null,
+                secondarySavedImageId: null,
+                video: null,
+                videoUrl: null,
+                savedVideoId: null,
+                startImage: null,
+                startImageUrl: null,
+                startImagePrompt: null,
+                startSavedImageId: null,
+                endImage: null,
+                endImageUrl: null,
+                endImagePrompt: null,
+                endSavedImageId: null,
+                imagePrompt: null,
+                savedImageId: null,
+                isFromLibrary: false,
+                sceneTab: 'image',
+                mediaMode: 'single',
+                hasSecondaryImageSlot: false,
+              }
           : item,
       ),
     );
   };
 
-  const handleGenerateSentenceImage = async (index: number, promptOverride?: string) => {
+  const handleGenerateSentenceImage = async (
+    index: number,
+    promptOverride?: string,
+    slot: SentenceImageSlot = 'primary',
+  ) => {
     const target = sentences[index];
     if (!target) return;
     const sentenceId = target.id;
 
     const style = IMAGE_STYLE_PRESETS.find((s) => s.key === imageStyle)?.style || IMAGE_STYLE_PRESETS[0].style;
 
-    patchSentenceById(sentenceId, { isGeneratingImage: true });
+    patchSentenceById(sentenceId, {
+      ...(slot === 'primary'
+        ? { isGeneratingImage: true }
+        : { isGeneratingSecondaryImage: true, hasSecondaryImageSlot: true }),
+    });
 
     try {
       const res = await api.post('/ai/generate-image-from-sentence', {
@@ -4457,6 +4600,11 @@ export function GeneratePageInner() {
         forcedCharacterKeys: Array.isArray(target.forcedCharacterKeys)
           ? target.forcedCharacterKeys
           : undefined,
+        imageVariant: slot === 'secondary' ? 'secondary' : 'primary',
+        continuityPrompt:
+          slot === 'secondary'
+            ? String(target.imagePrompt ?? '').trim() || undefined
+            : undefined,
         prompt: promptOverride?.trim() ? promptOverride.trim() : undefined,
       });
 
@@ -4479,15 +4627,32 @@ export function GeneratePageInner() {
 
       updateSentenceById(sentenceId, (item) => ({
         ...item,
-        imageUrl,
-        imagePrompt: data.prompt,
-        isGeneratingImage: false,
+        ...(slot === 'primary'
+          ? {
+            imageUrl,
+            image: null,
+            imagePrompt: data.prompt,
+            isGeneratingImage: false,
+            savedImageId: data.savedImageId ?? item.savedImageId ?? null,
+          }
+          : {
+            secondaryImageUrl: imageUrl,
+            secondaryImage: null,
+            secondaryImagePrompt: data.prompt,
+            isGeneratingSecondaryImage: false,
+            secondarySavedImageId:
+              data.savedImageId ?? item.secondarySavedImageId ?? null,
+            hasSecondaryImageSlot: true,
+          }),
         isFromLibrary: false,
-        savedImageId: data.savedImageId ?? item.savedImageId ?? null,
       }));
     } catch (error) {
       console.error('Generate image failed', error);
-      patchSentenceById(sentenceId, { isGeneratingImage: false });
+      patchSentenceById(sentenceId, {
+        ...(slot === 'primary'
+          ? { isGeneratingImage: false }
+          : { isGeneratingSecondaryImage: false, hasSecondaryImageSlot: true }),
+      });
       setSplitError('Failed to generate image for this sentence.');
     }
   };
@@ -5575,7 +5740,7 @@ export function GeneratePageInner() {
 
   const handleSelectFromLibrary = (
     index: number,
-    which: 'single' | 'start' | 'end' | 'reference' = 'single',
+    which: 'single' | 'secondary' | 'start' | 'end' | 'reference' = 'single',
   ) => {
     const sentenceId = sentences[index]?.id;
     if (!sentenceId) return;
@@ -5641,6 +5806,16 @@ export function GeneratePageInner() {
           isFromLibrary: true,
           savedImageId: id,
         }
+        : which === 'secondary'
+          ? {
+            ...item,
+            secondaryImageUrl: imageUrl,
+            secondaryImage: null,
+            secondaryImagePrompt: prompt ?? null,
+            isFromLibrary: true,
+            secondarySavedImageId: id,
+            hasSecondaryImageSlot: true,
+          }
         : which === 'start'
           ? {
             ...item,
@@ -6291,6 +6466,7 @@ export function GeneratePageInner() {
           location_key?: string | null;
           forced_location_key?: string | null;
           image_id?: string;
+          secondary_image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
           video_id?: string;
@@ -6332,6 +6508,14 @@ export function GeneratePageInner() {
             prompt: s.imagePrompt ?? null,
           });
 
+          const secondaryImageId = await uploadImageIfNeeded({
+            existingId: s.secondarySavedImageId ?? null,
+            file: s.secondaryImage,
+            url: s.secondaryImageUrl,
+            filename: `${prefix}-sentence-${index + 1}-secondary.png`,
+            prompt: s.secondaryImagePrompt ?? null,
+          });
+
           const startFrameImageId = await uploadImageIfNeeded({
             existingId: s.startSavedImageId ?? null,
             file: s.startImage,
@@ -6360,6 +6544,7 @@ export function GeneratePageInner() {
                 ? null
                 : String(s.forcedLocationKey).trim(),
             image_id: imageId ?? undefined,
+            secondary_image_id: secondaryImageId ?? undefined,
             start_frame_image_id: startFrameImageId ?? undefined,
             end_frame_image_id: endFrameImageId ?? undefined,
             video_id: s.savedVideoId ?? undefined,
@@ -7452,6 +7637,7 @@ export function GeneratePageInner() {
                   onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
                   onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                   onSentenceImageUpload={handleSentenceImageUpload}
+                  onAddSentenceImageSlot={handleAddSentenceImageSlot}
                   onRemoveSentenceImage={removeSentenceImage}
                   onSentenceFrameImageUpload={handleSentenceFrameImageUpload}
                   onRemoveSentenceFrameImage={removeSentenceFrameImage}

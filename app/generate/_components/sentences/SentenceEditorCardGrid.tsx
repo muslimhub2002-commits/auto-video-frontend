@@ -55,6 +55,7 @@ import {
   Timer,
   SlidersHorizontal,
   MapPin,
+  Plus,
 } from 'lucide-react';
 
 import { ForcedCharactersModal } from './ForcedCharactersModal';
@@ -98,271 +99,270 @@ import type { SentenceItem } from '../../_types/sentences';
 
 type VisualEffectValue = SentenceItem['visualEffect'];
 
-const VISUAL_EFFECT_SELECT_VALUES = [
-  'colorGrading',
-  'animatedLighting',
-  'glassSubtle',
-  'glassReflections',
-  'glassStrong',
-] as const;
+  const VISUAL_EFFECT_SELECT_VALUES = [
+    'colorGrading',
+    'animatedLighting',
+    'glassSubtle',
+    'glassReflections',
+    'glassStrong',
+  ] as const;
 
-type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
+  type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
 
-function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
-  return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
-}
-
-const getApiErrorMessage = (error: unknown, fallback: string) => {
-  const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
-  if (Array.isArray(message)) {
-    const firstMessage = message.find((item) => typeof item === 'string' && item.trim().length > 0);
-    if (typeof firstMessage === 'string') return firstMessage.trim();
+  function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
+    return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
   }
-  if (typeof message === 'string' && message.trim().length > 0) {
-    return message.trim();
-  }
-  return fallback;
-};
 
-const getSentenceSoundEffectSortableId = (
-  sfx: NonNullable<SentenceItem['soundEffects']>[number],
-  index: number,
-) => `${String(sfx.id ?? 'sfx')}-${index}`;
+  const getApiErrorMessage = (error: unknown, fallback: string) => {
+    const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+    if (Array.isArray(message)) {
+      const firstMessage = message.find((item) => typeof item === 'string' && item.trim().length > 0);
+      if (typeof firstMessage === 'string') return firstMessage.trim();
+    }
+    if (typeof message === 'string' && message.trim().length > 0) {
+      return message.trim();
+    }
+    return fallback;
+  };
 
-type SortableSentenceSoundEffectCardProps = {
-  sfx: NonNullable<SentenceItem['soundEffects']>[number];
-  sfxIndex: number;
-  isLast: boolean;
-  isDelayDisabled: boolean;
-  nextTimingMode: 'withPrevious' | 'afterPreviousEnds';
-  singleStatus: 'idle' | 'loading' | 'playing';
-  truncateTitle: (value: string) => string;
-  onTogglePlay: () => void;
-  onEdit: () => void;
-  onRemove: () => void;
-  onDelayChange: (value: number) => void;
-  onVolumeChange: (value: number) => void;
-  onNextTimingModeChange: (value: 'withPrevious' | 'afterPreviousEnds') => void;
-};
+  const getSentenceSoundEffectSortableId = (
+    sfx: NonNullable<SentenceItem['soundEffects']>[number],
+    index: number,
+  ) => `${String(sfx.id ?? 'sfx')}-${index}`;
 
-function SortableSentenceSoundEffectCard({
-  sfx,
-  sfxIndex,
-  isLast,
-  isDelayDisabled,
-  nextTimingMode,
-  singleStatus,
-  truncateTitle,
-  onTogglePlay,
-  onEdit,
-  onRemove,
-  onDelayChange,
-  onVolumeChange,
-  onNextTimingModeChange,
-}: SortableSentenceSoundEffectCardProps) {
-  const playbackDurationSeconds = getSoundEffectPlaybackDurationSeconds({
-    durationSeconds: sfx.durationSeconds,
-    audioSettings: sfx.audioSettings,
-  });
+  type SortableSentenceSoundEffectCardProps = {
+    sfx: NonNullable<SentenceItem['soundEffects']>[number];
+    sfxIndex: number;
+    isLast: boolean;
+    isDelayDisabled: boolean;
+    nextTimingMode: 'withPrevious' | 'afterPreviousEnds';
+    singleStatus: 'idle' | 'loading' | 'playing';
+    truncateTitle: (value: string) => string;
+    onTogglePlay: () => void;
+    onEdit: () => void;
+    onRemove: () => void;
+    onDelayChange: (value: number) => void;
+    onVolumeChange: (value: number) => void;
+    onNextTimingModeChange: (value: 'withPrevious' | 'afterPreviousEnds') => void;
+  };
 
-  const sortableId = getSentenceSoundEffectSortableId(sfx, sfxIndex);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: sortableId,
-  });
+  function SortableSentenceSoundEffectCard({
+    sfx,
+    sfxIndex,
+    isLast,
+    isDelayDisabled,
+    nextTimingMode,
+    singleStatus,
+    truncateTitle,
+    onTogglePlay,
+    onEdit,
+    onRemove,
+    onDelayChange,
+    onVolumeChange,
+    onNextTimingModeChange,
+  }: SortableSentenceSoundEffectCardProps) {
+    const playbackDurationSeconds = getSoundEffectPlaybackDurationSeconds({
+      durationSeconds: sfx.durationSeconds,
+      audioSettings: sfx.audioSettings,
+    });
 
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-      }}
-      className={isDragging ? 'relative z-20' : undefined}
-    >
+    const sortableId = getSentenceSoundEffectSortableId(sfx, sfxIndex);
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+      id: sortableId,
+    });
+
+    return (
       <div
-        className={
-          isDragging
-            ? 'rounded-xl border border-indigo-300 bg-white p-3 shadow-xl'
-            : 'rounded-xl border border-gray-200 bg-gray-50/50 p-3'
-        }
+        ref={setNodeRef}
+        style={{
+          transform: CSS.Transform.toString(transform),
+          transition,
+        }}
+        className={isDragging ? 'relative z-20' : undefined}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <button
-              type="button"
-              className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:bg-gray-50"
-              aria-label="Drag sound effect"
-              {...attributes}
-              {...listeners}
-            >
-              <GripVertical className="h-4 w-4" />
-            </button>
-
-            <div className="min-w-0">
-              <p
-                className="truncate text-sm font-bold text-gray-900"
-                title={String(sfx.title ?? '').trim()}
+        <div
+          className={
+            isDragging
+              ? 'rounded-xl border border-indigo-300 bg-white p-3 shadow-xl'
+              : 'rounded-xl border border-gray-200 bg-gray-50/50 p-3'
+          }
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <button
+                type="button"
+                className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:bg-gray-50"
+                aria-label="Drag sound effect"
+                {...attributes}
+                {...listeners}
               >
-                {truncateTitle(String(sfx.title ?? ''))}
-              </p>
-              <p className="truncate text-xs text-gray-500" title={sfx.url}>
-                {sfx.url}
-              </p>
-              {typeof playbackDurationSeconds === 'number' ? (
-                <p className="mt-1 text-[11px] font-medium text-indigo-600">
-                  Duration {playbackDurationSeconds.toFixed(2)}s
+                <GripVertical className="h-4 w-4" />
+              </button>
+
+              <div className="min-w-0">
+                <p
+                  className="truncate text-sm font-bold text-gray-900"
+                  title={String(sfx.title ?? '').trim()}
+                >
+                  {truncateTitle(String(sfx.title ?? ''))}
                 </p>
-              ) : null}
+                <p className="truncate text-xs text-gray-500" title={sfx.url}>
+                  {sfx.url}
+                </p>
+                {typeof playbackDurationSeconds === 'number' ? (
+                  <p className="mt-1 text-[11px] font-medium text-indigo-600">
+                    Duration {playbackDurationSeconds.toFixed(2)}s
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onTogglePlay}
+                className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
+                title="Preview this sound effect"
+              >
+                {singleStatus === 'loading' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : singleStatus === 'playing' ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onEdit}
+                className="border-gray-200 text-gray-700 hover:bg-white"
+                title="Edit name & volume"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onRemove}
+                className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                title="Remove"
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onTogglePlay}
-              className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
-              title="Preview this sound effect"
-            >
-              {singleStatus === 'loading' ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : singleStatus === 'playing' ? (
-                <Pause className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              
-            </Button>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+              <div className="flex h-9 items-start gap-2">
+                <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
+                  <Timer className="h-4 w-4 text-indigo-600" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-gray-900">Start offset</p>
+                  <p className="text-[11px] leading-tight text-gray-500">
+                    Seconds after this group starts
+                  </p>
+                </div>
+              </div>
 
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onEdit}
-              className="border-gray-200 text-gray-700 hover:bg-white"
-              title="Edit name & volume"
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
+              <div className="relative mt-2">
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={String(Number(sfx.delaySeconds ?? 0))}
+                  onChange={(e) => onDelayChange(Math.max(0, Number(e.target.value) || 0))}
+                  className="h-9 pr-10"
+                  disabled={isDelayDisabled}
+                  placeholder="0.0"
+                  title={
+                    isDelayDisabled
+                      ? 'Start offset is disabled while ending the sound stack with the scene'
+                      : 'Start offset in seconds'
+                  }
+                />
+                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                  s
+                </div>
+              </div>
+            </div>
 
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onRemove}
-              className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
-              title="Remove"
-            >
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+              <div className="flex h-9 items-start gap-2">
+                <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
+                  <Volume2 className="h-4 w-4 text-indigo-600" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-gray-900">Volume</p>
+                  <p className="text-[11px] leading-tight text-gray-500">
+                    Relative loudness
+                  </p>
+                </div>
+              </div>
+
+              <div className="relative mt-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={300}
+                  step={1}
+                  value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
+                  onChange={(e) => onVolumeChange(Math.max(0, Math.min(300, Number(e.target.value) || 0)))}
+                  className="h-9 pr-10"
+                  placeholder="100"
+                  title="Volume percent (100 = original volume)"
+                />
+                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                  %
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
-            <div className="flex h-9 items-start gap-2">
-              <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
-                <Timer className="h-4 w-4 text-indigo-600" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-900">Start offset</p>
-                <p className="text-[11px] leading-tight text-gray-500">
-                  Seconds after this group starts
-                </p>
-              </div>
-            </div>
-
-            <div className="relative mt-2">
-              <Input
-                type="number"
-                min={0}
-                step={0.1}
-                value={String(Number(sfx.delaySeconds ?? 0))}
-                onChange={(e) => onDelayChange(Math.max(0, Number(e.target.value) || 0))}
-                className="h-9 pr-10"
-                disabled={isDelayDisabled}
-                placeholder="0.0"
-                title={
-                  isDelayDisabled
-                    ? 'Start offset is disabled while ending the sound stack with the scene'
-                    : 'Start offset in seconds'
+        {isLast ? null : (
+          <div className="flex items-center justify-center py-2">
+            <div className="inline-flex items-center gap-1 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-1 shadow-sm">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onNextTimingModeChange('withPrevious')}
+                className={
+                  nextTimingMode === 'withPrevious'
+                    ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
+                    : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
                 }
-              />
-              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
-                s
-              </div>
+              >
+                Play together
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onNextTimingModeChange('afterPreviousEnds')}
+                className={
+                  nextTimingMode === 'afterPreviousEnds'
+                    ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
+                    : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
+                }
+              >
+                Play Next
+              </Button>
             </div>
           </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
-            <div className="flex h-9 items-start gap-2">
-              <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
-                <Volume2 className="h-4 w-4 text-indigo-600" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-gray-900">Volume</p>
-                <p className="text-[11px] leading-tight text-gray-500">
-                  Relative loudness
-                </p>
-              </div>
-            </div>
-
-            <div className="relative mt-2">
-              <Input
-                type="number"
-                min={0}
-                max={300}
-                step={1}
-                value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
-                onChange={(e) => onVolumeChange(Math.max(0, Math.min(300, Number(e.target.value) || 0)))}
-                className="h-9 pr-10"
-                placeholder="100"
-                title="Volume percent (100 = original volume)"
-              />
-              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
-                %
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
-
-      {isLast ? null : (
-        <div className="flex items-center justify-center py-2">
-          <div className="inline-flex items-center gap-1 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-1 shadow-sm">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => onNextTimingModeChange('withPrevious')}
-              className={
-                nextTimingMode === 'withPrevious'
-                  ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
-                  : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
-              }
-            >
-              Play together
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => onNextTimingModeChange('afterPreviousEnds')}
-              className={
-                nextTimingMode === 'afterPreviousEnds'
-                  ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
-                  : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
-              }
-            >
-              Play Next
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+    );
+  }
 
 type ScriptCharacter = {
   key: string;
@@ -471,14 +471,21 @@ type SentenceEditorCardProps = {
   onSentenceTextChange: (next: string) => void;
   onSentenceMediaModeChange: (mode: 'single' | 'frames') => void;
 
-  onSentenceImageUpload: (e: ChangeEvent<HTMLInputElement>) => void;
+  onSentenceImageUpload: (
+    e: ChangeEvent<HTMLInputElement>,
+    slot?: 'primary' | 'secondary',
+  ) => void;
   onSentenceFrameImageUpload: (which: 'start' | 'end', e: ChangeEvent<HTMLInputElement>) => void;
 
-  onGenerateSentenceImage: () => void | Promise<void>;
+  onGenerateSentenceImage: (
+    promptOverride?: string,
+    slot?: 'primary' | 'secondary',
+  ) => void | Promise<void>;
   onGenerateSentenceReferenceImage?: () => void | Promise<void>;
   onGenerateSentenceFrameImage?: (which: 'start' | 'end') => void | Promise<void>;
-  onSelectFromLibrary: (which: 'single' | 'start' | 'end' | 'reference') => void;
-  onRemoveSentenceImage: () => void;
+  onSelectFromLibrary: (which: 'single' | 'secondary' | 'start' | 'end' | 'reference') => void;
+  onAddSentenceImageSlot?: () => void;
+  onRemoveSentenceImage: (slot?: 'primary' | 'secondary') => void;
   onRemoveSentenceFrameImage: (which: 'start' | 'end') => void;
 
   onVideoGenerationModeChange?: (
@@ -573,6 +580,7 @@ function SentenceEditorCardComponent({
   onGenerateSentenceReferenceImage,
   onGenerateSentenceFrameImage,
   onSelectFromLibrary,
+  onAddSentenceImageSlot,
   onRemoveSentenceImage,
   onRemoveSentenceFrameImage,
 
@@ -599,7 +607,9 @@ function SentenceEditorCardComponent({
     : 'block w-full aspect-video object-cover';
   const hasAnyVideo = Boolean(item.video || item.videoUrl);
   const isSubscribeClip = item.videoUrl === '/subscribe.mp4';
-  const hasAnyImage = Boolean(item.image || item.imageUrl);
+  const hasAnyImage = Boolean(
+    item.image || item.imageUrl || item.secondaryImage || item.secondaryImageUrl,
+  );
   const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
 
   const soundEffects = useMemo(
@@ -696,7 +706,7 @@ function SentenceEditorCardComponent({
   };
 
   const getSfxPreviewKey = (sfx: { id?: unknown; url: string }) => {
-    const id = (sfx as any)?.id;
+    const id = sfx.id;
     if (typeof id === 'string' && id.trim().length > 0) return `id:${id}`;
     return `url:${String(sfx.url ?? '')}`;
   };
@@ -921,7 +931,7 @@ function SentenceEditorCardComponent({
       ignoreOffsets: isAlignSoundEffectsToSceneEndEnabled,
     });
     const shouldShowLoading = timedSoundEffects.some((sfx) => {
-      const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
+      const key = getSfxPreviewKey({ id: sfx.id, url: sfx.url });
       return !soundEffectsEverStartedRef.current.has(key);
     });
     setMixStatus(shouldShowLoading ? 'loading' : 'playing');
@@ -930,7 +940,7 @@ function SentenceEditorCardComponent({
     const total = timedSoundEffects.length;
 
     for (const sfx of timedSoundEffects) {
-      const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
+      const key = getSfxPreviewKey({ id: sfx.id, url: sfx.url });
       scheduleAudio({
         url: sfx.url,
         delaySeconds: sfx.absoluteDelaySeconds,
@@ -957,7 +967,7 @@ function SentenceEditorCardComponent({
     const sfx = soundEffects[sfxIndex];
     if (!sfx) return;
 
-    const key = getSfxPreviewKey({ id: (sfx as any)?.id, url: sfx.url });
+    const key = getSfxPreviewKey({ id: sfx.id, url: sfx.url });
     const shouldShowLoading = !soundEffectsEverStartedRef.current.has(key);
 
     // Stop any mix first.
@@ -1182,20 +1192,27 @@ function SentenceEditorCardComponent({
   );
 
   const imagePreviewObjectUrl = useManagedObjectUrl(item.image);
+  const secondaryImagePreviewObjectUrl = useManagedObjectUrl(item.secondaryImage);
   const startPreviewObjectUrl = useManagedObjectUrl(item.startImage);
   const endPreviewObjectUrl = useManagedObjectUrl(item.endImage);
   const referencePreviewObjectUrl = useManagedObjectUrl(item.referenceImage);
 
+  const imagePreviewUrl = imagePreviewObjectUrl ?? item.imageUrl ?? null;
+  const secondaryImagePreviewUrl = secondaryImagePreviewObjectUrl ?? item.secondaryImageUrl ?? null;
   const startPreviewUrl = startPreviewObjectUrl ?? item.startImageUrl ?? null;
   const endPreviewUrl = endPreviewObjectUrl ?? item.endImageUrl ?? null;
   const referencePreviewUrl = referencePreviewObjectUrl ?? item.referenceImageUrl ?? null;
   const detailPreviewUrl =
-    imagePreviewObjectUrl ??
-    item.imageUrl ??
+    imagePreviewUrl ??
+    secondaryImagePreviewUrl ??
     startPreviewUrl ??
     referencePreviewUrl ??
     endPreviewUrl ??
     null;
+  const showSecondaryImageSlot =
+    mediaMode === 'single' &&
+    !hasAnyVideo &&
+    (item.hasSecondaryImageSlot === true || Boolean(secondaryImagePreviewUrl));
   const hasStart = Boolean(startPreviewUrl);
   const hasEnd = Boolean(endPreviewUrl);
   const canGenerateVideo =
@@ -2346,71 +2363,162 @@ function SentenceEditorCardComponent({
           {/* Media Section */}
           <div className="space-y-4 lg:col-span-2 lg:pl-4">
             {/* Upload/Generate Area for Single Mode */}
-            {mediaMode === 'single' && !(item.image || item.imageUrl || item.video || item.videoUrl) && (
-              <div className="space-y-3">
-                <div
-                  className="relative bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-4 text-center transition-all duration-300 cursor-pointer hover:border-indigo-400 hover:shadow-lg hover:scale-[1.01] group"
-                  onClick={() => document.getElementById(`sentence-image-${item.id}`)?.click()}
-                >
-                  <div className="flex flex-col items-center gap-3 pointer-events-none">
-                    <div className="relative">
-                      <div className="absolute inset-0 bg-indigo-400 rounded-xl blur-lg opacity-20 group-hover:opacity-30 transition-opacity"></div>
-                      <div className="relative p-3 bg-white rounded-xl shadow-md group-hover:scale-110 transition-transform duration-300">
-                        <ImageIcon className="h-7 w-7 text-indigo-500" />
+            {mediaMode === 'single' && !(imagePreviewUrl || item.video || item.videoUrl) && (
+              <div className={showSecondaryImageSlot ? 'grid grid-cols-1 gap-4' : 'space-y-4'}>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-linear-to-r from-indigo-600 to-purple-600 shadow-sm"></div>
+                    <p className="text-sm font-bold text-gray-800">Primary Image</p>
+                  </div>
+                  <div
+                    className="relative bg-linear-to-br from-indigo-50 via-purple-50/50 to-pink-50/30 border-2 border-dashed border-indigo-300 rounded-2xl p-4 text-center transition-all duration-300 cursor-pointer hover:border-indigo-400 hover:shadow-lg hover:scale-[1.01] group"
+                    onClick={() => document.getElementById(`sentence-image-${item.id}`)?.click()}
+                  >
+                    <div className="flex flex-col items-center gap-3 pointer-events-none">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-indigo-400 rounded-xl blur-lg opacity-20 group-hover:opacity-30 transition-opacity"></div>
+                        <div className="relative p-3 bg-white rounded-xl shadow-md group-hover:scale-110 transition-transform duration-300">
+                          <ImageIcon className="h-7 w-7 text-indigo-500" />
+                        </div>
+                      </div>
+                      <input
+                        type="file"
+                        id={`sentence-image-${item.id}`}
+                        accept="image/*,video/*"
+                        onChange={(e) => onSentenceImageUpload(e, 'primary')}
+                        className="hidden"
+                      />
+                      <div>
+                        <p className="text-sm font-bold text-gray-900 mb-1">Click to upload</p>
+                        <p className="text-xs text-gray-600">Images or videos</p>
                       </div>
                     </div>
-                    <input
-                      type="file"
-                      id={`sentence-image-${item.id}`}
-                      accept="image/*,video/*"
-                      onChange={onSentenceImageUpload}
-                      className="hidden"
-                    />
-                    <div>
-                      <p className="text-sm font-bold text-gray-900 mb-1">Click to upload</p>
-                      <p className="text-xs text-gray-600">Images or videos</p>
-                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void Promise.resolve(onGenerateSentenceImage(undefined, 'primary'));
+                      }}
+                      disabled={item.isGeneratingImage}
+                      className="h-10 gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all"
+                    >
+                      {item.isGeneratingImage ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-sm font-bold">Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" />
+                          <span className="text-sm font-bold">Generate with AI</span>
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectFromLibrary('single');
+                      }}
+                      className="h-10 gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                    >
+                      <Library className="h-4 w-4" />
+                      <span className="text-sm">From Library</span>
+                    </Button>
+                    {!showSecondaryImageSlot && onAddSentenceImageSlot ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddSentenceImageSlot();
+                        }}
+                        className="h-10 gap-2 border-2 border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span className="text-sm">Add New Image</span>
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void Promise.resolve(onGenerateSentenceImage());
-                    }}
-                    disabled={item.isGeneratingImage}
-                    className="h-10 gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all"
-                  >
-                    {item.isGeneratingImage ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span className="text-sm font-bold">Generating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" />
-                        <span className="text-sm font-bold">Generate with AI</span>
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectFromLibrary('single');
-                    }}
-                    className="h-10 gap-2 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 font-semibold shadow-sm hover:shadow-md transition-all"
-                  >
-                    <Library className="h-4 w-4" />
-                    <span className="text-sm">From Library</span>
-                  </Button>
-                </div>
+                {showSecondaryImageSlot ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full bg-linear-to-r from-fuchsia-600 to-pink-600 shadow-sm"></div>
+                      <p className="text-sm font-bold text-gray-800">Second Image</p>
+                    </div>
+                    <div
+                      className="relative bg-linear-to-br from-fuchsia-50 via-rose-50/50 to-orange-50/30 border-2 border-dashed border-fuchsia-300 rounded-2xl p-4 text-center transition-all duration-300 cursor-pointer hover:border-fuchsia-400 hover:shadow-lg hover:scale-[1.01] group"
+                      onClick={() => document.getElementById(`sentence-secondary-image-${item.id}`)?.click()}
+                    >
+                      <div className="flex flex-col items-center gap-3 pointer-events-none">
+                        <div className="relative">
+                          <div className="absolute inset-0 bg-fuchsia-400 rounded-xl blur-lg opacity-20 group-hover:opacity-30 transition-opacity"></div>
+                          <div className="relative p-3 bg-white rounded-xl shadow-md group-hover:scale-110 transition-transform duration-300">
+                            <ImageIcon className="h-7 w-7 text-fuchsia-500" />
+                          </div>
+                        </div>
+                        <input
+                          type="file"
+                          id={`sentence-secondary-image-${item.id}`}
+                          accept="image/*"
+                          onChange={(e) => onSentenceImageUpload(e, 'secondary')}
+                          className="hidden"
+                        />
+                        <div>
+                          <p className="text-sm font-bold text-gray-900 mb-1">Click to upload</p>
+                          <p className="text-xs text-gray-600">Complementary still image</p>
+                        </div>
+                      </div>
+                    </div>
 
+                    <div className="flex flex-col gap-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void Promise.resolve(onGenerateSentenceImage(undefined, 'secondary'));
+                        }}
+                        disabled={item.isGeneratingSecondaryImage}
+                        className="h-10 gap-2 bg-linear-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-700 hover:to-pink-700 text-white shadow-md hover:shadow-lg transition-all"
+                      >
+                        {item.isGeneratingSecondaryImage ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span className="text-sm font-bold">Generating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4" />
+                            <span className="text-sm font-bold">Generate with AI</span>
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectFromLibrary('secondary');
+                        }}
+                        className="h-10 gap-2 border-2 border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-50 hover:border-fuchsia-300 font-semibold shadow-sm hover:shadow-md transition-all"
+                      >
+                        <Library className="h-4 w-4" />
+                        <span className="text-sm">From Library</span>
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
 
@@ -2960,7 +3068,7 @@ function SentenceEditorCardComponent({
                                 }
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                <div className="p-2 space-y-1">
+                                <div className="p-2 space-y-2">
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -3081,7 +3189,7 @@ function SentenceEditorCardComponent({
                             }
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <div className="p-2 space-y-1">
+                            <div className="p-2 space-y-2">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -3160,11 +3268,54 @@ function SentenceEditorCardComponent({
             )}
 
             {/* Media Preview (image or video) */}
-            {mediaMode === 'single' && (item.image || item.imageUrl || item.video || item.videoUrl) && (
-              <div className="space-y-3">
+            {mediaMode === 'single' && (imagePreviewUrl || secondaryImagePreviewUrl || item.video || item.videoUrl) && (
+              item.video || item.videoUrl ? (
                 <div className="space-y-3">
                   <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 bg-gray-100 shadow-lg group/preview">
-                    {item.image || item.imageUrl ? (
+                    <ImageEffectPreview
+                      visualEffect={item.visualEffect}
+                      isShortVideo={isShortVideo}
+                      imageMotionEffect={item.imageMotionEffect}
+                      imageFilterSettings={resolvedImageFilterSettings}
+                      imageMotionSettings={resolvedImageMotionSettings}
+                      enableMotion={false}
+                    >
+                      <video
+                        src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
+                        controls
+                        className={`block w-full max-w-65 mx-auto ${videoAspectClass} object-cover`}
+                      />
+                    </ImageEffectPreview>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveSentenceImage('primary')}
+                      className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className={showSecondaryImageSlot ? 'grid grid-cols-1 gap-4' : 'space-y-4'}>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-linear-to-r from-indigo-600 to-purple-600 shadow-sm"></div>
+                        <p className="text-sm font-bold text-gray-800">Primary Image</p>
+                      </div>
+                      {!showSecondaryImageSlot && onAddSentenceImageSlot ? (
+                        <button
+                          type="button"
+                          onClick={onAddSentenceImageSlot}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-amber-500 to-orange-500 text-white shadow-md transition-all hover:scale-105 hover:shadow-lg"
+                          title="Add a second image"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 bg-gray-100 shadow-lg group/preview">
                       <ImageEffectPreview
                         visualEffect={item.visualEffect}
                         imageMotionEffect={item.imageMotionEffect}
@@ -3175,12 +3326,12 @@ function SentenceEditorCardComponent({
                         enableMotion={shouldAnimateImagePreview}
                       >
                         <img
-                          src={item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string)}
+                          src={imagePreviewUrl as string}
                           alt={`Scene ${index + 1}`}
                           className="h-58 w-full cursor-zoom-in object-cover"
                           onClick={() =>
                             onPreviewImage(
-                              item.image ? URL.createObjectURL(item.image) : (item.imageUrl as string),
+                              imagePreviewUrl as string,
                               item.visualEffect ?? null,
                               item.imageMotionEffect ?? 'default',
                               item.imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
@@ -3190,73 +3341,54 @@ function SentenceEditorCardComponent({
                           }
                         />
                       </ImageEffectPreview>
-                    ) : (
-                      <ImageEffectPreview
-                        visualEffect={item.visualEffect}
-                        isShortVideo={isShortVideo}
-                        imageMotionEffect={item.imageMotionEffect}
-                        imageFilterSettings={resolvedImageFilterSettings}
-                        imageMotionSettings={resolvedImageMotionSettings}
-                        enableMotion={false}
+                      <button
+                        type="button"
+                        onClick={() => onRemoveSentenceImage('primary')}
+                        className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
                       >
-                        <video
-                          src={item.video ? URL.createObjectURL(item.video) : (item.videoUrl as string)}
-                          controls
-                          className={`block w-full max-w-65 mx-auto ${videoAspectClass} object-cover`}
-                        />
-                      </ImageEffectPreview>
-                    )}
-                    <button
-                      type="button"
-                      onClick={onRemoveSentenceImage}
-                      className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                    {item.imageUrl && !item.image && !item.video && !item.videoUrl && (
-                      <div className="absolute bottom-3 left-3">
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-bold rounded-xl shadow-lg">
-                          <Sparkles className="h-2 w-2" />
-                          AI Generated
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {item.imagePrompt && (
-                  <div className="col-span-2 bg-gray-50 rounded-xl p-2 border border-gray-200">
-                    <div className="flex items-start gap-2">
-                      <div className="p-1 bg-indigo-100 rounded-lg shrink-0 mt-0.5">
-                        <Sparkles className="h-3 w-3 text-indigo-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-gray-700 mb-1">Prompt Used</p>
-                        <p className="text-xs text-gray-600 leading-relaxed line-clamp-1">{item.imagePrompt}</p>
-                      </div>
+                        <X className="h-4 w-4" />
+                      </button>
+                      {item.imageUrl && !item.image ? (
+                        <div className="absolute bottom-3 left-3">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-bold rounded-xl shadow-lg">
+                            <Sparkles className="h-2 w-2" />
+                            AI Generated
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                )}
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onSelectFromLibrary('single')}
-                    disabled={item.isSavingImage || item.isGeneratingImage || isApplyingImagePrompt}
-                    className={`h-9 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300 font-semibold ${hasAnyImage ? '' : 'col-span-2'
-                      }`}
-                  >
-                    <Library className="h-4 w-4" />
-                    <span className="text-xs">Change</span>
-                  </Button>
-                  {hasAnyImage && (
-                    <>
+                    {item.imagePrompt ? (
+                      <div className="bg-gray-50 rounded-xl p-2 border border-gray-200">
+                        <div className="flex items-start gap-2">
+                          <div className="p-1 bg-indigo-100 rounded-lg shrink-0 mt-0.5">
+                            <Sparkles className="h-3 w-3 text-indigo-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-700 mb-1">Primary Prompt</p>
+                            <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">{item.imagePrompt}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="grid grid-cols-2 gap-2">
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => void Promise.resolve(onGenerateSentenceImage())}
+                        onClick={() => onSelectFromLibrary('single')}
+                        disabled={item.isSavingImage || item.isGeneratingImage || isApplyingImagePrompt}
+                        className="h-9 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300 font-semibold"
+                      >
+                        <Library className="h-4 w-4" />
+                        <span className="text-xs">Change</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void Promise.resolve(onGenerateSentenceImage(undefined, 'primary'))}
                         disabled={item.isGeneratingImage || isApplyingImagePrompt}
                         className="h-9 gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 font-semibold"
                       >
@@ -3282,19 +3414,130 @@ function SentenceEditorCardComponent({
                           </>
                         )}
                       </Button>
-                    </>
-                  )}
+                    </div>
+                  </div>
 
-                  {imagePromptError && (
-                    <div className="col-span-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
+                  {showSecondaryImageSlot ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-linear-to-r from-fuchsia-600 to-pink-600 shadow-sm"></div>
+                        <p className="text-sm font-bold text-gray-800">Second Image</p>
+                      </div>
+
+                      <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 bg-gray-100 shadow-lg group/preview">
+                        {secondaryImagePreviewUrl ? (
+                          <ImageEffectPreview
+                            visualEffect={item.visualEffect}
+                            imageMotionEffect={item.imageMotionEffect}
+                            imageMotionSpeed={item.imageMotionSpeed}
+                            isShortVideo={isShortVideo}
+                            imageFilterSettings={resolvedImageFilterSettings}
+                            imageMotionSettings={resolvedImageMotionSettings}
+                            enableMotion={shouldAnimateImagePreview}
+                          >
+                            <img
+                              src={secondaryImagePreviewUrl}
+                              alt={`Scene ${index + 1} second image`}
+                              className="h-58 w-full cursor-zoom-in object-cover"
+                              onClick={() =>
+                                onPreviewImage(
+                                  secondaryImagePreviewUrl,
+                                  item.visualEffect ?? null,
+                                  item.imageMotionEffect ?? 'default',
+                                  item.imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
+                                  item.imageFilterSettings ?? null,
+                                  item.imageMotionSettings ?? null,
+                                )
+                              }
+                            />
+                          </ImageEffectPreview>
+                        ) : (
+                          <div
+                            className="flex h-58 cursor-pointer flex-col items-center justify-center gap-3 bg-linear-to-br from-fuchsia-50 via-rose-50/50 to-orange-50/30"
+                            onClick={() => document.getElementById(`sentence-secondary-image-${item.id}`)?.click()}
+                          >
+                            <input
+                              type="file"
+                              id={`sentence-secondary-image-${item.id}`}
+                              accept="image/*"
+                              onChange={(e) => onSentenceImageUpload(e, 'secondary')}
+                              className="hidden"
+                            />
+                            <ImageIcon className="h-7 w-7 text-fuchsia-500" />
+                            <p className="text-sm font-semibold text-gray-800">Upload second image</p>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onRemoveSentenceImage('secondary')}
+                          className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      {item.secondaryImagePrompt ? (
+                        <div className="bg-gray-50 rounded-xl p-2 border border-gray-200">
+                          <div className="flex items-start gap-2">
+                            <div className="p-1 bg-fuchsia-100 rounded-lg shrink-0 mt-0.5">
+                              <Sparkles className="h-3 w-3 text-fuchsia-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-gray-700 mb-1">Second Image Prompt</p>
+                              <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">{item.secondaryImagePrompt}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSelectFromLibrary('secondary')}
+                          disabled={Boolean(item.isGeneratingSecondaryImage)}
+                          className="h-9 gap-2 border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-50 hover:border-fuchsia-300 font-semibold"
+                        >
+                          <Library className="h-4 w-4" />
+                          <span className="text-xs">Change</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void Promise.resolve(onGenerateSentenceImage(undefined, 'secondary'))}
+                          disabled={Boolean(item.isGeneratingSecondaryImage)}
+                          className="h-9 gap-2 border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-50 hover:border-fuchsia-300 font-semibold"
+                        >
+                          {item.isGeneratingSecondaryImage ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span className="text-xs">Generating...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4" />
+                              <span className="text-xs">
+                                {secondaryImagePreviewUrl ? 'Regenerate' : 'Generate AI'}
+                              </span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {imagePromptError ? (
+                    <div className="col-span-full rounded-xl border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
                       <div className="p-1 bg-red-100 rounded-lg shrink-0">
                         <X className="h-3 w-3 text-red-600" />
                       </div>
                       <p className="text-xs text-red-700 font-medium flex-1">{imagePromptError}</p>
                     </div>
-                  )}
+                  ) : null}
                 </div>
-              </div>
+              )
             )}
           </div>
         </div>
