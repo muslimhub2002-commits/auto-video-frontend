@@ -6106,6 +6106,7 @@ export function GeneratePageInner() {
         if (item.isTransitionSound !== true) {
           await api.patch(`/sound-effects/transition/${encodeURIComponent(item.id)}`, {
             isTransitionSound: true,
+            volumePercent: Math.max(0, Math.min(300, Number(item.volumePercent ?? 100) || 100)),
           });
         }
 

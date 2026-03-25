@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { X, Loader2, Check, Music2, Pencil, Trash2 } from 'lucide-react';
+import { X, Loader2, Check, Heart, Music2, Pencil, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Pagination } from './Pagination';
 import { SoundEffectEditModal, type SoundEffectEditValues } from './SoundEffectEditModal';
@@ -22,6 +22,7 @@ export type SoundEffectDto = {
   audio_settings?: SoundEffectAudioSettings | null;
   duration_seconds?: number | null;
   is_transition_sound?: boolean;
+  fromFavorites?: boolean;
   is_merged?: boolean;
   is_preset?: boolean;
   source_sound_effect_id?: string | null;
@@ -81,6 +82,7 @@ export function SoundEffectsLibraryModal({
   const [isApplyingEdit, setIsApplyingEdit] = useState(false);
   const [isSavingAsPreset, setIsSavingAsPreset] = useState(false);
   const [isDeletingById, setIsDeletingById] = useState<Record<string, boolean>>({});
+  const [isFavoritingById, setIsFavoritingById] = useState<Record<string, boolean>>({});
 
   const extractErrorMessage = (error: unknown, fallback: string) => {
     const message = (error as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
@@ -308,6 +310,24 @@ export function SoundEffectsLibraryModal({
     }
   };
 
+  const toggleFavorite = async (id: string) => {
+    setIsFavoritingById((prev) => ({ ...prev, [id]: true }));
+    setError(null);
+    try {
+      const response = await api.patch<SoundEffectDto>(`/sound-effects/favorite/${id}`);
+      mergeItemIntoState({
+        ...response.data,
+        audio_settings: cloneSoundEffectAudioSettings(response.data?.audio_settings),
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to toggle sound effect favorite', err);
+      setError(extractErrorMessage(err, 'Failed to update favorite sound effect'));
+    } finally {
+      setIsFavoritingById((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -445,6 +465,8 @@ export function SoundEffectsLibraryModal({
                   const resolvedVolume = Number(it.volume_percent ?? 100) || 100;
                   const displayName = String(it.name ?? it.title ?? 'Sound effect').trim() || 'Sound effect';
                   const isDeleting = Boolean(isDeletingById[it.id]);
+                  const isFavoriting = Boolean(isFavoritingById[it.id]);
+                  const isFavorite = it.fromFavorites === true;
 
                   return (
                     <button
@@ -481,6 +503,29 @@ export function SoundEffectsLibraryModal({
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-700">
                               {Math.round(resolvedVolume)}%
                             </span>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className={`h-8 w-8 p-0 ${
+                                isFavorite
+                                  ? 'border-rose-200 text-rose-600 hover:bg-rose-50'
+                                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void toggleFavorite(it.id);
+                              }}
+                              disabled={isFavoriting}
+                              title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                            >
+                              {isFavoriting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+                              )}
+                            </Button>
 
                             <Button
                               type="button"

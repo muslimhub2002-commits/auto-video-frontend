@@ -44,6 +44,8 @@ export type SentenceItem = {
     delaySeconds: number;
     volumePercent: number;
     isTransitionSound?: boolean;
+    fromFavorites?: boolean;
+    audioSettings?: SoundEffectAudioSettings | null;
   }>;
 
   // Non-forced mappings inferred during split (used for draft round-tripping).
