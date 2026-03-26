@@ -420,6 +420,9 @@ export function ScriptSection(props: ScriptSectionProps) {
                   </SelectItem>
                   <SelectItem value="Loss Aversion">Loss Aversion</SelectItem>
                   <SelectItem value="The Rhythm">The Rhythm</SelectItem>
+                  <SelectItem value="Curiousity Loop">
+                    Curiousity Loop
+                  </SelectItem>
                   <SelectItem value="Confrontation Technique">
                     Confrontation Technique
                   </SelectItem>

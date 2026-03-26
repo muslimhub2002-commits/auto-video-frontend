@@ -3785,6 +3785,7 @@ export function GeneratePageInner() {
     setIsGeneratingVoice(false);
     setIsSavingVoice(false);
     setIsVoiceLibraryOpen(false);
+    setAiStudioStyleInstructions('');
 
     resetJob();
 

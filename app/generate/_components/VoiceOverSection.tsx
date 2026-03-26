@@ -504,7 +504,7 @@ export function VoiceOverSection({
                       {voiceProvider === 'google' && onStyleInstructionsChange ? (
                         <div className="space-y-1">
                           <p className="text-xs font-semibold text-gray-900">
-                            Style instructions (optional)
+                            Style Instructions (optional)
                           </p>
                           <Textarea
                             value={styleInstructions ?? ''}

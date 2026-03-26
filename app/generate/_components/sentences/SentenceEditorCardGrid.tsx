@@ -56,6 +56,7 @@ import {
   SlidersHorizontal,
   MapPin,
   Plus,
+  Clapperboard,
 } from 'lucide-react';
 
 import { ForcedCharactersModal } from './ForcedCharactersModal';
@@ -1490,7 +1491,7 @@ function SentenceEditorCardComponent({
                     }
                   >
                     <div className="flex items-center gap-2">
-                      <Timer className="h-4 w-4" />
+                      <Clapperboard className="h-4 w-4" />
                       <SelectValue placeholder="Motion" />
                     </div>
                   </SelectTrigger>
@@ -1533,7 +1534,7 @@ function SentenceEditorCardComponent({
                   disabled={!isImageSceneTab}
                   className="h-9 rounded-xl border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <SlidersHorizontal className="mr-2 h-4 w-4" />
+                  <Clapperboard className="mr-2 h-4 w-4" />
                   Edit motion
                 </Button>
               </div>

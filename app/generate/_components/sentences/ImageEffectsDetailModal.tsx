@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Clock3, Loader2, Save, SlidersHorizontal, Sparkles, Timer, Trash2, Wand2, X } from 'lucide-react';
+import { Clapperboard, Clock3, Loader2, Save, SlidersHorizontal, Sparkles, Timer, Trash2, Wand2, X } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import {
@@ -906,7 +906,7 @@ export function ImageEffectsDetailModal({
                   : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
               }
             >
-              <Timer className="mr-2 h-4 w-4" />
+              <Clapperboard className="mr-2 h-4 w-4" />
               Motion
             </Button>
           </div>
