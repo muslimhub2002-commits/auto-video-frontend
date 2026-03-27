@@ -735,7 +735,7 @@ export function GeneratePageInner() {
     {
       key: 'anime',
       label: 'Anime',
-      style: 'Anime style, detailed, vibrant, high quality',
+      style: 'Modern Anime style, detailed, vibrant, high quality',
     },
     {
       key: 'realism',

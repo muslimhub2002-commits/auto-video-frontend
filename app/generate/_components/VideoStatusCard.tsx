@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, CheckCircle2, XCircle, Video, Download, Play, Sparkles } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Download, Play, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { YouTubeUploadModal } from './YouTubeUploadModal';
+import { MetaUploadModal } from './MetaUploadModal';
 
 interface VideoStatusCardProps {
     videoJobId: string | null;
@@ -36,13 +37,11 @@ export function VideoStatusCard({
     scriptId,
     scriptTextForUpload,
     scriptCharacters,
-    onSaveGeneration,
-    isSavingGeneration,
-    canSaveGeneration,
     onRetry,
 }: VideoStatusCardProps) {
     const [isVideoPaused, setIsVideoPaused] = useState(true);
     const [showYouTubeModal, setShowYouTubeModal] = useState(false);
+    const [showMetaModal, setShowMetaModal] = useState(false);
 
     if (!videoJobId) return null;
 
@@ -171,37 +170,11 @@ export function VideoStatusCard({
                             </Button>
                             <Button
                                 variant="outline"
-                                className="flex-1 min-w-35 border-gray-300 hover:bg-gray-50"
-                                onClick={() => {
-                                    if (navigator.share && videoUrl) {
-                                        navigator.share({
-                                            title: 'My AI Generated Video',
-                                            url: videoUrl,
-                                        }).catch(() => { });
-                                    }
-                                }}
+                                className="flex-1 min-w-35 bg-linear-to-r from-sky-700 to-indigo-700 hover:from-sky-800 hover:to-indigo-800 text-white hover:text-white border-0 shadow-md hover:shadow-lg transition-all group"
+                                onClick={() => setShowMetaModal(true)}
                             >
-                                <Video className="h-4 w-4 mr-2" />
-                                Share
-                            </Button>
-                            <Button
-                                type="button"
-                                onClick={onSaveGeneration}
-                                disabled={isSavingGeneration || !canSaveGeneration}
-                                className="flex-1 min-w-35 bg-linear-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                                size="sm"
-                            >
-                                {isSavingGeneration ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        <span className="font-medium">Saving...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Sparkles className="mr-2 h-4 w-4" />
-                                        <span className="font-medium">Save</span>
-                                    </>
-                                )}
+                                <Share2 className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />
+                                Upload to Meta Platforms
                             </Button>
                         </div>
 
@@ -231,6 +204,14 @@ export function VideoStatusCard({
                 scriptId={scriptId}
                 script={scriptTextForUpload}
                 scriptCharacters={scriptCharacters}
+            />
+            <MetaUploadModal
+                isOpen={showMetaModal}
+                onClose={() => setShowMetaModal(false)}
+                videoUrl={videoUrl}
+                isShortVideo={isShortVideo}
+                scriptId={scriptId}
+                script={scriptTextForUpload}
             />
 
             {/* Failed State */}

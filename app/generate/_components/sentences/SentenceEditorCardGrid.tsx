@@ -100,270 +100,270 @@ import type { SentenceItem } from '../../_types/sentences';
 
 type VisualEffectValue = SentenceItem['visualEffect'];
 
-  const VISUAL_EFFECT_SELECT_VALUES = [
-    'colorGrading',
-    'animatedLighting',
-    'glassSubtle',
-    'glassReflections',
-    'glassStrong',
-  ] as const;
+const VISUAL_EFFECT_SELECT_VALUES = [
+  'colorGrading',
+  'animatedLighting',
+  'glassSubtle',
+  'glassReflections',
+  'glassStrong',
+] as const;
 
-  type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
+type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
 
-  function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
-    return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
+function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
+  return (VISUAL_EFFECT_SELECT_VALUES as readonly string[]).includes(value);
+}
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+  if (Array.isArray(message)) {
+    const firstMessage = message.find((item) => typeof item === 'string' && item.trim().length > 0);
+    if (typeof firstMessage === 'string') return firstMessage.trim();
   }
+  if (typeof message === 'string' && message.trim().length > 0) {
+    return message.trim();
+  }
+  return fallback;
+};
 
-  const getApiErrorMessage = (error: unknown, fallback: string) => {
-    const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
-    if (Array.isArray(message)) {
-      const firstMessage = message.find((item) => typeof item === 'string' && item.trim().length > 0);
-      if (typeof firstMessage === 'string') return firstMessage.trim();
-    }
-    if (typeof message === 'string' && message.trim().length > 0) {
-      return message.trim();
-    }
-    return fallback;
-  };
+const getSentenceSoundEffectSortableId = (
+  sfx: NonNullable<SentenceItem['soundEffects']>[number],
+  index: number,
+) => `${String(sfx.id ?? 'sfx')}-${index}`;
 
-  const getSentenceSoundEffectSortableId = (
-    sfx: NonNullable<SentenceItem['soundEffects']>[number],
-    index: number,
-  ) => `${String(sfx.id ?? 'sfx')}-${index}`;
+type SortableSentenceSoundEffectCardProps = {
+  sfx: NonNullable<SentenceItem['soundEffects']>[number];
+  sfxIndex: number;
+  isLast: boolean;
+  isDelayDisabled: boolean;
+  nextTimingMode: 'withPrevious' | 'afterPreviousEnds';
+  singleStatus: 'idle' | 'loading' | 'playing';
+  truncateTitle: (value: string) => string;
+  onTogglePlay: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+  onDelayChange: (value: number) => void;
+  onVolumeChange: (value: number) => void;
+  onNextTimingModeChange: (value: 'withPrevious' | 'afterPreviousEnds') => void;
+};
 
-  type SortableSentenceSoundEffectCardProps = {
-    sfx: NonNullable<SentenceItem['soundEffects']>[number];
-    sfxIndex: number;
-    isLast: boolean;
-    isDelayDisabled: boolean;
-    nextTimingMode: 'withPrevious' | 'afterPreviousEnds';
-    singleStatus: 'idle' | 'loading' | 'playing';
-    truncateTitle: (value: string) => string;
-    onTogglePlay: () => void;
-    onEdit: () => void;
-    onRemove: () => void;
-    onDelayChange: (value: number) => void;
-    onVolumeChange: (value: number) => void;
-    onNextTimingModeChange: (value: 'withPrevious' | 'afterPreviousEnds') => void;
-  };
+function SortableSentenceSoundEffectCard({
+  sfx,
+  sfxIndex,
+  isLast,
+  isDelayDisabled,
+  nextTimingMode,
+  singleStatus,
+  truncateTitle,
+  onTogglePlay,
+  onEdit,
+  onRemove,
+  onDelayChange,
+  onVolumeChange,
+  onNextTimingModeChange,
+}: SortableSentenceSoundEffectCardProps) {
+  const playbackDurationSeconds = getSoundEffectPlaybackDurationSeconds({
+    durationSeconds: sfx.durationSeconds,
+    audioSettings: sfx.audioSettings,
+  });
 
-  function SortableSentenceSoundEffectCard({
-    sfx,
-    sfxIndex,
-    isLast,
-    isDelayDisabled,
-    nextTimingMode,
-    singleStatus,
-    truncateTitle,
-    onTogglePlay,
-    onEdit,
-    onRemove,
-    onDelayChange,
-    onVolumeChange,
-    onNextTimingModeChange,
-  }: SortableSentenceSoundEffectCardProps) {
-    const playbackDurationSeconds = getSoundEffectPlaybackDurationSeconds({
-      durationSeconds: sfx.durationSeconds,
-      audioSettings: sfx.audioSettings,
-    });
+  const sortableId = getSentenceSoundEffectSortableId(sfx, sfxIndex);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: sortableId,
+  });
 
-    const sortableId = getSentenceSoundEffectSortableId(sfx, sfxIndex);
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-      id: sortableId,
-    });
-
-    return (
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={isDragging ? 'relative z-20' : undefined}
+    >
       <div
-        ref={setNodeRef}
-        style={{
-          transform: CSS.Transform.toString(transform),
-          transition,
-        }}
-        className={isDragging ? 'relative z-20' : undefined}
+        className={
+          isDragging
+            ? 'rounded-xl border border-indigo-300 bg-white p-3 shadow-xl'
+            : 'rounded-xl border border-gray-200 bg-gray-50/50 p-3'
+        }
       >
-        <div
-          className={
-            isDragging
-              ? 'rounded-xl border border-indigo-300 bg-white p-3 shadow-xl'
-              : 'rounded-xl border border-gray-200 bg-gray-50/50 p-3'
-          }
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-start gap-3">
-              <button
-                type="button"
-                className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:bg-gray-50"
-                aria-label="Drag sound effect"
-                {...attributes}
-                {...listeners}
-              >
-                <GripVertical className="h-4 w-4" />
-              </button>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <button
+              type="button"
+              className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-500 shadow-sm hover:bg-gray-50"
+              aria-label="Drag sound effect"
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical className="h-4 w-4" />
+            </button>
 
-              <div className="min-w-0">
-                <p
-                  className="truncate text-sm font-bold text-gray-900"
-                  title={String(sfx.title ?? '').trim()}
-                >
-                  {truncateTitle(String(sfx.title ?? ''))}
+            <div className="min-w-0">
+              <p
+                className="truncate text-sm font-bold text-gray-900"
+                title={String(sfx.title ?? '').trim()}
+              >
+                {truncateTitle(String(sfx.title ?? ''))}
+              </p>
+              <p className="truncate text-xs text-gray-500" title={sfx.url}>
+                {sfx.url}
+              </p>
+              {typeof playbackDurationSeconds === 'number' ? (
+                <p className="mt-1 text-[11px] font-medium text-indigo-600">
+                  Duration {playbackDurationSeconds.toFixed(2)}s
                 </p>
-                <p className="truncate text-xs text-gray-500" title={sfx.url}>
-                  {sfx.url}
-                </p>
-                {typeof playbackDurationSeconds === 'number' ? (
-                  <p className="mt-1 text-[11px] font-medium text-indigo-600">
-                    Duration {playbackDurationSeconds.toFixed(2)}s
-                  </p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={onTogglePlay}
-                className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
-                title="Preview this sound effect"
-              >
-                {singleStatus === 'loading' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : singleStatus === 'playing' ? (
-                  <Pause className="h-4 w-4" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-              </Button>
-
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={onEdit}
-                className="border-gray-200 text-gray-700 hover:bg-white"
-                title="Edit name & volume"
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={onRemove}
-                className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
-                title="Remove"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              ) : null}
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
-              <div className="flex h-9 items-start gap-2">
-                <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
-                  <Timer className="h-4 w-4 text-indigo-600" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-gray-900">Start offset</p>
-                  <p className="text-[11px] leading-tight text-gray-500">
-                    Seconds after this group starts
-                  </p>
-                </div>
-              </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onTogglePlay}
+              className="h-8 gap-2 border-gray-200 text-gray-700 hover:bg-white"
+              title="Preview this sound effect"
+            >
+              {singleStatus === 'loading' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : singleStatus === 'playing' ? (
+                <Pause className="h-4 w-4" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+            </Button>
 
-              <div className="relative mt-2">
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.1}
-                  value={String(Number(sfx.delaySeconds ?? 0))}
-                  onChange={(e) => onDelayChange(Math.max(0, Number(e.target.value) || 0))}
-                  className="h-9 pr-10"
-                  disabled={isDelayDisabled}
-                  placeholder="0.0"
-                  title={
-                    isDelayDisabled
-                      ? 'Start offset is disabled while ending the sound stack with the scene'
-                      : 'Start offset in seconds'
-                  }
-                />
-                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
-                  s
-                </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onEdit}
+              className="border-gray-200 text-gray-700 hover:bg-white"
+              title="Edit name & volume"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onRemove}
+              className="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
+              title="Remove"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+            <div className="flex h-9 items-start gap-2">
+              <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
+                <Timer className="h-4 w-4 text-indigo-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-gray-900">Start offset</p>
+                <p className="text-[11px] leading-tight text-gray-500">
+                  Seconds after this group starts
+                </p>
               </div>
             </div>
 
-            <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
-              <div className="flex h-9 items-start gap-2">
-                <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
-                  <Volume2 className="h-4 w-4 text-indigo-600" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-gray-900">Volume</p>
-                  <p className="text-[11px] leading-tight text-gray-500">
-                    Relative loudness
-                  </p>
-                </div>
+            <div className="relative mt-2">
+              <Input
+                type="number"
+                min={0}
+                step={0.1}
+                value={String(Number(sfx.delaySeconds ?? 0))}
+                onChange={(e) => onDelayChange(Math.max(0, Number(e.target.value) || 0))}
+                className="h-9 pr-10"
+                disabled={isDelayDisabled}
+                placeholder="0.0"
+                title={
+                  isDelayDisabled
+                    ? 'Start offset is disabled while ending the sound stack with the scene'
+                    : 'Start offset in seconds'
+                }
+              />
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                s
               </div>
+            </div>
+          </div>
 
-              <div className="relative mt-2">
-                <Input
-                  type="number"
-                  min={0}
-                  max={300}
-                  step={1}
-                  value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
-                  onChange={(e) => onVolumeChange(Math.max(0, Math.min(300, Number(e.target.value) || 0)))}
-                  className="h-9 pr-10"
-                  placeholder="100"
-                  title="Volume percent (100 = original volume)"
-                />
-                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
-                  %
-                </div>
+          <div className="rounded-xl border border-gray-200 bg-white/60 p-3">
+            <div className="flex h-9 items-start gap-2">
+              <div className="mt-0.5 rounded-xl bg-indigo-50 p-2">
+                <Volume2 className="h-4 w-4 text-indigo-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-gray-900">Volume</p>
+                <p className="text-[11px] leading-tight text-gray-500">
+                  Relative loudness
+                </p>
+              </div>
+            </div>
+
+            <div className="relative mt-2">
+              <Input
+                type="number"
+                min={0}
+                max={300}
+                step={1}
+                value={String(Math.max(0, Math.min(300, Number(sfx.volumePercent ?? 100) || 0)))}
+                onChange={(e) => onVolumeChange(Math.max(0, Math.min(300, Number(e.target.value) || 0)))}
+                className="h-9 pr-10"
+                placeholder="100"
+                title="Volume percent (100 = original volume)"
+              />
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400">
+                %
               </div>
             </div>
           </div>
         </div>
-
-        {isLast ? null : (
-          <div className="flex items-center justify-center py-2">
-            <div className="inline-flex items-center gap-1 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-1 shadow-sm">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => onNextTimingModeChange('withPrevious')}
-                className={
-                  nextTimingMode === 'withPrevious'
-                    ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
-                    : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
-                }
-              >
-                Play together
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => onNextTimingModeChange('afterPreviousEnds')}
-                className={
-                  nextTimingMode === 'afterPreviousEnds'
-                    ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
-                    : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
-                }
-              >
-                Play Next
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
-    );
-  }
+
+      {isLast ? null : (
+        <div className="flex items-center justify-center py-2">
+          <div className="inline-flex items-center gap-1 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-1 shadow-sm">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onNextTimingModeChange('withPrevious')}
+              className={
+                nextTimingMode === 'withPrevious'
+                  ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
+                  : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
+              }
+            >
+              Play together
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onNextTimingModeChange('afterPreviousEnds')}
+              className={
+                nextTimingMode === 'afterPreviousEnds'
+                  ? 'h-8 rounded-xl bg-white text-indigo-700 shadow-sm hover:bg-white'
+                  : 'h-8 rounded-xl text-gray-600 hover:bg-white/80'
+              }
+            >
+              Play Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type ScriptCharacter = {
   key: string;
@@ -1100,15 +1100,15 @@ function SentenceEditorCardComponent({
   } | null>(() =>
     !item.customImageFilterId && item.imageFilterSettings?.presetKey === 'custom'
       ? {
-          visualEffect:
-            resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ??
-            item.visualEffect ??
-            null,
-          imageFilterSettings: normalizeImageFilterSettings(
-            item.imageFilterSettings,
-            item.visualEffect ?? null,
-          ),
-        }
+        visualEffect:
+          resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ??
+          item.visualEffect ??
+          null,
+        imageFilterSettings: normalizeImageFilterSettings(
+          item.imageFilterSettings,
+          item.visualEffect ?? null,
+        ),
+      }
       : null,
   );
   const [retainedTemporaryMotion, setRetainedTemporaryMotion] = useState<{
@@ -1124,18 +1124,18 @@ function SentenceEditorCardComponent({
 
     return !item.customMotionEffectId && item.imageMotionSettings?.presetKey === 'custom'
       ? {
-          imageMotionEffect: resolveMotionEffectFromSettings(
-            item.imageMotionSettings,
-            item.imageMotionEffect ?? 'default',
-          ),
-          imageMotionSettings: normalizeImageMotionSettings(
-            item.imageMotionSettings,
-            item.imageMotionEffect ?? 'default',
-            resolvedSpeed,
-            isShortVideo,
-          ),
-          imageMotionSpeed: resolvedSpeed,
-        }
+        imageMotionEffect: resolveMotionEffectFromSettings(
+          item.imageMotionSettings,
+          item.imageMotionEffect ?? 'default',
+        ),
+        imageMotionSettings: normalizeImageMotionSettings(
+          item.imageMotionSettings,
+          item.imageMotionEffect ?? 'default',
+          resolvedSpeed,
+          isShortVideo,
+        ),
+        imageMotionSpeed: resolvedSpeed,
+      }
       : null;
   });
 
@@ -1181,7 +1181,7 @@ function SentenceEditorCardComponent({
         ? `custom:${item.customImageFilterId}`
         : item.imageFilterSettings?.presetKey === 'custom'
           ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
-        : `builtin:${resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ?? 'none'}`,
+          : `builtin:${resolveVisualEffectFromSettings(item.imageFilterSettings, item.visualEffect ?? null) ?? 'none'}`,
     [item.customImageFilterId, item.imageFilterSettings, item.visualEffect],
   );
   const quickMotionSelectValue = useMemo(
@@ -1190,7 +1190,7 @@ function SentenceEditorCardComponent({
         ? `custom:${item.customMotionEffectId}`
         : item.imageMotionSettings?.presetKey === 'custom'
           ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
-        : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`,
+          : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`,
     [item.customMotionEffectId, item.imageMotionEffect, item.imageMotionSettings],
   );
 
