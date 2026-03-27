@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
+import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 
 interface TikTokUploadModalProps {
   isOpen: boolean;
@@ -50,37 +51,63 @@ type TikTokUploadResponse = {
   warning?: string;
 };
 
-function ensureTikTokSourceVideoUrl(inputUrl: string): string {
-  const trimmed = String(inputUrl ?? '').trim();
-  if (!trimmed) {
-    throw new Error('Missing video URL');
-  }
+function isCloudinaryUrl(url: string) {
+  return /^(https?:\/\/)?res\.cloudinary\.com\//i.test(url || '');
+}
 
-  let parsed: URL;
+function getFileNameFromUrl(urlString: string): string {
   try {
-    parsed = new URL(trimmed);
+    const parsed = new URL(urlString);
+    const lastSegment = String(parsed.pathname.split('/').pop() ?? '').trim();
+    if (lastSegment) return lastSegment;
   } catch {
-    throw new Error('TikTok requires a valid absolute video URL.');
+    // ignore
   }
 
-  if (parsed.protocol !== 'https:') {
-    throw new Error('TikTok pull-from-url requires an https video URL.');
+  return 'video.mp4';
+}
+
+async function downloadVideoAsFile(url: string, timeoutMs: number): Promise<File> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `Failed to download video before TikTok upload (${res.status}): ${text || res.statusText}`,
+      );
+    }
+
+    const contentType = res.headers.get('content-type') || 'video/mp4';
+    const buffer = await res.arrayBuffer();
+    if (!buffer || buffer.byteLength === 0) {
+      throw new Error('Downloaded video is empty.');
+    }
+
+    return new File([buffer], getFileNameFromUrl(url), { type: contentType });
+  } catch (err: unknown) {
+    const isAbort =
+      typeof err === 'object' &&
+      err !== null &&
+      'name' in err &&
+      (err as { name?: unknown }).name === 'AbortError';
+
+    if (isAbort) {
+      throw new Error(
+        'Timed out while downloading the rendered video bytes. Confirm the video URL opens successfully in the browser.',
+      );
+    }
+
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const host = parsed.hostname.toLowerCase();
-  const isLocalHost =
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host.endsWith('.local');
-
-  if (isLocalHost) {
-    throw new Error(
-      'TikTok cannot pull a localhost video URL. Render the video on your public backend domain first, then upload again.',
-    );
-  }
-
-  return trimmed;
 }
 
 export function TikTokUploadModal({
@@ -110,6 +137,9 @@ export function TikTokUploadModal({
   const [isGeneratingSeo, setIsGeneratingSeo] = useState(false);
   const [useWebSearchForSeo, setUseWebSearchForSeo] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [cloudinaryStage, setCloudinaryStage] = useState<'idle' | 'downloading' | 'uploading'>('idle');
+  const [cloudinaryCachedForVideoUrl, setCloudinaryCachedForVideoUrl] = useState<string | null>(null);
+  const [cloudinaryCachedUrl, setCloudinaryCachedUrl] = useState<string | null>(null);
   const [seoError, setSeoError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<TikTokUploadResponse | null>(null);
@@ -254,7 +284,8 @@ export function TikTokUploadModal({
     isUploading ||
     isConnectingTikTok ||
     isLoadingCreatorInfo ||
-    isGeneratingSeo;
+    isGeneratingSeo ||
+    cloudinaryStage !== 'idle';
 
   const privacyOptions = Array.isArray(creatorInfo?.privacy_level_options)
     ? creatorInfo.privacy_level_options
@@ -273,6 +304,33 @@ export function TikTokUploadModal({
     Boolean(privacyLevel) &&
     consentConfirmed &&
     !commercialSelectionRequired;
+
+  const ensureTikTokPublicVideoUrl = async (inputUrl: string): Promise<string> => {
+    const trimmed = String(inputUrl ?? '').trim();
+    if (!trimmed) throw new Error('Missing video URL');
+
+    if (isCloudinaryUrl(trimmed)) return trimmed;
+
+    if (cloudinaryCachedForVideoUrl === trimmed && cloudinaryCachedUrl) {
+      return cloudinaryCachedUrl;
+    }
+
+    setCloudinaryStage('downloading');
+    try {
+      const file = await downloadVideoAsFile(trimmed, 600_000);
+      setCloudinaryStage('uploading');
+      const cloudinaryUrl = await uploadToCloudinaryUnsigned(file, {
+        resourceType: 'video',
+        folder: 'auto-video-generator/tiktok-uploads',
+      });
+
+      setCloudinaryCachedForVideoUrl(trimmed);
+      setCloudinaryCachedUrl(cloudinaryUrl);
+      return cloudinaryUrl;
+    } finally {
+      setCloudinaryStage('idle');
+    }
+  };
 
   const parseTagsPreserveOrder = (raw: string): string[] => {
     return (raw || '')
@@ -449,7 +507,7 @@ export function TikTokUploadModal({
     setIsUploading(true);
     try {
       const token = localStorage.getItem('token');
-      const publicVideoUrl = ensureTikTokSourceVideoUrl(videoUrl);
+      const publicVideoUrl = await ensureTikTokPublicVideoUrl(videoUrl);
       const formattedCaption = formatCaptionWithTags(caption, tiktokTags);
       const response = await fetch(`${TIKTOK_API_URL}/tiktok/upload`, {
         method: 'POST',
@@ -893,10 +951,20 @@ export function TikTokUploadModal({
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={!canSubmit}
+                disabled={isBusy || !creatorInfo}
                 className="rounded-xl bg-linear-to-r bg-rose-600 hover:bg-rose-700 text-white"
               >
-                {isConnectingTikTok ? (
+                {cloudinaryStage === 'downloading' ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Preparing video...
+                  </>
+                ) : cloudinaryStage === 'uploading' ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Uploading to Cloudinary...
+                  </>
+                ) : isConnectingTikTok ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Connecting...
