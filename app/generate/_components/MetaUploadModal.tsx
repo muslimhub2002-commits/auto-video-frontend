@@ -132,8 +132,7 @@ export function MetaUploadModal({
     process.env.NEXT_PUBLIC_META_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
     process.env.NEXT_PUBLIC_YOUTUBE_API_URL ||
-    'http://localhost:3000';
-
+    'https://auto-video-backend.vercel.app';
   useEffect(() => {
     if (isOpen) {
       setIsRendered(true);
