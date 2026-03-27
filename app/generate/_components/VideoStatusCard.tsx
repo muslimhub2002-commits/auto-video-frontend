@@ -171,7 +171,7 @@ export function VideoStatusCard({
                             </Button>
                             <Button
                                 variant="outline"
-                                className="flex-1 min-w-35 bg-linear-to-r from-neutral-950 via-rose-600 to-cyan-500 hover:from-black hover:via-rose-700 hover:to-cyan-600 text-white hover:text-white border-0 shadow-md hover:shadow-lg transition-all group"
+                                className="flex-1 min-w-35 bg-linear-to-r from-neutral-950  to-rose-500 hover:from-black hover:to-rose-600 text-white hover:text-white border-0 shadow-md hover:shadow-lg transition-all group"
                                 onClick={() => setShowTikTokModal(true)}
                             >
                                 <Music className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />

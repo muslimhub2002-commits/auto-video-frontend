@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
-import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 
 interface TikTokUploadModalProps {
   isOpen: boolean;
@@ -51,63 +50,37 @@ type TikTokUploadResponse = {
   warning?: string;
 };
 
-function isCloudinaryUrl(url: string) {
-  return /^(https?:\/\/)?res\.cloudinary\.com\//i.test(url || '');
-}
+function ensureTikTokSourceVideoUrl(inputUrl: string): string {
+  const trimmed = String(inputUrl ?? '').trim();
+  if (!trimmed) {
+    throw new Error('Missing video URL');
+  }
 
-function getFileNameFromUrl(urlString: string): string {
+  let parsed: URL;
   try {
-    const parsed = new URL(urlString);
-    const lastSegment = String(parsed.pathname.split('/').pop() ?? '').trim();
-    if (lastSegment) return lastSegment;
+    parsed = new URL(trimmed);
   } catch {
-    // ignore
+    throw new Error('TikTok requires a valid absolute video URL.');
   }
 
-  return 'video.mp4';
-}
-
-async function downloadVideoAsFile(url: string, timeoutMs: number): Promise<File> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      cache: 'no-store',
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(
-        `Failed to download video before TikTok upload (${res.status}): ${text || res.statusText}`,
-      );
-    }
-
-    const contentType = res.headers.get('content-type') || 'video/mp4';
-    const buffer = await res.arrayBuffer();
-    if (!buffer || buffer.byteLength === 0) {
-      throw new Error('Downloaded video is empty.');
-    }
-
-    return new File([buffer], getFileNameFromUrl(url), { type: contentType });
-  } catch (err: unknown) {
-    const isAbort =
-      typeof err === 'object' &&
-      err !== null &&
-      'name' in err &&
-      (err as { name?: unknown }).name === 'AbortError';
-
-    if (isAbort) {
-      throw new Error(
-        'Timed out while downloading the rendered video bytes. Confirm the video URL opens successfully in the browser.',
-      );
-    }
-
-    throw err;
-  } finally {
-    clearTimeout(timeout);
+  if (parsed.protocol !== 'https:') {
+    throw new Error('TikTok pull-from-url requires an https video URL.');
   }
+
+  const host = parsed.hostname.toLowerCase();
+  const isLocalHost =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host.endsWith('.local');
+
+  if (isLocalHost) {
+    throw new Error(
+      'TikTok cannot pull a localhost video URL. Render the video on your public backend domain first, then upload again.',
+    );
+  }
+
+  return trimmed;
 }
 
 export function TikTokUploadModal({
@@ -122,10 +95,14 @@ export function TikTokUploadModal({
   const [isVisible, setIsVisible] = useState(false);
   const [caption, setCaption] = useState('');
   const [tiktokTags, setTiktokTags] = useState('');
-  const [privacyLevel, setPrivacyLevel] = useState('SELF_ONLY');
-  const [disableComment, setDisableComment] = useState(false);
-  const [disableDuet, setDisableDuet] = useState(false);
-  const [disableStitch, setDisableStitch] = useState(false);
+  const [privacyLevel, setPrivacyLevel] = useState('');
+  const [allowComment, setAllowComment] = useState(false);
+  const [allowDuet, setAllowDuet] = useState(false);
+  const [allowStitch, setAllowStitch] = useState(false);
+  const [discloseCommercialContent, setDiscloseCommercialContent] = useState(false);
+  const [brandOrganicToggle, setBrandOrganicToggle] = useState(false);
+  const [brandContentToggle, setBrandContentToggle] = useState(false);
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [creatorInfo, setCreatorInfo] = useState<TikTokCreatorInfo | null>(null);
   const [creatorInfoError, setCreatorInfoError] = useState<string | null>(null);
   const [isLoadingCreatorInfo, setIsLoadingCreatorInfo] = useState(false);
@@ -133,9 +110,6 @@ export function TikTokUploadModal({
   const [isGeneratingSeo, setIsGeneratingSeo] = useState(false);
   const [useWebSearchForSeo, setUseWebSearchForSeo] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [cloudinaryStage, setCloudinaryStage] = useState<'idle' | 'downloading' | 'uploading'>('idle');
-  const [cloudinaryCachedForVideoUrl, setCloudinaryCachedForVideoUrl] = useState<string | null>(null);
-  const [cloudinaryCachedUrl, setCloudinaryCachedUrl] = useState<string | null>(null);
   const [seoError, setSeoError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<TikTokUploadResponse | null>(null);
@@ -177,14 +151,12 @@ export function TikTokUploadModal({
       ? data.privacy_level_options.filter(Boolean)
       : [];
     if (!options.includes(privacyLevel)) {
-      const fallbackPrivacy =
-        options.find((value) => value === 'SELF_ONLY') || options[0] || 'SELF_ONLY';
-      setPrivacyLevel(fallbackPrivacy);
+      setPrivacyLevel('');
     }
 
-    if (data.comment_disabled) setDisableComment(true);
-    if (data.duet_disabled) setDisableDuet(true);
-    if (data.stitch_disabled) setDisableStitch(true);
+    if (data.comment_disabled) setAllowComment(false);
+    if (data.duet_disabled) setAllowDuet(false);
+    if (data.stitch_disabled) setAllowStitch(false);
   }, [privacyLevel]);
 
   const loadCreatorInfo = useCallback(async (silent = false) => {
@@ -237,8 +209,21 @@ export function TikTokUploadModal({
     setSeoError(null);
     setUploadError(null);
     setUploadResult(null);
+    setConsentConfirmed(false);
     void loadCreatorInfo();
   }, [isOpen, loadCreatorInfo]);
+
+  useEffect(() => {
+    if (!discloseCommercialContent) {
+      setBrandOrganicToggle(false);
+      setBrandContentToggle(false);
+      return;
+    }
+
+    if (brandContentToggle && privacyLevel === 'SELF_ONLY') {
+      setPrivacyLevel('');
+    }
+  }, [brandContentToggle, discloseCommercialContent, privacyLevel]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -269,35 +254,25 @@ export function TikTokUploadModal({
     isUploading ||
     isConnectingTikTok ||
     isLoadingCreatorInfo ||
-    isGeneratingSeo ||
-    cloudinaryStage !== 'idle';
+    isGeneratingSeo;
 
-  const ensureTikTokPublicVideoUrl = async (inputUrl: string): Promise<string> => {
-    const trimmed = String(inputUrl ?? '').trim();
-    if (!trimmed) throw new Error('Missing video URL');
+  const privacyOptions = Array.isArray(creatorInfo?.privacy_level_options)
+    ? creatorInfo.privacy_level_options
+    : [];
 
-    if (isCloudinaryUrl(trimmed)) return trimmed;
+  const commercialSelectionRequired =
+    discloseCommercialContent && !brandOrganicToggle && !brandContentToggle;
 
-    if (cloudinaryCachedForVideoUrl === trimmed && cloudinaryCachedUrl) {
-      return cloudinaryCachedUrl;
-    }
+  const declarationText = discloseCommercialContent && brandContentToggle
+    ? 'By posting, you agree to TikTok\'s Branded Content Policy and Music Usage Confirmation.'
+    : 'By posting, you agree to TikTok\'s Music Usage Confirmation.';
 
-    setCloudinaryStage('downloading');
-    try {
-      const file = await downloadVideoAsFile(trimmed, 600_000);
-      setCloudinaryStage('uploading');
-      const cloudinaryUrl = await uploadToCloudinaryUnsigned(file, {
-        resourceType: 'video',
-        folder: 'auto-video-generator/tiktok-uploads',
-      });
-
-      setCloudinaryCachedForVideoUrl(trimmed);
-      setCloudinaryCachedUrl(cloudinaryUrl);
-      return cloudinaryUrl;
-    } finally {
-      setCloudinaryStage('idle');
-    }
-  };
+  const canSubmit =
+    !isBusy &&
+    Boolean(creatorInfo) &&
+    Boolean(privacyLevel) &&
+    consentConfirmed &&
+    !commercialSelectionRequired;
 
   const parseTagsPreserveOrder = (raw: string): string[] => {
     return (raw || '')
@@ -428,11 +403,53 @@ export function TikTokUploadModal({
       return;
     }
 
+    if (!privacyLevel) {
+      setUploadError('Select a TikTok privacy setting before uploading.');
+      return;
+    }
+
+    if (!consentConfirmed) {
+      setUploadError('Confirm TikTok\'s publishing declaration before uploading.');
+      return;
+    }
+
+    if (commercialSelectionRequired) {
+      setUploadError('Select the applicable commercial content disclosure before uploading.');
+      return;
+    }
+
+    if (brandContentToggle && privacyLevel === 'SELF_ONLY') {
+      setUploadError('Branded content cannot be posted with Only me visibility.');
+      return;
+    }
+
+    if (typeof creatorInfo.max_video_post_duration_sec === 'number') {
+      try {
+        const durationSeconds = await getVideoDurationSeconds(videoUrl, 20_000);
+        if (
+          typeof durationSeconds === 'number' &&
+          durationSeconds > creatorInfo.max_video_post_duration_sec
+        ) {
+          setUploadError(
+            `This TikTok account allows videos up to ${creatorInfo.max_video_post_duration_sec} seconds, but the selected video is about ${Math.ceil(durationSeconds)} seconds.`,
+          );
+          return;
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Failed to validate the video duration before posting.';
+        setUploadError(message);
+        return;
+      }
+    }
+
     setIsConnectingTikTok(false);
     setIsUploading(true);
     try {
       const token = localStorage.getItem('token');
-      const publicVideoUrl = await ensureTikTokPublicVideoUrl(videoUrl);
+      const publicVideoUrl = ensureTikTokSourceVideoUrl(videoUrl);
       const formattedCaption = formatCaptionWithTags(caption, tiktokTags);
       const response = await fetch(`${TIKTOK_API_URL}/tiktok/upload`, {
         method: 'POST',
@@ -444,9 +461,12 @@ export function TikTokUploadModal({
           videoUrl: publicVideoUrl,
           caption: formattedCaption,
           privacyLevel,
-          disableComment,
-          disableDuet,
-          disableStitch,
+          disableComment: creatorInfo.comment_disabled ? true : !allowComment,
+          disableDuet: creatorInfo.duet_disabled ? true : !allowDuet,
+          disableStitch: creatorInfo.stitch_disabled ? true : !allowStitch,
+          brandOrganicToggle,
+          brandContentToggle,
+          consentConfirmed,
           scriptId: scriptId || undefined,
           scriptText: (script || '').trim() || undefined,
         }),
@@ -477,20 +497,16 @@ export function TikTokUploadModal({
 
   if (!isRendered) return null;
 
-  const privacyOptions = Array.isArray(creatorInfo?.privacy_level_options)
-    ? creatorInfo.privacy_level_options
-    : [];
-
   return (
     <div
       className={`fixed inset-0 bg-linear-to-br from-black/75 via-neutral-950/70 to-cyan-950/70 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-opacity duration-300 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
       onClick={onClose}
     >
       <div
-        className={`bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-100 transition-all duration-300 ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+        className={`bg-white rounded-3xl shadow-2xl max-w-3xl w-full overflow-hidden border border-gray-100 transition-all duration-300 ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative bg-linear-to-r from-neutral-950 via-rose-600 to-cyan-500 px-8 py-6">
+        <div className="relative bg-linear-to-r from-neutral-950 to-rose-500 px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-white/12 backdrop-blur-sm rounded-2xl shadow-lg">
@@ -505,7 +521,7 @@ export function TikTokUploadModal({
             </div>
             <button
               onClick={onClose}
-              className="p-2.5 hover:bg-white/20 rounded-xl transition-all duration-200 group"
+                disabled={!canSubmit}
               aria-label="Close modal"
             >
               <X className="h-5 w-5 text-white group-hover:rotate-90 transition-transform duration-200" />
@@ -569,7 +585,7 @@ export function TikTokUploadModal({
                     type="button"
                     onClick={handleGenerateSeo}
                     disabled={isBusy || !(script || '').trim()}
-                    className="bg-linear-to-r from-rose-600 to-cyan-500 hover:from-rose-700 hover:to-cyan-600 text-white hover:text-white shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="bg-linear-to-r bg-rose-600 hover:bg-rose-700 text-white hover:text-white shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
                     size="sm"
                   >
                     {isGeneratingSeo ? (
@@ -628,6 +644,10 @@ export function TikTokUploadModal({
                     {seoError}
                   </div>
                 ) : null}
+
+                <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+                  TikTok may take a few minutes to process and surface the post on the creator profile after publishing.
+                </div>
               </div>
             </div>
           </div>
@@ -675,12 +695,19 @@ export function TikTokUploadModal({
                 </SelectTrigger>
                 <SelectContent>
                   {privacyOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
+                    <SelectItem
+                      key={option}
+                      value={option}
+                      disabled={brandContentToggle && option === 'SELF_ONLY'}
+                    >
                       {option.replace(/_/g, ' ')}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-500">
+                TikTok requires the creator to choose privacy manually for each post.
+              </p>
             </div>
 
             <div className="bg-neutral-950 rounded-2xl px-4 py-3 text-sm text-white/90">
@@ -698,31 +725,125 @@ export function TikTokUploadModal({
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-rose-600"
-                checked={disableComment}
-                onChange={(e) => setDisableComment(e.target.checked)}
+                checked={allowComment}
+                onChange={(e) => setAllowComment(e.target.checked)}
                 disabled={isBusy || Boolean(creatorInfo?.comment_disabled)}
               />
-              <span>Disable comments</span>
+              <span>Allow comments</span>
             </label>
             <label className="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-800 bg-gray-50">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-rose-600"
-                checked={disableDuet}
-                onChange={(e) => setDisableDuet(e.target.checked)}
+                checked={allowDuet}
+                onChange={(e) => setAllowDuet(e.target.checked)}
                 disabled={isBusy || Boolean(creatorInfo?.duet_disabled)}
               />
-              <span>Disable duet</span>
+              <span>Allow duet</span>
             </label>
             <label className="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-800 bg-gray-50">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-rose-600"
-                checked={disableStitch}
-                onChange={(e) => setDisableStitch(e.target.checked)}
+                checked={allowStitch}
+                onChange={(e) => setAllowStitch(e.target.checked)}
                 disabled={isBusy || Boolean(creatorInfo?.stitch_disabled)}
               />
-              <span>Disable stitch</span>
+              <span>Allow stitch</span>
+            </label>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-900">Commercial content disclosure</h4>
+              <p className="text-xs text-gray-500 mt-1">
+                Enable this if the post promotes yourself, your business, or a third party.
+              </p>
+            </div>
+
+            <label className="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-800 bg-gray-50">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-rose-600"
+                checked={discloseCommercialContent}
+                onChange={(e) => setDiscloseCommercialContent(e.target.checked)}
+                disabled={isBusy}
+              />
+              <span>Enable commercial content disclosure</span>
+            </label>
+
+            {discloseCommercialContent ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-800 bg-gray-50">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-rose-600"
+                    checked={brandOrganicToggle}
+                    onChange={(e) => setBrandOrganicToggle(e.target.checked)}
+                    disabled={isBusy}
+                  />
+                  <span>Your brand</span>
+                </label>
+                <label className="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-800 bg-gray-50">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-rose-600"
+                    checked={brandContentToggle}
+                    onChange={(e) => setBrandContentToggle(e.target.checked)}
+                    disabled={isBusy}
+                  />
+                  <span>Branded content / paid partnership</span>
+                </label>
+              </div>
+            ) : null}
+
+            {commercialSelectionRequired ? (
+              <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                Choose at least one disclosure option before posting commercial content.
+              </div>
+            ) : null}
+
+            {brandContentToggle ? (
+              <div className="text-xs text-gray-500">
+                Branded content cannot use Only me visibility on TikTok.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5 space-y-3">
+            <div className="text-sm font-semibold text-gray-900">Creator consent</div>
+            <label className="flex items-start gap-3 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-rose-600"
+                checked={consentConfirmed}
+                onChange={(e) => setConsentConfirmed(e.target.checked)}
+                disabled={isBusy}
+              />
+              <span>
+                {declarationText}{' '}
+                <a
+                  href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline font-medium"
+                >
+                  Music Usage Confirmation
+                </a>
+                {discloseCommercialContent && brandContentToggle ? (
+                  <>
+                    {' '}and{' '}
+                    <a
+                      href="https://www.tiktok.com/legal/page/global/bc-policy/en"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline font-medium"
+                    >
+                      Branded Content Policy
+                    </a>
+                  </>
+                ) : null}
+              </span>
             </label>
           </div>
 
@@ -772,20 +893,10 @@ export function TikTokUploadModal({
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={isBusy || !creatorInfo}
-                className="rounded-xl bg-linear-to-r from-neutral-950 via-rose-600 to-cyan-500 hover:from-black hover:via-rose-700 hover:to-cyan-600 text-white"
+                disabled={!canSubmit}
+                className="rounded-xl bg-linear-to-r bg-rose-600 hover:bg-rose-700 text-white"
               >
-                {cloudinaryStage === 'downloading' ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Preparing video...
-                  </>
-                ) : cloudinaryStage === 'uploading' ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Uploading to Cloudinary...
-                  </>
-                ) : isConnectingTikTok ? (
+                {isConnectingTikTok ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Connecting...
@@ -810,4 +921,42 @@ export function TikTokUploadModal({
       </div>
     </div>
   );
+}
+
+async function getVideoDurationSeconds(url: string, timeoutMs: number): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    let finished = false;
+
+    const cleanup = () => {
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.removeAttribute('src');
+      video.load();
+    };
+
+    const complete = (value: number | null, error?: Error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      cleanup();
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value);
+      }
+    };
+
+    const timeout = window.setTimeout(() => {
+      complete(null, new Error('Timed out while reading the video duration.'));
+    }, timeoutMs);
+
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const duration = Number(video.duration);
+      complete(Number.isFinite(duration) && duration > 0 ? duration : null);
+    };
+    video.onerror = () => complete(null, new Error('Failed to read the video duration.'));
+    video.src = url;
+  });
 }
