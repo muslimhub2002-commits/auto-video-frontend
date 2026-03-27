@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, CheckCircle2, XCircle, Download, Play, Share2 } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Music, Play, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { YouTubeUploadModal } from './YouTubeUploadModal';
 import { MetaUploadModal } from './MetaUploadModal';
+import { TikTokUploadModal } from './TikTokUploadModal';
 
 interface VideoStatusCardProps {
     videoJobId: string | null;
@@ -42,6 +43,7 @@ export function VideoStatusCard({
     const [isVideoPaused, setIsVideoPaused] = useState(true);
     const [showYouTubeModal, setShowYouTubeModal] = useState(false);
     const [showMetaModal, setShowMetaModal] = useState(false);
+    const [showTikTokModal, setShowTikTokModal] = useState(false);
 
     if (!videoJobId) return null;
 
@@ -146,15 +148,6 @@ export function VideoStatusCard({
                         {/* Action buttons */}
                         <div className="flex flex-wrap gap-3">
                             <Button
-                                asChild
-                                className="flex-1 bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md hover:shadow-lg transition-all"
-                            >
-                                <a href={videoUrl} target='_blank' download="ai-generated-video.mp4">
-                                    <Download className="h-4 w-4 mr-2" />
-                                    Download Video
-                                </a>
-                            </Button>
-                            <Button
                                 variant="outline"
                                 className="flex-1 min-w-35 bg-linear-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white hover:text-white border-0 shadow-md hover:shadow-lg transition-all group"
                                 onClick={() => setShowYouTubeModal(true)}
@@ -175,6 +168,14 @@ export function VideoStatusCard({
                             >
                                 <Share2 className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />
                                 Upload to Meta Platforms
+                            </Button>
+                            <Button
+                                variant="outline"
+                                className="flex-1 min-w-35 bg-linear-to-r from-neutral-950 via-rose-600 to-cyan-500 hover:from-black hover:via-rose-700 hover:to-cyan-600 text-white hover:text-white border-0 shadow-md hover:shadow-lg transition-all group"
+                                onClick={() => setShowTikTokModal(true)}
+                            >
+                                <Music className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />
+                                Upload to TikTok
                             </Button>
                         </div>
 
@@ -208,6 +209,14 @@ export function VideoStatusCard({
             <MetaUploadModal
                 isOpen={showMetaModal}
                 onClose={() => setShowMetaModal(false)}
+                videoUrl={videoUrl}
+                isShortVideo={isShortVideo}
+                scriptId={scriptId}
+                script={scriptTextForUpload}
+            />
+            <TikTokUploadModal
+                isOpen={showTikTokModal}
+                onClose={() => setShowTikTokModal(false)}
                 videoUrl={videoUrl}
                 isShortVideo={isShortVideo}
                 scriptId={scriptId}
