@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
   Clapperboard,
   Facebook,
   Instagram,
+  KeyRound,
   Loader2,
   Sparkles,
   X,
@@ -44,6 +45,17 @@ type MetaUploadResponse = {
     instagram?: PlatformResult;
   };
 };
+
+function isTokenExpired(expiresAt: string | null | undefined): boolean {
+  if (!expiresAt) return false;
+  return new Date(expiresAt).getTime() <= Date.now();
+}
+
+function isTokenExpiringSoon(expiresAt: string | null | undefined): boolean {
+  if (!expiresAt) return false;
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  return new Date(expiresAt).getTime() - Date.now() <= sevenDays;
+}
 
 function isCloudinaryUrl(url: string) {
   return /^(https?:\/\/)?res\.cloudinary\.com\//i.test(url || '');
@@ -124,6 +136,18 @@ export function MetaUploadModal({
   const [cloudinaryStage, setCloudinaryStage] = useState<'idle' | 'downloading' | 'uploading'>('idle');
   const [cloudinaryCachedForVideoUrl, setCloudinaryCachedForVideoUrl] = useState<string | null>(null);
   const [cloudinaryCachedUrl, setCloudinaryCachedUrl] = useState<string | null>(null);
+  const [credentialStatus, setCredentialStatus] = useState<{
+    hasMetaAccessToken: boolean;
+    metaTokenExpiresAt: string | null;
+    lastError: string | null;
+    canAutoRefresh: boolean;
+  } | null>(null);
+  const [isLoadingCredStatus, setIsLoadingCredStatus] = useState(false);
+  const [showTokenPanel, setShowTokenPanel] = useState(false);
+  const [newShortToken, setNewShortToken] = useState('');
+  const [isExchangingToken, setIsExchangingToken] = useState(false);
+  const [tokenExchangeError, setTokenExchangeError] = useState<string | null>(null);
+  const [tokenExchangeSuccess, setTokenExchangeSuccess] = useState(false);
   const [seoError, setSeoError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<MetaUploadResponse | null>(null);
@@ -132,7 +156,7 @@ export function MetaUploadModal({
     process.env.NEXT_PUBLIC_META_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
     process.env.NEXT_PUBLIC_YOUTUBE_API_URL ||
-    'https://auto-video-backend.vercel.app';
+    'http://localhost:3000';
   useEffect(() => {
     if (isOpen) {
       setIsRendered(true);
@@ -145,13 +169,93 @@ export function MetaUploadModal({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
+  const loadCredentialStatus = useCallback(async () => {
+    setIsLoadingCredStatus(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${META_API_URL}/meta/credentials`, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+      });
+      if (res.ok) {
+        const data = await res.json() as {
+          hasMetaAccessToken: boolean;
+          metaTokenExpiresAt: string | null;
+          lastError: string | null;
+          canAutoRefresh: boolean;
+        };
+        setCredentialStatus(data);
+        if (!data.hasMetaAccessToken || isTokenExpired(data.metaTokenExpiresAt)) {
+          setShowTokenPanel(true);
+        }
+      }
+    } catch {
+      // non-critical
+    } finally {
+      setIsLoadingCredStatus(false);
+    }
+  }, [META_API_URL]);
+
+  const handleExchangeToken = async () => {
+    setTokenExchangeError(null);
+    setTokenExchangeSuccess(false);
+    const trimmed = newShortToken.trim();
+    if (!trimmed) {
+      setTokenExchangeError('Paste a short-lived Meta access token first.');
+      return;
+    }
+    setIsExchangingToken(true);
+    try {
+      const authToken = localStorage.getItem('token');
+      const res = await fetch(`${META_API_URL}/meta/credentials/exchange-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authToken ? `Bearer ${authToken}` : '',
+        },
+        body: JSON.stringify({ shortLivedToken: trimmed }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        exchanged?: boolean;
+        status?: typeof credentialStatus;
+        message?: string;
+      } | null;
+      if (!res.ok) {
+        throw new Error(
+          (data && 'message' in data && typeof data.message === 'string' && data.message.trim())
+            ? data.message
+            : 'Token exchange failed.',
+        );
+      }
+      if (data?.status) {
+        setCredentialStatus(data.status as typeof credentialStatus);
+      }
+      setTokenExchangeSuccess(true);
+      setNewShortToken('');
+      setShowTokenPanel(false);
+    } catch (err: unknown) {
+      setTokenExchangeError(
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : 'Token exchange failed. Make sure the token is valid.',
+      );
+    } finally {
+      setIsExchangingToken(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
     setSeoError(null);
     setUploadError(null);
     setUploadResult(null);
-  }, [isOpen]);
+    setTokenExchangeError(null);
+    setTokenExchangeSuccess(false);
+    void loadCredentialStatus();
+  }, [isOpen, loadCredentialStatus]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -162,7 +266,7 @@ export function MetaUploadModal({
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
-  const isBusy = isUploading || isGeneratingSeo || cloudinaryStage !== 'idle';
+  const isBusy = isUploading || isGeneratingSeo || cloudinaryStage !== 'idle' || isExchangingToken;
 
   const togglePlatform = (platform: MetaPlatform) => {
     setSelectedPlatforms((current) => {
@@ -416,6 +520,136 @@ export function MetaUploadModal({
               </div>
             </div>
           </div>
+
+          {/* ── Token status banner ── */}
+          {!isLoadingCredStatus && credentialStatus ? (
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm flex items-center justify-between gap-3 ${
+                !credentialStatus.hasMetaAccessToken || isTokenExpired(credentialStatus.metaTokenExpiresAt)
+                  ? 'border-red-200 bg-red-50 text-red-800'
+                  : isTokenExpiringSoon(credentialStatus.metaTokenExpiresAt)
+                  ? 'border-amber-200 bg-amber-50 text-amber-800'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {!credentialStatus.hasMetaAccessToken ? (
+                  <>
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>No Meta access token configured. Paste one below.</span>
+                  </>
+                ) : isTokenExpired(credentialStatus.metaTokenExpiresAt) ? (
+                  <>
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>
+                      Token expired on{' '}
+                      {new Date(credentialStatus.metaTokenExpiresAt!).toLocaleDateString()}.
+                      {' '}Paste a fresh token to continue posting.
+                    </span>
+                  </>
+                ) : isTokenExpiringSoon(credentialStatus.metaTokenExpiresAt) ? (
+                  <>
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>
+                      Token expires{' '}
+                      {new Date(credentialStatus.metaTokenExpiresAt!).toLocaleDateString()}.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>
+                      Token valid until{' '}
+                      {credentialStatus.metaTokenExpiresAt
+                        ? new Date(credentialStatus.metaTokenExpiresAt).toLocaleDateString()
+                        : 'unknown'}.
+                    </span>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTokenPanel((v) => !v)}
+                className="text-xs underline font-medium whitespace-nowrap shrink-0"
+              >
+                {showTokenPanel ? 'Hide' : 'Manage token'}
+              </button>
+            </div>
+          ) : null}
+
+          {/* ── Token exchange panel ── */}
+          {showTokenPanel ? (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="shrink-0 w-8 h-8 bg-blue-700 rounded-xl flex items-center justify-center">
+                  <KeyRound className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-blue-900">
+                    Exchange for a 60-day long-lived token
+                  </h4>
+                  <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                    Open the{' '}
+                    <a
+                      href="https://developers.facebook.com/tools/explorer"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline font-medium"
+                    >
+                      Facebook Graph API Explorer
+                    </a>
+                    , select your app, click <strong>Generate Access Token</strong>, and grant{' '}
+                    <code className="bg-blue-100 px-1 rounded text-xs">pages_manage_videos</code>{' '}
+                    +{' '}
+                    <code className="bg-blue-100 px-1 rounded text-xs">pages_read_engagement</code>{' '}
+                    permissions. Paste the short-lived token below — the backend will exchange it
+                    for a ~60-day long-lived token automatically.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  placeholder="Paste short-lived Meta access token here..."
+                  value={newShortToken}
+                  onChange={(e) => setNewShortToken(e.target.value)}
+                  disabled={isExchangingToken}
+                  className="flex-1 text-sm"
+                />
+                <Button
+                  type="button"
+                  onClick={() => void handleExchangeToken()}
+                  disabled={isExchangingToken || !newShortToken.trim()}
+                  className="bg-blue-700 hover:bg-blue-800 text-white whitespace-nowrap"
+                  size="sm"
+                >
+                  {isExchangingToken ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Exchanging...
+                    </>
+                  ) : (
+                    'Exchange & Save'
+                  )}
+                </Button>
+              </div>
+
+              {tokenExchangeError ? (
+                <div className="flex items-start gap-2 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{tokenExchangeError}</span>
+                </div>
+              ) : null}
+
+              {tokenExchangeSuccess ? (
+                <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>Token exchanged and saved. You can now upload to Meta.</span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="space-y-3">
             <Label className="text-sm font-semibold text-gray-900">Platforms</Label>

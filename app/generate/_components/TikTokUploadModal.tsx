@@ -298,13 +298,6 @@ export function TikTokUploadModal({
     ? 'By posting, you agree to TikTok\'s Branded Content Policy and Music Usage Confirmation.'
     : 'By posting, you agree to TikTok\'s Music Usage Confirmation.';
 
-  const canSubmit =
-    !isBusy &&
-    Boolean(creatorInfo) &&
-    Boolean(privacyLevel) &&
-    consentConfirmed &&
-    !commercialSelectionRequired;
-
   const ensureTikTokPublicVideoUrl = async (inputUrl: string): Promise<string> => {
     const trimmed = String(inputUrl ?? '').trim();
     if (!trimmed) throw new Error('Missing video URL');
@@ -578,8 +571,9 @@ export function TikTokUploadModal({
               </div>
             </div>
             <button
+              type="button"
               onClick={onClose}
-                disabled={!canSubmit}
+              className="group rounded-full p-2 text-white/90 transition hover:bg-white/10 hover:text-white"
               aria-label="Close modal"
             >
               <X className="h-5 w-5 text-white group-hover:rotate-90 transition-transform duration-200" />
