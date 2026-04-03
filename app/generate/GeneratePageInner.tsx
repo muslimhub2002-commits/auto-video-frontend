@@ -1072,7 +1072,7 @@ export function GeneratePageInner() {
   const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
   const [scriptLanguage, setScriptLanguage] = useState('en');
   // Default to Anthropic (Claude) as requested.
-  const [scriptModel, setScriptModel] = useState('claude-sonnet-4-5');
+  const [scriptModel, setScriptModel] = useState('gpt-5.2');
 
   const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState('en');

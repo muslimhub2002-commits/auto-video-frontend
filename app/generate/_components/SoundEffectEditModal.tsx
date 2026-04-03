@@ -3,12 +3,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { api } from '@/lib/api';
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Loader2,
   Mic,
@@ -20,6 +28,7 @@ import {
   Save,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Wand2,
   Waves,
   X,
@@ -30,6 +39,7 @@ import {
   normalizeSoundEffectAudioSettings,
   type SoundEffectAudioSettings,
 } from '../_types/sound-effect-audio';
+import { Pagination } from './Pagination';
 
 export type SoundEffectEditValues = {
   name: string;
@@ -61,6 +71,15 @@ type SoundEffectEditModalProps = {
   onSaveAsPreset?: (values: SoundEffectEditValues) => void | Promise<void>;
 };
 
+type SoundEditPresetDto = {
+  id: string;
+  title: string;
+  volume_percent?: number;
+  audio_settings?: SoundEffectAudioSettings | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
 type RangeFieldProps = {
   label: string;
   value: number;
@@ -88,6 +107,8 @@ const clampDuration = (raw: unknown, fallback = 0) => {
 const roundDuration = (value: number) => Math.round(value * 100) / 100;
 const MIN_TRIM_GAP_SECONDS = 0.05;
 const WAVEFORM_BAR_COUNT = 72;
+const PRESET_PAGE_SIZE = 20;
+const PRESET_FILTER_DEBOUNCE_MS = 300;
 
 const formatSeconds = (value: number | null) => {
   if (value === null || !Number.isFinite(value)) return 'Unknown';
@@ -182,10 +203,23 @@ export function SoundEffectEditModal({
 }: SoundEffectEditModalProps) {
   const CompanionPreviewIcon = companionPreviewIcon === 'music' ? Music2 : Mic;
   const [name, setName] = useState('');
+  const [presetTitle, setPresetTitle] = useState('');
   const [volumePercent, setVolumePercent] = useState(100);
   const [audioSettings, setAudioSettings] = useState<SoundEffectAudioSettings>(
     cloneSoundEffectAudioSettings(DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS),
   );
+  const [presetItems, setPresetItems] = useState<SoundEditPresetDto[]>([]);
+  const [presetPage, setPresetPage] = useState(1);
+  const [presetTotal, setPresetTotal] = useState(0);
+  const [presetSearch, setPresetSearch] = useState('');
+  const [debouncedPresetSearch, setDebouncedPresetSearch] = useState('');
+  const [isLoadingPresets, setIsLoadingPresets] = useState(false);
+  const [isSavingEditPreset, setIsSavingEditPreset] = useState(false);
+  const [isDeletingEditPreset, setIsDeletingEditPreset] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [activePreset, setActivePreset] = useState<SoundEditPresetDto | null>(null);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [showPresetSaveChoices, setShowPresetSaveChoices] = useState(false);
   const [previewStatus, setPreviewStatus] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [isPreviewLoopEnabled, setIsPreviewLoopEnabled] = useState(false);
   const [isCompanionPreviewEnabled, setIsCompanionPreviewEnabled] = useState(false);
@@ -507,6 +541,202 @@ export function SoundEffectEditModal({
     audioSettings: normalizeSoundEffectAudioSettings(audioSettings),
   });
 
+  const currentPresetValues = () => ({
+    title: String(presetTitle ?? '').trim(),
+    volumePercent: clampVolume(volumePercent),
+    audioSettings: normalizeSoundEffectAudioSettings(audioSettings),
+  });
+
+  const extractErrorMessage = (error: unknown, fallback: string) => {
+    const message = (error as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+    if (Array.isArray(message)) {
+      const joined = message.map((item) => String(item ?? '').trim()).filter(Boolean).join(' ');
+      return joined || fallback;
+    }
+
+    const single = String(message ?? '').trim();
+    return single || fallback;
+  };
+
+  const normalizePresetDto = (item: SoundEditPresetDto): SoundEditPresetDto => ({
+    ...item,
+    title: String(item?.title ?? '').trim(),
+    volume_percent: clampVolume(item?.volume_percent ?? 100),
+    audio_settings: cloneSoundEffectAudioSettings(item?.audio_settings),
+  });
+
+  const presetSignature = (value: {
+    title?: string;
+    volumePercent?: number;
+    audioSettings?: SoundEffectAudioSettings | null;
+  }) =>
+    JSON.stringify({
+      title: String(value?.title ?? '').trim(),
+      volumePercent: clampVolume(value?.volumePercent ?? 100),
+      audioSettings: normalizeSoundEffectAudioSettings(value?.audioSettings),
+    });
+
+  const hydrateFromPreset = (preset: SoundEditPresetDto) => {
+    const normalizedPreset = normalizePresetDto(preset);
+    setActivePreset(normalizedPreset);
+    setSelectedPresetId(normalizedPreset.id);
+    setPresetTitle(normalizedPreset.title);
+    setVolumePercent(clampVolume(normalizedPreset.volume_percent ?? 100));
+    setAudioSettings(
+      cloneSoundEffectAudioSettings(normalizedPreset.audio_settings),
+    );
+    setPresetError(null);
+    setShowPresetSaveChoices(false);
+  };
+
+  const mergePresetIntoState = (preset: SoundEditPresetDto) => {
+    const normalizedPreset = normalizePresetDto(preset);
+
+    setPresetItems((prev) => {
+      const existingIndex = prev.findIndex((item) => item.id === normalizedPreset.id);
+      if (existingIndex === -1) {
+        return [normalizedPreset, ...prev].slice(0, PRESET_PAGE_SIZE);
+      }
+
+      return prev.map((item) => (item.id === normalizedPreset.id ? normalizedPreset : item));
+    });
+
+    setActivePreset(normalizedPreset);
+    setSelectedPresetId(normalizedPreset.id);
+    setPresetTitle(normalizedPreset.title);
+  };
+
+  const fetchPresetItems = async (pageToLoad = 1, query = debouncedPresetSearch) => {
+    setIsLoadingPresets(true);
+    setPresetError(null);
+
+    try {
+      const response = await api.get<{
+        items: SoundEditPresetDto[];
+        total: number;
+        page: number;
+        limit: number;
+      }>('/sound-edit-presets', {
+        params: {
+          page: pageToLoad,
+          limit: PRESET_PAGE_SIZE,
+          q: String(query ?? '').trim() || undefined,
+        },
+      });
+
+      const data = response.data;
+      setPresetItems(
+        (Array.isArray(data.items) ? data.items : []).map((item) => normalizePresetDto(item)),
+      );
+      setPresetTotal(Number(data.total ?? 0) || 0);
+      setPresetPage(Number(data.page ?? pageToLoad) || pageToLoad);
+    } catch (error) {
+      setPresetError(extractErrorMessage(error, 'Failed to load sound edit presets'));
+    } finally {
+      setIsLoadingPresets(false);
+    }
+  };
+
+  const createPreset = async () => {
+    const next = currentPresetValues();
+    if (!next.title) {
+      setPresetError('Preset title is required');
+      return;
+    }
+
+    setIsSavingEditPreset(true);
+    setPresetError(null);
+
+    try {
+      const response = await api.post<SoundEditPresetDto>('/sound-edit-presets', {
+        title: next.title,
+        volumePercent: next.volumePercent,
+        audioSettings: next.audioSettings,
+      });
+
+      const createdPreset = normalizePresetDto(response.data);
+      mergePresetIntoState(createdPreset);
+      setPresetSearch('');
+      setDebouncedPresetSearch('');
+      setPresetPage(1);
+      setPresetTotal((prev) => Math.max(prev + 1, 1));
+      setShowPresetSaveChoices(false);
+      void fetchPresetItems(1, '');
+    } catch (error) {
+      setPresetError(extractErrorMessage(error, 'Failed to save sound edit preset'));
+    } finally {
+      setIsSavingEditPreset(false);
+    }
+  };
+
+  const overrideActivePreset = async () => {
+    const presetId = String(activePreset?.id ?? '').trim();
+    if (!presetId) {
+      await createPreset();
+      return;
+    }
+
+    const next = currentPresetValues();
+    if (!next.title) {
+      setPresetError('Preset title is required');
+      return;
+    }
+
+    setIsSavingEditPreset(true);
+    setPresetError(null);
+
+    try {
+      const response = await api.patch<SoundEditPresetDto>(`/sound-edit-presets/${encodeURIComponent(presetId)}`, {
+        title: next.title,
+        volumePercent: next.volumePercent,
+        audioSettings: next.audioSettings,
+      });
+
+      mergePresetIntoState(response.data);
+      setShowPresetSaveChoices(false);
+      void fetchPresetItems(presetPage, debouncedPresetSearch);
+    } catch (error) {
+      setPresetError(extractErrorMessage(error, 'Failed to override sound edit preset'));
+    } finally {
+      setIsSavingEditPreset(false);
+    }
+  };
+
+  const deleteActivePreset = async () => {
+    const presetId = String(activePreset?.id ?? '').trim();
+    if (!presetId) return;
+
+    const presetTitleToDelete = String(activePreset?.title ?? '').trim() || 'this preset';
+    if (typeof window !== 'undefined') {
+      const confirmed = window.confirm(`Delete ${presetTitleToDelete}? This cannot be undone.`);
+      if (!confirmed) return;
+    }
+
+    setIsDeletingEditPreset(true);
+    setPresetError(null);
+
+    try {
+      await api.delete(`/sound-edit-presets/${encodeURIComponent(presetId)}`);
+
+      setPresetItems((prev) => prev.filter((item) => item.id !== presetId));
+      setPresetTotal((prev) => Math.max(0, prev - 1));
+      setActivePreset(null);
+      setSelectedPresetId('');
+      setShowPresetSaveChoices(false);
+
+      const nextPage = presetItems.length === 1 && presetPage > 1 ? presetPage - 1 : presetPage;
+      if (nextPage !== presetPage) {
+        setPresetPage(nextPage);
+      } else {
+        void fetchPresetItems(nextPage, debouncedPresetSearch);
+      }
+    } catch (error) {
+      setPresetError(extractErrorMessage(error, 'Failed to delete sound edit preset'));
+    } finally {
+      setIsDeletingEditPreset(false);
+    }
+  };
+
   const applyAudioSettingsToNodes = (nextSettings: SoundEffectAudioSettings, nextVolumePercent: number) => {
     if (lowFilterRef.current) {
       lowFilterRef.current.frequency.value = nextSettings.eq.lowFrequencyHz;
@@ -587,14 +817,45 @@ export function SoundEffectEditModal({
 
     editSessionKeyRef.current = nextSessionKey;
     setName(String(initialName ?? '').trim());
+    setPresetTitle(String(initialName ?? '').trim());
     setVolumePercent(clampVolume(initialVolumePercent));
     setAudioSettings(normalizedInitialAudioSettings);
     setAudioDurationSeconds(null);
     setWaveformSamples([]);
+    setPresetItems([]);
+    setPresetPage(1);
+    setPresetTotal(0);
+    setPresetSearch('');
+    setDebouncedPresetSearch('');
+    setIsLoadingPresets(false);
+    setIsSavingEditPreset(false);
+    setIsDeletingEditPreset(false);
+    setPresetError(null);
+    setActivePreset(null);
+    setSelectedPresetId('');
+    setShowPresetSaveChoices(false);
     setIsPreviewLoopEnabled(false);
     setIsCompanionPreviewEnabled(Boolean(companionAudioDefaultEnabled && String(companionAudioUrl ?? '').trim()));
     updatePlayheadIndicator(null);
   }, [isOpen, audioUrl, companionAudioDefaultEnabled, companionAudioUrl, initialName, initialVolumePercent, initialAudioSettings]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedPresetSearch(String(presetSearch ?? '').trim());
+    }, PRESET_FILTER_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isOpen, presetSearch]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void fetchPresetItems(presetPage, debouncedPresetSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, presetPage, debouncedPresetSearch]);
 
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined') return;
@@ -879,6 +1140,28 @@ export function SoundEffectEditModal({
     () => resolveTrimWindow(normalizeSoundEffectAudioSettings(audioSettings)),
     [audioSettings, audioDurationSeconds],
   );
+  const presetTotalPages = presetTotal > 0 ? Math.max(1, Math.ceil(presetTotal / PRESET_PAGE_SIZE)) : 1;
+  const currentPresetStateSignature = useMemo(
+    () =>
+      presetSignature({
+        title: presetTitle,
+        volumePercent,
+        audioSettings,
+      }),
+    [presetTitle, volumePercent, audioSettings],
+  );
+  const isImportedPresetDirty = useMemo(() => {
+    if (!activePreset) return false;
+
+    return (
+      currentPresetStateSignature !==
+      presetSignature({
+        title: activePreset.title,
+        volumePercent: activePreset.volume_percent,
+        audioSettings: activePreset.audio_settings,
+      })
+    );
+  }, [activePreset, currentPresetStateSignature]);
   const trimStartMax = audioDurationSeconds === null ? 30 : Math.max(0, roundDuration(audioDurationSeconds - MIN_TRIM_GAP_SECONDS));
   const trimDurationMax = audioDurationSeconds === null
     ? 30
@@ -934,7 +1217,202 @@ export function SoundEffectEditModal({
           </div>
 
           <div className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="flex h-full col-span-2 flex-col rounded-[1.75rem] border border-white/10 bg-black/30 p-5">
+            <div className="flex h-full col-span-2 flex-col rounded-[1.75rem] border border-white/10 bg-black/30 p-5 gap-3">
+              <Accordion type="single" collapsible className="w-full rounded-2xl border border-white/10 bg-white/5 px-4">
+                <AccordionItem value="presets" className="border-none">
+                  <AccordionTrigger className="py-4 text-left text-white hover:no-underline">
+                    <div className="flex flex-wrap items-start justify-between gap-3 pr-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300">Edit presets</p>
+                        <p className="mt-1 text-sm text-slate-300">
+                          Save this mix as a reusable preset or import one of your saved presets.
+                        </p>
+                      </div>
+                      {activePreset ? (
+                        <span className="inline-flex items-center rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                          Loaded preset
+                        </span>
+                      ) : null}
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-4">
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+                      <div className="space-y-4">
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                          <div>
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Preset title</p>
+                            <Input
+                              value={presetTitle}
+                              onChange={(event) => {
+                                setPresetTitle(event.target.value);
+                                setPresetError(null);
+                                setShowPresetSaveChoices(false);
+                              }}
+                              className="h-11 border-white/15 bg-white/10 text-white placeholder:text-slate-400"
+                              placeholder="Preset title"
+                              disabled={isBusy || isSavingEditPreset}
+                            />
+                          </div>
+                          <div>
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Find saved presets</p>
+                            <Input
+                              value={presetSearch}
+                              onChange={(event) => {
+                                setPresetSearch(event.target.value);
+                                setPresetPage(1);
+                                setPresetError(null);
+                              }}
+                              className="h-11 border-white/15 bg-white/10 text-white placeholder:text-slate-400"
+                              placeholder="Search presets"
+                              disabled={isBusy || isSavingEditPreset}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                          <div>
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Import preset</p>
+                            <Select
+                              value={selectedPresetId}
+                              onValueChange={(value) => {
+                                setSelectedPresetId(value);
+                                const nextPreset = presetItems.find((item) => item.id === value);
+                                if (!nextPreset) return;
+                                hydrateFromPreset(nextPreset);
+                              }}
+                              disabled={isBusy || isSavingEditPreset || isLoadingPresets || presetItems.length === 0}
+                            >
+                              <SelectTrigger className="h-11 border-white/15 bg-white/10 text-white data-placeholder:text-slate-400">
+                                <SelectValue placeholder={isLoadingPresets ? 'Loading presets...' : 'Select a preset to import'} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {presetItems.map((preset) => (
+                                  <SelectItem key={preset.id} value={preset.id}>
+                                    {preset.title}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-11 w-11 rounded-xl border-red-300/30 bg-red-500/10 px-0 text-red-100 hover:bg-red-500/20"
+                              disabled={!activePreset || isBusy || isSavingEditPreset || isDeletingEditPreset}
+                              onClick={() => void deleteActivePreset()}
+                              aria-label="Delete current preset"
+                              title="Delete current preset"
+                            >
+                              {isDeletingEditPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-11 rounded-xl border-white/15 bg-white/5 text-white hover:bg-white/10"
+                              disabled={!activePreset || isBusy || isSavingEditPreset || isDeletingEditPreset}
+                              onClick={() => {
+                                setActivePreset(null);
+                                setSelectedPresetId('');
+                                setShowPresetSaveChoices(false);
+                                setPresetError(null);
+                              }}
+                            >
+                              Detach
+                            </Button>
+                            <Button
+                              type="button"
+                              className="h-11 rounded-xl bg-linear-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-600 hover:to-blue-700"
+                              disabled={isBusy || isSavingEditPreset || isDeletingEditPreset}
+                              onClick={() => {
+                                setPresetError(null);
+                                if (activePreset) {
+                                  setShowPresetSaveChoices(true);
+                                  return;
+                                }
+                                void createPreset();
+                              }}
+                            >
+                              {isSavingEditPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                              Save edit preset
+                            </Button>
+                          </div>
+                        </div>
+
+                        {presetTotalPages > 1 ? (
+                          <Pagination
+                            currentPage={presetPage}
+                            totalPages={presetTotalPages}
+                            onPageChange={(nextPage) => {
+                              if (nextPage === presetPage) return;
+                              setPresetPage(nextPage);
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {showPresetSaveChoices ? (
+                      <div className="mt-4 rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-amber-100">
+                              {activePreset
+                                ? isImportedPresetDirty
+                                  ? `Save changes to ${activePreset.title}`
+                                  : `Choose how to save ${activePreset.title}`
+                                : 'Choose how to save this preset'}
+                            </p>
+                            <p className="mt-1 text-xs text-amber-50/80">
+                              Override the imported preset or save the current values as a new preset entity.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-10 rounded-xl border-amber-200/40 bg-transparent text-amber-50 hover:bg-amber-300/10"
+                              disabled={isSavingEditPreset || isDeletingEditPreset}
+                              onClick={() => setShowPresetSaveChoices(false)}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-10 rounded-xl border-amber-200/40 bg-transparent text-amber-50 hover:bg-amber-300/10"
+                              disabled={isSavingEditPreset || isDeletingEditPreset}
+                              onClick={() => void overrideActivePreset()}
+                            >
+                              Override current preset
+                            </Button>
+                            <Button
+                              type="button"
+                              className="h-10 rounded-xl bg-linear-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600"
+                              disabled={isSavingEditPreset || isDeletingEditPreset}
+                              onClick={() => {
+                                setActivePreset(null);
+                                setSelectedPresetId('');
+                                void createPreset();
+                              }}
+                            >
+                              Save as new preset
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {presetError ? (
+                      <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                        {presetError}
+                      </div>
+                    ) : null}
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+
               <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">Current sound</p>
@@ -1065,7 +1543,7 @@ export function SoundEffectEditModal({
                 </div>
               </div>
 
-              <div className="mt-5 flex flex-col gap-4">
+              <div className="flex flex-col gap-4">
                 <Accordion type="single" collapsible className="w-full rounded-2xl border border-white/10 bg-white/5 px-4">
                   <AccordionItem value="trim" className="border-none">
                     <AccordionTrigger className="py-4 text-left text-white hover:no-underline">

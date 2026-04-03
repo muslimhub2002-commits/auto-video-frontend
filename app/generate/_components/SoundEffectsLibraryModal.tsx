@@ -186,7 +186,7 @@ export function SoundEffectsLibraryModal({
 
   const handleApply = () => {
     const selected = Object.values(selectedById);
-    onApply(selected);
+    onApply(selected)
     onClose();
   };
 

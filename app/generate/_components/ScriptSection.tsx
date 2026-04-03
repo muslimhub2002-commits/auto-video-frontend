@@ -62,6 +62,9 @@ interface ScriptSectionProps {
 }
 
 export function ScriptSection(props: ScriptSectionProps) {
+  const HERO_JOURNEY_TECHNIQUE = "Hero's Journey";
+  const DEFAULT_SCRIPT_TECHNIQUE = 'The Dance (Context, Conflict)';
+
   const {
     script,
     onScriptChange,
@@ -183,12 +186,53 @@ export function ScriptSection(props: ScriptSectionProps) {
   }, [scriptSubject, scriptSubjectContent, subjectContentPresetSet]);
 
   const isUsingReferences = (referenceScripts?.length ?? 0) > 0;
+  const supportsHeroJourney = useMemo(() => {
+    const match = scriptLength.trim().match(/^(\d+)\s+minute/);
+    return match ? Number(match[1]) >= 3 : false;
+  }, [scriptLength]);
+  const techniqueOptions = useMemo(() => {
+    const options = [
+      {
+        value: DEFAULT_SCRIPT_TECHNIQUE,
+        label: 'The Dance',
+      },
+      { value: 'Loss Aversion', label: 'Loss Aversion' },
+      { value: 'The Rhythm', label: 'The Rhythm' },
+      { value: 'Curiousity Loop', label: 'Curiousity Loop' },
+      {
+        value: 'Confrontation Technique',
+        label: 'Confrontation Technique',
+      },
+    ];
+
+    if (supportsHeroJourney) {
+      options.push({
+        value: HERO_JOURNEY_TECHNIQUE,
+        label: HERO_JOURNEY_TECHNIQUE,
+      });
+    }
+
+    return options;
+  }, [DEFAULT_SCRIPT_TECHNIQUE, HERO_JOURNEY_TECHNIQUE, supportsHeroJourney]);
 
   // Check if script config has changed (excluding model, length, and style)
   const hasConfigChanged =
     originalScriptSubject !== undefined &&
     (scriptSubject !== originalScriptSubject ||
       scriptSubjectContent !== originalScriptSubjectContent);
+
+  useEffect(() => {
+    if (supportsHeroJourney) return;
+    if (scriptTechnique !== HERO_JOURNEY_TECHNIQUE) return;
+
+    setScriptTechnique(DEFAULT_SCRIPT_TECHNIQUE);
+  }, [
+    DEFAULT_SCRIPT_TECHNIQUE,
+    HERO_JOURNEY_TECHNIQUE,
+    scriptTechnique,
+    setScriptTechnique,
+    supportsHeroJourney,
+  ]);
 
   const shouldShowEnhanceButton = script.trim().length > 0;
   const isEnhanceDisabled = hasSentences || hasConfigChanged || isEnhancingScript;
@@ -415,17 +459,11 @@ export function ScriptSection(props: ScriptSectionProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="The Dance (Context, Conflict)">
-                    The Dance
-                  </SelectItem>
-                  <SelectItem value="Loss Aversion">Loss Aversion</SelectItem>
-                  <SelectItem value="The Rhythm">The Rhythm</SelectItem>
-                  <SelectItem value="Curiousity Loop">
-                    Curiousity Loop
-                  </SelectItem>
-                  <SelectItem value="Confrontation Technique">
-                    Confrontation Technique
-                  </SelectItem>
+                  {techniqueOptions.map((technique) => (
+                    <SelectItem key={technique.value} value={technique.value}>
+                      {technique.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 
