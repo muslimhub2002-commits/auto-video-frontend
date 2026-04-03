@@ -95,7 +95,10 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t bg-white/50 backdrop-blur-sm dark:bg-gray-900/50">
         <div className="container mx-auto px-4 py-6 text-center text-sm text-gray-600 dark:text-gray-400">
-          © 2025 Auto Video Generator. All rights reserved.
+          © {new Date().getFullYear()} Auto Video Generator. All rights reserved.{' '}
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-primary">Privacy Policy</Link>
+          {' · '}
+          <Link href="/terms" className="underline underline-offset-2 hover:text-primary">Terms of Service</Link>
         </div>
       </footer>
     </div>

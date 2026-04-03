@@ -9,9 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users, Music2, Clapperboard, MapPin } from 'lucide-react';
+import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users, Music2, Clapperboard, MapPin, RotateCcw } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
+import { AlertDialog } from '@/components/ui/alert-dialog';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
 import { CharactersModal } from './CharactersModal';
 import { LocationsModal, type ScriptLocation } from './LocationsModal';
@@ -39,8 +40,10 @@ type SceneEditorSectionProps = {
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
   isApplyingBulkLookEffects?: boolean;
   onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
+  onResetBulkLookEffects?: () => void;
   isApplyingBulkMotionEffects?: boolean;
   onGenerateBulkMotionEffects?: (() => void) | (() => Promise<void>);
+  onResetBulkMotionEffects?: () => void;
 
   onSelectVideoFromLibrary?: (index: number) => void;
 
@@ -754,8 +757,10 @@ export function SceneEditorSection({
   onGenerateAllImages,
   isApplyingBulkLookEffects = false,
   onGenerateBulkLookEffects,
+  onResetBulkLookEffects,
   isApplyingBulkMotionEffects = false,
   onGenerateBulkMotionEffects,
+  onResetBulkMotionEffects,
 
   onSelectVideoFromLibrary,
 
@@ -850,6 +855,7 @@ export function SceneEditorSection({
 
   const [isCharactersModalOpen, setIsCharactersModalOpen] = useState(false);
   const [isLocationsModalOpen, setIsLocationsModalOpen] = useState(false);
+  const [pendingReset, setPendingReset] = useState<'look' | 'motion' | null>(null);
 
   const completeCount = useMemo(
     () =>
@@ -970,52 +976,99 @@ export function SceneEditorSection({
                 </>
               )}
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onGenerateBulkLookEffects}
-              disabled={!onGenerateBulkLookEffects || isApplyingBulkLookEffects}
-              className="gap-2 h-10 px-4 border-fuchsia-200 bg-white text-fuchsia-700 hover:bg-fuchsia-50 hover:border-fuchsia-300 shadow-sm hover:shadow transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-              title="Use AI to apply random look settings to eligible image scenes"
-            >
-              {isApplyingBulkLookEffects ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm font-semibold">Applying Look...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4" />
-                  <span className="text-sm font-semibold">AI Look</span>
-                </>
-              )}
-            </Button>
+            <div className="flex h-10 overflow-hidden rounded-lg border border-fuchsia-200 bg-white shadow-sm transition-all hover:shadow">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={onGenerateBulkLookEffects}
+                disabled={!onGenerateBulkLookEffects || isApplyingBulkLookEffects}
+                className="h-full gap-2 rounded-none px-4 text-fuchsia-700 hover:bg-fuchsia-50 hover:text-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-70"
+                title="Use AI to apply look settings to all eligible image scenes"
+              >
+                {isApplyingBulkLookEffects ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-sm font-semibold">Applying Look...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    <span className="text-sm font-semibold">AI Look</span>
+                  </>
+                )}
+              </Button>
+              <div className="my-1.5 w-px bg-fuchsia-200" />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setPendingReset('look')}
+                disabled={!onResetBulkLookEffects || isApplyingBulkLookEffects}
+                className="h-full w-9 rounded-none p-0 text-fuchsia-400 hover:bg-fuchsia-50 hover:text-fuchsia-600 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Reset all image look effects to none"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
 
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onGenerateBulkMotionEffects}
-              disabled={!onGenerateBulkMotionEffects || isApplyingBulkMotionEffects}
-              className="gap-2 h-10 px-4 border-sky-200 bg-white text-sky-700 hover:bg-sky-50 hover:border-sky-300 shadow-sm hover:shadow transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-              title="Use AI to apply random motion settings to eligible image scenes"
-            >
-              {isApplyingBulkMotionEffects ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm font-semibold">Applying Motion...</span>
-                </>
-              ) : (
-                <>
-                  <Clapperboard className="h-4 w-4" />
-                  <span className="text-sm font-semibold">AI Motion</span>
-                </>
-              )}
-            </Button>
+            <div className="flex h-10 overflow-hidden rounded-lg border border-sky-200 bg-white shadow-sm transition-all hover:shadow">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={onGenerateBulkMotionEffects}
+                disabled={!onGenerateBulkMotionEffects || isApplyingBulkMotionEffects}
+                className="h-full gap-2 rounded-none px-4 text-sky-700 hover:bg-sky-50 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
+                title="Use AI to apply motion settings to all eligible image scenes"
+              >
+                {isApplyingBulkMotionEffects ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-sm font-semibold">Applying Motion...</span>
+                  </>
+                ) : (
+                  <>
+                    <Clapperboard className="h-4 w-4" />
+                    <span className="text-sm font-semibold">AI Motion</span>
+                  </>
+                )}
+              </Button>
+              <div className="my-1.5 w-px bg-sky-200" />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setPendingReset('motion')}
+                disabled={!onResetBulkMotionEffects || isApplyingBulkMotionEffects}
+                className="h-full w-9 rounded-none p-0 text-sky-400 hover:bg-sky-50 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Reset all image motion effects to default scale"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        isOpen={pendingReset !== null}
+        onClose={() => setPendingReset(null)}
+        onConfirm={() => {
+          if (pendingReset === 'look') onResetBulkLookEffects?.();
+          if (pendingReset === 'motion') onResetBulkMotionEffects?.();
+          setPendingReset(null);
+        }}
+        variant="warning"
+        title={pendingReset === 'look' ? 'Reset all look effects?' : 'Reset all motion effects?'}
+        description={
+          pendingReset === 'look'
+            ? `This will remove the look effect (color grading, lighting, etc.) from all ${sentences.length} scenes and set them back to none. This cannot be undone.`
+            : `This will reset the motion effect on all ${sentences.length} scenes back to the default scale. This cannot be undone.`
+        }
+        confirmText={pendingReset === 'look' ? 'Reset Look' : 'Reset Motion'}
+        cancelText="Keep Current"
+      />
 
       <CharactersModal
         isOpen={isCharactersModalOpen}

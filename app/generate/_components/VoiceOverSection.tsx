@@ -22,9 +22,15 @@ import { Mic, Upload, X, Sparkles, Loader2, Play, Library, SlidersHorizontal, St
 interface VoiceOverSectionProps {
   script: string;
   voiceOver: File | null;
+  voicePreviewUrl?: string | null;
   voiceDuration: number | null;
   voiceError: string | null;
   isGeneratingVoice: boolean;
+  voiceGenerationProgress?: {
+    stage: 'generating' | 'merging';
+    current: number;
+    total: number;
+  } | null;
   isPreviewingVoice?: boolean;
   isSavingVoice: boolean;
   savedVoiceId: string | null;
@@ -59,9 +65,11 @@ interface VoiceOverSectionProps {
 export function VoiceOverSection({
   script,
   voiceOver,
+  voicePreviewUrl,
   voiceDuration,
   voiceError,
   isGeneratingVoice,
+  voiceGenerationProgress,
   isPreviewingVoice,
   isSavingVoice,
   savedVoiceId,
@@ -90,6 +98,8 @@ export function VoiceOverSection({
   const selectedVoice = voices.find((v) => v.voice_id === selectedVoiceId) || null;
   const providerLabel = voiceProvider === 'google' ? 'AI Studio' : 'ElevenLabs';
   const haveStyleInstructions = Boolean(String(styleInstructions ?? '').trim());
+  const hasVoiceSelection = Boolean(voiceOver || String(voicePreviewUrl ?? '').trim());
+  const resolvedVoiceName = voiceOver?.name || (savedVoiceId ? 'Library voice-over' : 'Saved voice-over');
   const [isGeneratingStyle, setIsGeneratingStyle] = useState(false);
   const [styleGenError, setStyleGenError] = useState<string | null>(null);
 
@@ -246,6 +256,20 @@ export function VoiceOverSection({
     !canPreview ||
     Boolean(isPreviewingVoice) ||
     Boolean(isSettingFavoriteVoice);
+  const generateVoiceLabel = isGeneratingVoice
+    ? voiceGenerationProgress?.stage === 'merging'
+      ? `Merging ${voiceGenerationProgress.total} parts...`
+      : voiceGenerationProgress && voiceGenerationProgress.total > 1
+        ? `Generating part ${voiceGenerationProgress.current}/${voiceGenerationProgress.total}...`
+        : `Generating voice with ${providerLabel}...`
+    : `Generate with ${providerLabel}`;
+  const regenerateVoiceLabel = isGeneratingVoice
+    ? voiceGenerationProgress?.stage === 'merging'
+      ? `Merging ${voiceGenerationProgress.total} parts...`
+      : voiceGenerationProgress && voiceGenerationProgress.total > 1
+        ? `Generating part ${voiceGenerationProgress.current}/${voiceGenerationProgress.total}...`
+        : 'Generating...'
+    : 'Regenerate';
 
   return (
     <AccordionItem value="voice" className="px-6">
@@ -271,7 +295,7 @@ export function VoiceOverSection({
               Audio Configuration
             </h4>
 
-            {!voiceOver ? (
+            {!hasVoiceSelection ? (
               <div className="space-y-4">
                 {/* Provider toggle */}
                 <div className="bg-white rounded-xl border border-purple-200 p-6 space-y-4 shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -677,12 +701,12 @@ export function VoiceOverSection({
                   {isGeneratingVoice ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Generating voice with {providerLabel}...
+                      {generateVoiceLabel}
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-4 w-4" />
-                      Generate with {providerLabel}
+                      {generateVoiceLabel}
                     </>
                   )}
                 </Button>
@@ -706,7 +730,7 @@ export function VoiceOverSection({
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{voiceOver.name}</p>
+                        <p className="text-sm font-semibold text-gray-900 truncate">{resolvedVoiceName}</p>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-medium rounded-full shrink-0">
                           <div className="h-1.5 w-1.5 rounded-full bg-green-500"></div>
                           Ready
@@ -714,10 +738,12 @@ export function VoiceOverSection({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                        <div className="flex items-center gap-1">
-                          <div className="h-1 w-1 rounded-full bg-gray-400"></div>
-                          <span>{(voiceOver.size / 1024 / 1024).toFixed(2)} MB</span>
-                        </div>
+                        {voiceOver ? (
+                          <div className="flex items-center gap-1">
+                            <div className="h-1 w-1 rounded-full bg-gray-400"></div>
+                            <span>{(voiceOver.size / 1024 / 1024).toFixed(2)} MB</span>
+                          </div>
+                        ) : null}
                         {voiceDuration && (
                           <div className="flex items-center gap-1">
                             <div className="h-1 w-1 rounded-full bg-gray-400"></div>
@@ -730,7 +756,7 @@ export function VoiceOverSection({
                       <div className="mt-3">
                         <audio
                           controls
-                          src={URL.createObjectURL(voiceOver)}
+                          src={voicePreviewUrl ?? undefined}
                           className="w-full h-8"
                           style={{ maxWidth: '100%' }}
                         />
@@ -802,7 +828,7 @@ export function VoiceOverSection({
                     className="flex-1 gap-1.5 text-xs border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
                   >
                     <Sparkles className="h-3 w-3" />
-                    Regenerate
+                    {regenerateVoiceLabel}
                   </Button>
                 </div>
               </div>

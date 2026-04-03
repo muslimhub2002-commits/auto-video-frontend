@@ -86,8 +86,10 @@ type SentencesImagesSectionProps = {
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
   isApplyingBulkLookEffects?: boolean;
   onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
+  onResetBulkLookEffects?: () => void;
   isApplyingBulkMotionEffects?: boolean;
   onGenerateBulkMotionEffects?: (() => void) | (() => Promise<void>);
+  onResetBulkMotionEffects?: () => void;
 
   imageAspectRatio: '16:9' | '9:16' | '1:1';
   onImageAspectRatioChange: (value: '16:9' | '9:16' | '1:1') => void;
@@ -278,8 +280,10 @@ export function SentencesImagesSection({
   onGenerateAllImages,
   isApplyingBulkLookEffects = false,
   onGenerateBulkLookEffects,
+  onResetBulkLookEffects,
   isApplyingBulkMotionEffects = false,
   onGenerateBulkMotionEffects,
+  onResetBulkMotionEffects,
 
   isLongForm = false,
   shortsTabs = [],
@@ -674,8 +678,10 @@ export function SentencesImagesSection({
               onGenerateAllImages={onGenerateAllImages}
               isApplyingBulkLookEffects={isApplyingBulkLookEffects}
               onGenerateBulkLookEffects={onGenerateBulkLookEffects}
+              onResetBulkLookEffects={onResetBulkLookEffects}
               isApplyingBulkMotionEffects={isApplyingBulkMotionEffects}
               onGenerateBulkMotionEffects={onGenerateBulkMotionEffects}
+              onResetBulkMotionEffects={onResetBulkMotionEffects}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
               videoModel={videoModel}
 

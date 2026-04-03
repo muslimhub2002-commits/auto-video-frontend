@@ -89,7 +89,7 @@ export function AlertDialog({
 
   return (
     <div
-      className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-70 min-h-full flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
       onClick={() => {
         if (!isLoading) onClose();
       }}

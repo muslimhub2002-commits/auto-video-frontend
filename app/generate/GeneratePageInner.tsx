@@ -512,10 +512,12 @@ type ScriptDraftDto = {
   script: string;
   language?: string | null;
   video_url?: string | null;
+  voice_over_chunks?: ScriptVoiceOverChunkDto[] | null;
   shorts_scripts?: string[] | null;
   short_scripts?: Array<{
     id: string;
     video_url?: string | null;
+    voice_over_chunks?: ScriptVoiceOverChunkDto[] | null;
     sentences?: BackendSentenceDto[];
     voice?: { id: string; voice: string } | null;
   }>;
@@ -533,6 +535,8 @@ type ScriptDraftDto = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ||
   'http://localhost:3000';
+
+const LONG_LOCAL_RENDER_THRESHOLD_SECONDS = 10 * 60;
 
 const CTA_SENTENCES_BY_LANGUAGE: Record<
   string,
@@ -693,6 +697,293 @@ function extensionFromAudioMimeType(mimeTypeRaw: string): string {
   }
 }
 
+async function readErrorMessageFromResponse(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  const raw = await response.text().catch(() => '');
+  if (!raw.trim()) return fallback;
+
+  try {
+    const parsed = JSON.parse(raw) as { message?: unknown };
+    if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+    if (Array.isArray(parsed?.message)) {
+      const first = parsed.message.find(
+        (value): value is string => typeof value === 'string' && value.trim().length > 0,
+      );
+      if (first) return first.trim();
+    }
+  } catch {
+    // ignore JSON parse errors
+  }
+
+  return raw.trim() || fallback;
+}
+
+function normalizeApiBaseUrl(value: string): string {
+  return String(value ?? '').trim().replace(/\/+$/u, '');
+}
+
+function isBackendStaticUrl(url: string): boolean {
+  const trimmed = String(url ?? '').trim();
+  if (!trimmed) return false;
+
+  const apiBase = normalizeApiBaseUrl(API_URL);
+  return trimmed.startsWith('/static/') || trimmed.startsWith(`${apiBase}/static/`);
+}
+
+function filenameFromUrl(value: string, fallback: string): string {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return fallback;
+
+  try {
+    const parsed = new URL(trimmed, window.location.origin);
+    const candidate = parsed.pathname.split('/').pop();
+    return candidate && candidate.trim() ? candidate.trim() : fallback;
+  } catch {
+    const candidate = trimmed.split('?')[0]?.split('/').pop();
+    return candidate && candidate.trim() ? candidate.trim() : fallback;
+  }
+}
+
+async function downloadUrlAsFile(url: string, fallbackName: string): Promise<File> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download asset from ${url}`);
+  }
+
+  const blob = await response.blob();
+  return new File([blob], filenameFromUrl(url, fallbackName), {
+    type: blob.type || 'application/octet-stream',
+  });
+}
+
+const VOICE_ESTIMATED_WPM = 150;
+const VOICE_SPLIT_THRESHOLD_SECONDS = 150;
+const VOICE_TARGET_CHUNK_SECONDS = 135;
+const VOICE_MAX_SENTENCE_CHARS = 560;
+
+type PlannedVoiceChunk = {
+  index: number;
+  sentences: string[];
+  script: string;
+  estimatedSeconds: number;
+};
+
+type VoiceProvider = 'google' | 'elevenlabs';
+
+type ScriptVoiceOverChunkDto = {
+  index: number;
+  text: string;
+  sentences: string[];
+  provider: VoiceProvider | string | null;
+  mimeType: string | null;
+  durationSeconds: number | null;
+  estimatedSeconds: number | null;
+  url: string;
+  fileName?: string | null;
+  createdAt?: string | null;
+};
+
+type VoiceOverChunkState = {
+  index: number;
+  text: string;
+  sentences: string[];
+  provider: VoiceProvider | string | null;
+  mimeType: string | null;
+  durationSeconds: number | null;
+  estimatedSeconds: number | null;
+  url: string | null;
+  fileName: string | null;
+  createdAt: string | null;
+  sourceFile: File | null;
+};
+
+type GeneratedVoiceFileResult = {
+  file: File;
+  durationSeconds: number | null;
+  mimeType: string;
+  chunks: VoiceOverChunkState[];
+};
+
+type VoiceGenerationProgress = {
+  stage: 'generating' | 'merging';
+  current: number;
+  total: number;
+};
+
+const mergeVoiceSentenceTexts = (items: string[]) => {
+  return items
+    .map((s) => String(s ?? '').trim())
+    .filter(Boolean)
+    .map((s) => (/[.!?]$/u.test(s) ? s : `${s}.`))
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+};
+
+const countVoiceWords = (value: string) =>
+  String(value ?? '')
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean).length;
+
+const estimateVoiceDurationSeconds = (value: string) =>
+  Math.max(1, Math.round((countVoiceWords(value) * 60) / VOICE_ESTIMATED_WPM));
+
+const splitLongVoiceSentence = (value: string, maxChars = VOICE_MAX_SENTENCE_CHARS): string[] => {
+  const text = String(value ?? '').trim();
+  if (!text) return [];
+  if (text.length <= maxChars) return [text];
+
+  const out: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxChars) {
+    let cutIndex = remaining.lastIndexOf(' ', maxChars);
+    if (cutIndex < Math.floor(maxChars * 0.6)) {
+      const forwardCut = remaining.indexOf(' ', maxChars);
+      cutIndex = forwardCut === -1 ? maxChars : forwardCut;
+    }
+
+    const segment = remaining.slice(0, cutIndex).trim();
+    if (segment) out.push(segment);
+    remaining = remaining.slice(cutIndex).trim();
+  }
+
+  if (remaining) out.push(remaining);
+  return out;
+};
+
+const splitScriptIntoVoiceSentences = (value: string): string[] => {
+  const normalized = String(value ?? '').replace(/\r\n?/gu, '\n').trim();
+  if (!normalized) return [];
+
+  const blocks = normalized
+    .split(/\n+/u)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const sentenceRegex = /[^.!?\n]+(?:[.!?]+(?:["')\]]+)?(?=\s|$)|$)/gu;
+  const out: string[] = [];
+
+  for (const block of blocks) {
+    const matches = block.match(sentenceRegex) ?? [block];
+    for (const match of matches) {
+      const candidate = match.trim();
+      if (!candidate) continue;
+      out.push(...splitLongVoiceSentence(candidate));
+    }
+  }
+
+  return out;
+};
+
+const normalizeVoiceSentencesForChunking = (sentences: string[], fallbackScript: string): string[] => {
+  const baseSentences = sentences
+    .map((sentence) => String(sentence ?? '').trim())
+    .filter(Boolean);
+
+  const rawSentences = baseSentences.length > 0
+    ? baseSentences
+    : splitScriptIntoVoiceSentences(fallbackScript);
+
+  return rawSentences.flatMap((sentence) => splitLongVoiceSentence(sentence));
+};
+
+const buildPlannedVoiceChunks = (params: {
+  sentenceTexts: string[];
+  fallbackScript: string;
+}): PlannedVoiceChunk[] => {
+  const sentences = normalizeVoiceSentencesForChunking(
+    params.sentenceTexts,
+    params.fallbackScript,
+  );
+
+  if (sentences.length === 0) {
+    return [];
+  }
+
+  const fullScript = mergeVoiceSentenceTexts(sentences);
+  const estimatedFullDuration = estimateVoiceDurationSeconds(fullScript);
+  if (estimatedFullDuration <= VOICE_SPLIT_THRESHOLD_SECONDS) {
+    return [
+      {
+        index: 0,
+        sentences,
+        script: fullScript,
+        estimatedSeconds: estimatedFullDuration,
+      },
+    ];
+  }
+
+  const chunks: PlannedVoiceChunk[] = [];
+  let currentSentences: string[] = [];
+  let currentEstimatedSeconds = 0;
+
+  for (const sentence of sentences) {
+    const sentenceEstimatedSeconds = estimateVoiceDurationSeconds(sentence);
+    const wouldOverflow =
+      currentSentences.length > 0 &&
+      currentEstimatedSeconds + sentenceEstimatedSeconds > VOICE_TARGET_CHUNK_SECONDS;
+
+    if (wouldOverflow) {
+      chunks.push({
+        index: chunks.length,
+        sentences: currentSentences,
+        script: mergeVoiceSentenceTexts(currentSentences),
+        estimatedSeconds: currentEstimatedSeconds,
+      });
+      currentSentences = [];
+      currentEstimatedSeconds = 0;
+    }
+
+    currentSentences.push(sentence);
+    currentEstimatedSeconds += sentenceEstimatedSeconds;
+  }
+
+  if (currentSentences.length > 0) {
+    chunks.push({
+      index: chunks.length,
+      sentences: currentSentences,
+      script: mergeVoiceSentenceTexts(currentSentences),
+      estimatedSeconds: currentEstimatedSeconds,
+    });
+  }
+
+  return chunks;
+};
+
+const cloneVoiceOverChunks = (chunks: VoiceOverChunkState[]) =>
+  Array.isArray(chunks)
+    ? chunks.map((chunk) => ({
+        ...chunk,
+        sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+      }))
+    : [];
+
+const toVoiceOverChunkState = (
+  chunk: ScriptVoiceOverChunkDto,
+  sourceFile: File | null = null,
+): VoiceOverChunkState => ({
+  index: Number(chunk.index ?? 0),
+  text: String(chunk.text ?? '').trim(),
+  sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+  provider: normalizeVoiceProvider(chunk.provider),
+  mimeType: chunk.mimeType,
+  durationSeconds: chunk.durationSeconds,
+  estimatedSeconds: chunk.estimatedSeconds,
+  url: String(chunk.url ?? '').trim() || null,
+  fileName: chunk.fileName ?? null,
+  createdAt: chunk.createdAt ?? null,
+  sourceFile,
+});
+
+const normalizeVoiceProvider = (value: string | null | undefined): VoiceProvider =>
+  value === 'elevenlabs' ? 'elevenlabs' : 'google';
+
 async function sha256HexForFile(file: File): Promise<string | null> {
   try {
     const subtle = globalThis.crypto?.subtle;
@@ -729,8 +1020,6 @@ type TransitionSoundDraftItem = NonNullable<SentenceItem['transitionSoundEffects
 type SentenceImageSlot = 'primary' | 'secondary';
 
 export function GeneratePageInner() {
-  type VoiceProvider = 'google' | 'elevenlabs';
-
   const IMAGE_STYLE_PRESETS = [
     {
       key: 'anime',
@@ -807,10 +1096,13 @@ export function GeneratePageInner() {
   const [videoModel, setVideoModel] = useState<'gemini' | 'grok'>('gemini');
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
+  const [voiceOverChunks, setVoiceOverChunks] = useState<VoiceOverChunkState[]>([]);
   const [voiceDuration, setVoiceDuration] = useState<number | null>(null);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
   const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceGenerationProgress, setVoiceGenerationProgress] =
+    useState<VoiceGenerationProgress | null>(null);
   const [isSavingVoice, setIsSavingVoice] = useState(false);
   const [savedVoiceId, setSavedVoiceId] = useState<string | null>(null);
   const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>('google');
@@ -991,6 +1283,7 @@ export function GeneratePageInner() {
     scriptId: string | null;
     sentences: SentenceItem[];
     voiceOver: File | null;
+    voiceOverChunks: VoiceOverChunkState[];
     voiceDuration: number | null;
     savedVoiceId: string | null;
     voiceLibraryUrl: string | null;
@@ -1081,6 +1374,7 @@ export function GeneratePageInner() {
       scriptId: activeScriptId,
       sentences,
       voiceOver,
+      voiceOverChunks: cloneVoiceOverChunks(voiceOverChunks),
       voiceDuration,
       savedVoiceId,
       voiceLibraryUrl,
@@ -1097,6 +1391,7 @@ export function GeneratePageInner() {
       sentences: Array.isArray(snapshot.sentences)
         ? snapshot.sentences.map((s) => ({ ...s }))
         : [],
+      voiceOverChunks: cloneVoiceOverChunks(snapshot.voiceOverChunks),
     };
   };
 
@@ -1104,6 +1399,7 @@ export function GeneratePageInner() {
     setActiveScriptId(snapshot.scriptId);
     setSentences(snapshot.sentences);
     setVoiceOver(snapshot.voiceOver);
+    setVoiceOverChunks(cloneVoiceOverChunks(snapshot.voiceOverChunks));
     setVoiceDuration(snapshot.voiceDuration);
     setSavedVoiceId(snapshot.savedVoiceId);
     setVoiceLibraryUrl(snapshot.voiceLibraryUrl);
@@ -1254,6 +1550,7 @@ export function GeneratePageInner() {
         scriptId: existingScriptId,
         sentences: cloned,
         voiceOver: null,
+        voiceOverChunks: [],
         voiceDuration: null,
         savedVoiceId: null,
         voiceLibraryUrl: null,
@@ -1379,6 +1676,327 @@ export function GeneratePageInner() {
       });
       audio.addEventListener('error', () => finalize(null));
     });
+  };
+
+  const getAudioDurationSecondsFromUrl = async (
+    sourceUrl: string,
+  ): Promise<number | null> => {
+    const trimmed = String(sourceUrl ?? '').trim();
+    if (!trimmed) return null;
+
+    return new Promise((resolve) => {
+      const audio = new Audio(trimmed);
+      const finalize = (value: number | null) => resolve(value);
+
+      audio.addEventListener('loadedmetadata', () => {
+        if (!Number.isNaN(audio.duration) && audio.duration > 0) {
+          finalize(audio.duration);
+          return;
+        }
+
+        finalize(null);
+      });
+      audio.addEventListener('error', () => finalize(null));
+    });
+  };
+
+  const parseVoiceResponseToFile = async (params: {
+    response: Response;
+    provider: VoiceProvider;
+    fallbackBaseName: string;
+  }) => {
+    const arrayBuffer = await params.response.arrayBuffer();
+    const contentType = params.response.headers.get('content-type');
+    const disposition = params.response.headers.get('content-disposition');
+
+    const fallbackMime = params.provider === 'google' ? 'audio/wav' : 'audio/mpeg';
+    const mimeType = String(contentType ?? '').trim() || fallbackMime;
+    const headerFilename = filenameFromContentDisposition(disposition);
+    const extFromMime = extensionFromAudioMimeType(mimeType);
+    const defaultExt = params.provider === 'google' ? 'wav' : 'mp3';
+    const fileName =
+      headerFilename ||
+      `${params.fallbackBaseName}.${extFromMime || defaultExt}`;
+
+    const blob = new Blob([arrayBuffer], { type: mimeType });
+    const file = new File([blob], fileName, { type: mimeType });
+    const durationSeconds = await getAudioDurationSeconds(file);
+
+    return { file, durationSeconds, mimeType };
+  };
+
+  const requestGeneratedVoiceFile = async (params: {
+    scriptForVoice: string;
+    sentencesForVoice?: string[];
+    voiceId: string;
+    provider: VoiceProvider;
+    styleInstructions?: string;
+    fallbackBaseName: string;
+    errorMessage: string;
+  }) => {
+    const response = await fetch(`${API_URL}/ai/generate-voice`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        script: params.scriptForVoice,
+        sentences:
+          Array.isArray(params.sentencesForVoice) && params.sentencesForVoice.length > 0
+            ? params.sentencesForVoice
+            : undefined,
+        voiceId: params.voiceId,
+        styleInstructions: params.styleInstructions,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        await readErrorMessageFromResponse(response, params.errorMessage),
+      );
+    }
+
+    return parseVoiceResponseToFile({
+      response,
+      provider: params.provider,
+      fallbackBaseName: params.fallbackBaseName,
+    });
+  };
+
+  const mergeGeneratedVoiceChunks = async (params: {
+    files: File[];
+    provider: VoiceProvider;
+    fallbackBaseName: string;
+  }) => {
+    const formData = new FormData();
+    for (const file of params.files) {
+      formData.append('audioChunks', file, file.name);
+    }
+    formData.append('outputFormat', 'mp3');
+
+    const response = await fetch(`${API_URL}/ai/merge-voice-chunks`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        await readErrorMessageFromResponse(
+          response,
+          'Failed to merge generated voice chunks.',
+        ),
+      );
+    }
+
+    return parseVoiceResponseToFile({
+      response,
+      provider: params.provider,
+      fallbackBaseName: params.fallbackBaseName,
+    });
+  };
+
+  const persistVoiceOverChunksToCloudinary = async (
+    chunks: VoiceOverChunkState[],
+  ): Promise<ScriptVoiceOverChunkDto[] | null> => {
+    if (!Array.isArray(chunks) || chunks.length <= 1) {
+      return null;
+    }
+
+    const orderedChunks = [...chunks].sort((left, right) => left.index - right.index);
+    const persisted = await mapWithConcurrency(orderedChunks, 2, async (chunk) => {
+      let chunkUrl = String(chunk.url ?? '').trim();
+      if (!chunkUrl) {
+        if (!chunk.sourceFile) {
+          throw new Error('A generated voice chunk is missing its audio file. Please regenerate the voice-over.');
+        }
+
+        chunkUrl = await uploadToCloudinaryUnsigned(chunk.sourceFile, {
+          resourceType: 'video',
+          folder: 'auto-video-generator/voice-chunks',
+        });
+      }
+
+      return {
+        index: chunk.index,
+        text: chunk.text,
+        sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+        provider: normalizeVoiceProvider(chunk.provider),
+        mimeType: chunk.mimeType,
+        durationSeconds: chunk.durationSeconds,
+        estimatedSeconds: chunk.estimatedSeconds,
+        url: chunkUrl,
+        fileName: chunk.fileName,
+        createdAt: chunk.createdAt,
+      } satisfies ScriptVoiceOverChunkDto;
+    });
+
+    return persisted;
+  };
+
+  const rebuildVoiceOverFromSavedChunks = async (params: {
+    chunks?: ScriptVoiceOverChunkDto[] | null;
+    fallbackBaseName: string;
+  }): Promise<GeneratedVoiceFileResult | null> => {
+    const orderedChunks = Array.isArray(params.chunks)
+      ? [...params.chunks]
+          .filter((chunk) => String(chunk?.url ?? '').trim())
+          .sort((left, right) => Number(left.index ?? 0) - Number(right.index ?? 0))
+      : [];
+
+    if (orderedChunks.length === 0) {
+      return null;
+    }
+
+    const files = await Promise.all(
+      orderedChunks.map((chunk, index) =>
+        downloadUrlAsFile(
+          chunk.url,
+          chunk.fileName || `${params.fallbackBaseName}-part-${index + 1}.mp3`,
+        ),
+      ),
+    );
+
+    const normalizedChunks: VoiceOverChunkState[] = orderedChunks.map((chunk) => ({
+      index: Number(chunk.index ?? 0),
+      text: String(chunk.text ?? '').trim(),
+      sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+      provider: normalizeVoiceProvider(chunk.provider),
+      mimeType: chunk.mimeType,
+      durationSeconds: chunk.durationSeconds,
+      estimatedSeconds: chunk.estimatedSeconds,
+      url: String(chunk.url ?? '').trim() || null,
+      fileName: chunk.fileName ?? null,
+      createdAt: chunk.createdAt ?? null,
+      sourceFile: null,
+    }));
+
+    if (files.length === 1) {
+      const [file] = files;
+      return {
+        file,
+        durationSeconds: await getAudioDurationSeconds(file),
+        mimeType: file.type || normalizedChunks[0]?.mimeType || 'audio/mpeg',
+        chunks: normalizedChunks,
+      };
+    }
+
+    const merged = await mergeGeneratedVoiceChunks({
+      files,
+      provider: normalizeVoiceProvider(orderedChunks[0]?.provider),
+      fallbackBaseName: params.fallbackBaseName,
+    });
+
+    return {
+      ...merged,
+      chunks: normalizedChunks,
+    };
+  };
+
+  const generateVoiceFileWithChunkSupport = async (params: {
+    sentenceTexts?: string[];
+    scriptText: string;
+    voiceId: string;
+    provider: VoiceProvider;
+    styleInstructions?: string;
+    fallbackBaseName: string;
+    onProgress?: (progress: VoiceGenerationProgress | null) => void;
+    errorLabel?: string;
+  }): Promise<GeneratedVoiceFileResult> => {
+    const chunks = buildPlannedVoiceChunks({
+      sentenceTexts: params.sentenceTexts ?? [],
+      fallbackScript: params.scriptText,
+    });
+
+    if (chunks.length === 0) {
+      throw new Error('No script text is available for voice generation.');
+    }
+
+    if (chunks.length === 1) {
+      params.onProgress?.({ stage: 'generating', current: 1, total: 1 });
+      const result = await requestGeneratedVoiceFile({
+        scriptForVoice: chunks[0].script,
+        sentencesForVoice: chunks[0].sentences,
+        voiceId: params.voiceId,
+        provider: params.provider,
+        styleInstructions: params.styleInstructions,
+        fallbackBaseName: params.fallbackBaseName,
+        errorMessage: params.errorLabel || 'Failed to generate voice.',
+      });
+      params.onProgress?.(null);
+      return {
+        ...result,
+        chunks: [
+          {
+            index: chunks[0].index,
+            text: chunks[0].script,
+            sentences: [...chunks[0].sentences],
+            provider: params.provider,
+            mimeType: result.mimeType,
+            durationSeconds: result.durationSeconds,
+            estimatedSeconds: chunks[0].estimatedSeconds,
+            url: null,
+            fileName: result.file.name,
+            createdAt: new Date().toISOString(),
+            sourceFile: result.file,
+          },
+        ],
+      };
+    }
+
+    const generatedFiles: File[] = [];
+    const generatedChunks: VoiceOverChunkState[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
+      params.onProgress?.({
+        stage: 'generating',
+        current: index + 1,
+        total: chunks.length,
+      });
+
+      const generated = await requestGeneratedVoiceFile({
+        scriptForVoice: chunk.script,
+        sentencesForVoice: chunk.sentences,
+        voiceId: params.voiceId,
+        provider: params.provider,
+        styleInstructions: params.styleInstructions,
+        fallbackBaseName: `${params.fallbackBaseName}-part-${index + 1}`,
+        errorMessage:
+          params.errorLabel ||
+          `Failed to generate voice chunk ${index + 1} of ${chunks.length}.`,
+      });
+      generatedFiles.push(generated.file);
+      generatedChunks.push({
+        index: chunk.index,
+        text: chunk.script,
+        sentences: [...chunk.sentences],
+        provider: params.provider,
+        mimeType: generated.mimeType,
+        durationSeconds: generated.durationSeconds,
+        estimatedSeconds: chunk.estimatedSeconds,
+        url: null,
+        fileName: generated.file.name,
+        createdAt: new Date().toISOString(),
+        sourceFile: generated.file,
+      });
+    }
+
+    params.onProgress?.({
+      stage: 'merging',
+      current: chunks.length,
+      total: chunks.length,
+    });
+
+    const merged = await mergeGeneratedVoiceChunks({
+      files: generatedFiles,
+      provider: params.provider,
+      fallbackBaseName: params.fallbackBaseName,
+    });
+
+    params.onProgress?.(null);
+    return {
+      ...merged,
+      chunks: generatedChunks,
+    };
   };
 
   const resolveBackgroundMusicSrcForRender = (): string | undefined => {
@@ -1550,15 +2168,78 @@ export function GeneratePageInner() {
     return imageUploads;
   };
 
-  const resolveRenderAudioUrl = async () => {
+  const shouldUseLocalRenderTransport = () => {
+    if (voiceDuration && voiceDuration > 0) {
+      return voiceDuration > LONG_LOCAL_RENDER_THRESHOLD_SECONDS;
+    }
+
+    return estimateSecondsForText(script) > LONG_LOCAL_RENDER_THRESHOLD_SECONDS;
+  };
+
+  const stageRenderAssetLocally = async (
+    file: File,
+    kind: 'audio' | 'image',
+  ): Promise<string> => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('kind', kind);
+
+    const response = await fetch(`${API_URL}/videos/stage-local-asset`, {
+      method: 'POST',
+      body: form,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        await readErrorMessageFromResponse(
+          response,
+          'Failed to stage render asset locally.',
+        ),
+      );
+    }
+
+    const data = (await response.json()) as { url?: string };
+    const url = String(data?.url ?? '').trim();
+    if (!url) {
+      throw new Error('Failed to stage render asset locally: missing URL');
+    }
+
+    return url;
+  };
+
+  const resolveRenderAudioUrl = async (preferLocalTransport = false) => {
     const persistedUrl = String(voiceLibraryUrl ?? '').trim();
-    if (persistedUrl) {
+    if (persistedUrl && !preferLocalTransport) {
       return persistedUrl;
     }
 
     const previewUrl = String(voiceOverPreviewUrl ?? '').trim();
-    if (/^https?:\/\//i.test(previewUrl)) {
+    if (/^https?:\/\//i.test(previewUrl) && !preferLocalTransport) {
       return previewUrl;
+    }
+
+    if (preferLocalTransport) {
+      if (persistedUrl && isBackendStaticUrl(persistedUrl)) {
+        return persistedUrl;
+      }
+
+      if (previewUrl && isBackendStaticUrl(previewUrl)) {
+        return previewUrl;
+      }
+
+      if (voiceOver) {
+        return stageRenderAssetLocally(voiceOver, 'audio');
+      }
+
+      if (/^https?:\/\//i.test(persistedUrl)) {
+        const downloaded = await downloadUrlAsFile(persistedUrl, 'voice-over.mp3');
+        return stageRenderAssetLocally(downloaded, 'audio');
+      }
+
+      if (/^https?:\/\//i.test(previewUrl)) {
+        const downloaded = await downloadUrlAsFile(previewUrl, 'voice-over.mp3');
+        return stageRenderAssetLocally(downloaded, 'audio');
+      }
     }
 
     if (!voiceOver) {
@@ -1574,7 +2255,10 @@ export function GeneratePageInner() {
     return uploadedUrl;
   };
 
-  const buildRenderImageUrls = async (sourceSentences: SentenceItem[]) => {
+  const buildRenderImageUrls = async (
+    sourceSentences: SentenceItem[],
+    preferLocalTransport = false,
+  ) => {
     return await mapWithConcurrency(sourceSentences, 4, async (sentence, index) => {
       const text = String(sentence?.text ?? '').trim();
       if (isSubscribeLikeSentence(text)) {
@@ -1587,19 +2271,32 @@ export function GeneratePageInner() {
       }
 
       const currentUrl = String(sentence.imageUrl ?? '').trim();
-      if (currentUrl && !currentUrl.startsWith('data:')) {
+      if (currentUrl && !currentUrl.startsWith('data:') && !preferLocalTransport) {
+        return currentUrl;
+      }
+
+      if (preferLocalTransport && currentUrl && isBackendStaticUrl(currentUrl)) {
         return currentUrl;
       }
 
       let fileToUpload = sentence.image ?? null;
       if (!fileToUpload && currentUrl.startsWith('data:')) {
         fileToUpload = dataUrlToFile(currentUrl, `sentence-${index + 1}.png`);
+      } else if (!fileToUpload && currentUrl) {
+        fileToUpload = await downloadUrlAsFile(
+          currentUrl,
+          `sentence-${index + 1}.png`,
+        );
       }
 
       if (!fileToUpload) {
         throw new Error(
           `Missing image for sentence ${index + 1}. Please provide an image for every sentence on the Image tab.`,
         );
+      }
+
+      if (preferLocalTransport) {
+        return stageRenderAssetLocally(fileToUpload, 'image');
       }
 
       const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
@@ -1611,7 +2308,10 @@ export function GeneratePageInner() {
     });
   };
 
-  const buildRenderSecondaryImageUrls = async (sourceSentences: SentenceItem[]) => {
+  const buildRenderSecondaryImageUrls = async (
+    sourceSentences: SentenceItem[],
+    preferLocalTransport = false,
+  ) => {
     return await mapWithConcurrency(sourceSentences, 4, async (sentence, index) => {
       const text = String(sentence?.text ?? '').trim();
       if (isSubscribeLikeSentence(text)) {
@@ -1624,17 +2324,30 @@ export function GeneratePageInner() {
       }
 
       const currentUrl = String(sentence.secondaryImageUrl ?? '').trim();
-      if (currentUrl && !currentUrl.startsWith('data:')) {
+      if (currentUrl && !currentUrl.startsWith('data:') && !preferLocalTransport) {
+        return currentUrl;
+      }
+
+      if (preferLocalTransport && currentUrl && isBackendStaticUrl(currentUrl)) {
         return currentUrl;
       }
 
       let fileToUpload = sentence.secondaryImage ?? null;
       if (!fileToUpload && currentUrl.startsWith('data:')) {
         fileToUpload = dataUrlToFile(currentUrl, `sentence-${index + 1}-secondary.png`);
+      } else if (!fileToUpload && currentUrl) {
+        fileToUpload = await downloadUrlAsFile(
+          currentUrl,
+          `sentence-${index + 1}-secondary.png`,
+        );
       }
 
       if (!fileToUpload) {
         return null;
+      }
+
+      if (preferLocalTransport) {
+        return stageRenderAssetLocally(fileToUpload, 'image');
       }
 
       const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
@@ -1655,50 +2368,18 @@ export function GeneratePageInner() {
       throw new Error('No sentences available for test voice-over generation');
     }
 
-    const scriptForVoice = normalizedSentences
-      .map((sentence) => (/[.!?]$/u.test(sentence) ? sentence : `${sentence}.`))
-      .join(' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-
-    const response = await fetch(`${API_URL}/ai/generate-voice`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        script: scriptForVoice,
-        sentences: normalizedSentences,
-        voiceId,
-        styleInstructions:
-          voiceProvider === 'google'
-            ? String(aiStudioStyleInstructions ?? '').trim() || undefined
-            : undefined,
-      }),
+    return generateVoiceFileWithChunkSupport({
+      sentenceTexts: normalizedSentences,
+      scriptText: mergeVoiceSentenceTexts(normalizedSentences),
+      voiceId,
+      provider: voiceProvider,
+      styleInstructions:
+        voiceProvider === 'google'
+          ? String(aiStudioStyleInstructions ?? '').trim() || undefined
+          : undefined,
+      fallbackBaseName: `test-${voiceProvider}-voice-over`,
+      errorLabel: 'Failed to generate test voice-over.',
     });
-
-    if (!response.ok) {
-      throw new Error('Failed to generate test voice-over');
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type');
-    const disposition = response.headers.get('content-disposition');
-
-    const fallbackMime = voiceProvider === 'google' ? 'audio/wav' : 'audio/mpeg';
-    const mimeType = String(contentType ?? '').trim() || fallbackMime;
-    const headerFilename = filenameFromContentDisposition(disposition);
-    const extFromMime = extensionFromAudioMimeType(mimeType);
-    const defaultExt = voiceProvider === 'google' ? 'wav' : 'mp3';
-    const fileName =
-      headerFilename ||
-      `test-${voiceProvider}-voice-over.${extFromMime || defaultExt}`;
-
-    const blob = new Blob([arrayBuffer], { type: mimeType });
-    const file = new File([blob], fileName, { type: mimeType });
-    const durationSeconds = await getAudioDurationSeconds(file);
-
-    return { file, durationSeconds };
   };
 
   const canUseCurrentTestVoiceSettings = Boolean(selectedVoiceId);
@@ -1943,28 +2624,20 @@ export function GeneratePageInner() {
 
     setSentences(restored);
 
-    // Restore voice-over (download into File so render upload works)
+    // Restore voice-over as a URL reference so large saved voices don't need to be
+    // downloaded into browser memory just to render later.
     if (msg.voice?.voice) {
       try {
-        const res = await fetch(msg.voice.voice);
-        if (!res.ok) throw new Error('Failed to download voice-over');
-        const blob = await res.blob();
-        const file = new File([blob], 'reused-voice-over.mp3', {
-          type: blob.type || 'audio/mpeg',
-        });
-        setVoiceOver(file);
+        setVoiceOver(null);
+        setVoiceOverChunks([]);
         setSavedVoiceId(null);
         setVoiceLibraryUrl(msg.voice.voice);
 
-        const url = URL.createObjectURL(file);
-        const audio = new Audio(url);
-        audio.addEventListener('loadedmetadata', () => {
-          const dur = Number.isFinite(audio.duration) ? audio.duration : null;
-          setVoiceDuration(dur && dur > 0 ? dur : null);
-          URL.revokeObjectURL(url);
-        });
+        const duration = await getAudioDurationSecondsFromUrl(msg.voice.voice);
+        setVoiceDuration(duration);
       } catch {
         setVoiceOver(null);
+        setVoiceOverChunks([]);
         setVoiceDuration(null);
         setSavedVoiceId(null);
         setVoiceLibraryUrl(null);
@@ -1972,6 +2645,7 @@ export function GeneratePageInner() {
       }
     } else {
       setVoiceOver(null);
+      setVoiceOverChunks([]);
       setVoiceDuration(null);
       setSavedVoiceId(null);
       setVoiceLibraryUrl(null);
@@ -2980,6 +3654,7 @@ export function GeneratePageInner() {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setVoiceOver(file);
+      setVoiceOverChunks([]);
       setVoiceDuration(null);
       setSavedVoiceId(null);
       setVoiceLibraryUrl(null);
@@ -3009,68 +3684,41 @@ export function GeneratePageInner() {
 
     setVoiceError(null);
     setIsGeneratingVoice(true);
+    setVoiceGenerationProgress(null);
 
     try {
-      const mergeSentences = (items: string[]) => {
-        return items
-          .map((s) => (s ?? '').trim())
-          .filter(Boolean)
-          .map((s) => (/[.!?]$/u.test(s) ? s : `${s}.`))
-          .join(' ')
-          .replace(/\s{2,}/g, ' ')
-          .trim();
-      };
-
       const sentenceTexts = (sentences || [])
         .map((s) => s.text)
         .filter(Boolean);
       const sentencesForVoice = sentenceTexts;
       const scriptForVoice =
-        sentencesForVoice.length > 0 ? mergeSentences(sentencesForVoice) : script;
+        sentencesForVoice.length > 0 ? mergeVoiceSentenceTexts(sentencesForVoice) : script;
 
-      const response = await fetch(`${API_URL}/ai/generate-voice`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          script: scriptForVoice,
-          sentences: sentencesForVoice.length > 0 ? sentencesForVoice : undefined,
-          voiceId,
-          styleInstructions:
-            voiceProvider === 'google'
-              ? String(aiStudioStyleInstructions ?? '').trim() || undefined
-              : undefined,
-        }),
+      const generatedVoice = await generateVoiceFileWithChunkSupport({
+        sentenceTexts: sentencesForVoice,
+        scriptText: scriptForVoice,
+        voiceId,
+        provider: voiceProvider,
+        styleInstructions:
+          voiceProvider === 'google'
+            ? String(aiStudioStyleInstructions ?? '').trim() || undefined
+            : undefined,
+        fallbackBaseName: `${voiceProvider}-voice-over`,
+        errorLabel: 'Failed to generate voice.',
+        onProgress: setVoiceGenerationProgress,
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate voice');
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const contentType = response.headers.get('content-type');
-      const disposition = response.headers.get('content-disposition');
-
-      const fallbackMime = voiceProvider === 'google' ? 'audio/wav' : 'audio/mpeg';
-      const mimeType = String(contentType ?? '').trim() || fallbackMime;
-
-      const headerFilename = filenameFromContentDisposition(disposition);
-      const extFromMime = extensionFromAudioMimeType(mimeType);
-      const defaultExt = voiceProvider === 'google' ? 'wav' : 'mp3';
-      const fileName =
-        headerFilename ||
-        `${voiceProvider}-voice-over.${extFromMime || defaultExt}`;
-
-      const blob = new Blob([arrayBuffer], { type: mimeType });
-      const file = new File([blob], fileName, { type: mimeType });
-
-      setVoiceOver(file);
+      setVoiceOver(generatedVoice.file);
+      setVoiceOverChunks(
+        generatedVoice.chunks.length > 1
+          ? cloneVoiceOverChunks(generatedVoice.chunks)
+          : [],
+      );
       setVoiceDuration(null);
       setSavedVoiceId(null);
       setVoiceLibraryUrl(null);
 
-      const url = URL.createObjectURL(file);
+      const url = URL.createObjectURL(generatedVoice.file);
       const audio = new Audio(url);
       audio.addEventListener('loadedmetadata', () => {
         if (!Number.isNaN(audio.duration) && audio.duration > 0) {
@@ -3080,9 +3728,12 @@ export function GeneratePageInner() {
     } catch (error) {
       console.error('Voice generation failed', error);
       setVoiceError(
-        'Failed to generate voice. Please try again in a moment.',
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : 'Failed to generate voice. Please try again in a moment.',
       );
     } finally {
+      setVoiceGenerationProgress(null);
       setIsGeneratingVoice(false);
     }
   };
@@ -3093,9 +3744,11 @@ export function GeneratePageInner() {
 
   const removeVoice = () => {
     setVoiceOver(null);
+    setVoiceOverChunks([]);
     setVoiceDuration(null);
     setSavedVoiceId(null);
     setVoiceLibraryUrl(null);
+    setVoiceGenerationProgress(null);
     setIsVoiceOverEditorOpen(false);
   };
 
@@ -3141,6 +3794,7 @@ export function GeneratePageInner() {
     try {
       const rendered = await materializeEditedVoiceOver(values);
       setVoiceOver(rendered.file);
+      setVoiceOverChunks([]);
       setVoiceDuration(rendered.durationSeconds > 0 ? rendered.durationSeconds : null);
       setSavedVoiceId(null);
       setVoiceLibraryUrl(null);
@@ -3171,6 +3825,7 @@ export function GeneratePageInner() {
       const saved = await persistVoiceToLibrary(rendered.file);
 
       setVoiceOver(rendered.file);
+      setVoiceOverChunks([]);
       setVoiceDuration(rendered.durationSeconds > 0 ? rendered.durationSeconds : null);
       setSavedVoiceId(saved.id);
       setVoiceLibraryUrl(saved.url);
@@ -3179,6 +3834,7 @@ export function GeneratePageInner() {
       if (scriptId) {
         await api.patch(`/scripts/${encodeURIComponent(scriptId)}`, {
           voice_id: saved.id,
+          voice_over_chunks: null,
         });
       }
 
@@ -3227,28 +3883,13 @@ export function GeneratePageInner() {
 
   const handleVoiceLibrarySelect = async (voiceUrl: string, id: string) => {
     try {
-      const res = await fetch(voiceUrl);
-      if (!res.ok) {
-        throw new Error('Failed to fetch voice from library');
-      }
-      const blob = await res.blob();
-      const fileName = 'library-voice-over.mp3';
-      const file = new File([blob], fileName, {
-        type: blob.type || 'audio/mpeg',
-      });
-
-      setVoiceOver(file);
-      setVoiceDuration(null);
+      setVoiceOver(null);
+      setVoiceOverChunks([]);
       setSavedVoiceId(id);
       setVoiceLibraryUrl(voiceUrl);
 
-      const url = URL.createObjectURL(file);
-      const audio = new Audio(url);
-      audio.addEventListener('loadedmetadata', () => {
-        if (!Number.isNaN(audio.duration) && audio.duration > 0) {
-          setVoiceDuration(audio.duration);
-        }
-      });
+      const duration = await getAudioDurationSecondsFromUrl(voiceUrl);
+      setVoiceDuration(duration);
     } catch (error) {
       console.error('Select voice from library failed', error);
       showAlert('Failed to load voice from library. Please try again.', { type: 'error' });
@@ -3339,9 +3980,13 @@ export function GeneratePageInner() {
       );
 
       const sentencePayload = buildRenderSentencePayload(sentences);
-      const audioUrl = await resolveRenderAudioUrl();
-      const imageUrls = await buildRenderImageUrls(sentences);
-      const secondaryImageUrls = await buildRenderSecondaryImageUrls(sentences);
+      const useLocalRenderTransport = shouldUseLocalRenderTransport();
+      const audioUrl = await resolveRenderAudioUrl(useLocalRenderTransport);
+      const imageUrls = await buildRenderImageUrls(sentences, useLocalRenderTransport);
+      const secondaryImageUrls = await buildRenderSecondaryImageUrls(
+        sentences,
+        useLocalRenderTransport,
+      );
 
       let res = await fetch(`${API_URL}/videos/url`, {
         method: 'POST',
@@ -3456,6 +4101,7 @@ export function GeneratePageInner() {
     setScriptCharacters([]);
     setScriptLocations([]);
     setVoiceOver(null);
+    setVoiceOverChunks([]);
     setVoiceDuration(null);
     setSavedVoiceId(null);
     setVoiceLibraryUrl(null);
@@ -3783,6 +4429,7 @@ export function GeneratePageInner() {
     setVoiceError(null);
     setIsPreviewingVoice(false);
     setIsGeneratingVoice(false);
+    setVoiceGenerationProgress(null);
     setIsSavingVoice(false);
     setIsVoiceLibraryOpen(false);
     setAiStudioStyleInstructions('');
@@ -3939,26 +4586,55 @@ export function GeneratePageInner() {
     });
   };
 
-  const downloadVoiceAsFile = async (params: {
-    url: string;
-    fileName: string;
-  }): Promise<File | null> => {
-    const url = String(params.url ?? '').trim();
-    if (!url) return null;
-
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      return new File([blob], params.fileName, {
-        type: String(blob.type ?? '').trim() || 'audio/mpeg',
-      });
-    } catch {
+  const hydrateVoiceStateFromDraft = async (params: {
+    voice?: { id: string; voice: string } | null;
+    voiceOverChunks?: ScriptVoiceOverChunkDto[] | null;
+    fallbackBaseName: string;
+  }): Promise<{
+    voiceFile: File | null;
+    voiceDuration: number | null;
+    savedVoiceId: string | null;
+    voiceLibraryUrl: string | null;
+    voiceOverChunks: VoiceOverChunkState[];
+  }> => {
+    const chunkedVoice = await rebuildVoiceOverFromSavedChunks({
+      chunks: params.voiceOverChunks,
+      fallbackBaseName: params.fallbackBaseName,
+    }).catch((error) => {
+      console.error('Failed to rebuild saved voice chunks', error);
       return null;
+    });
+
+    if (chunkedVoice) {
+      return {
+        voiceFile: chunkedVoice.file,
+        voiceDuration: chunkedVoice.durationSeconds,
+        savedVoiceId: params.voice?.id ?? null,
+        voiceLibraryUrl: null,
+        voiceOverChunks: cloneVoiceOverChunks(chunkedVoice.chunks),
+      };
     }
+
+    if (params.voice?.voice) {
+      return {
+        voiceFile: null,
+        voiceDuration: await getAudioDurationSecondsFromUrl(params.voice.voice),
+        savedVoiceId: params.voice.id ?? null,
+        voiceLibraryUrl: params.voice.voice,
+        voiceOverChunks: [],
+      };
+    }
+
+    return {
+      voiceFile: null,
+      voiceDuration: null,
+      savedVoiceId: null,
+      voiceLibraryUrl: null,
+      voiceOverChunks: [],
+    };
   };
 
-  const handleSelectScriptFromLibrary = (draft: ScriptDraftDto) => {
+  const handleSelectScriptFromLibrary = async (draft: ScriptDraftDto) => {
     setActiveScriptId(draft.id);
     setFullScriptId(draft.id);
     setActiveShortTabIndex(null);
@@ -4015,6 +4691,7 @@ export function GeneratePageInner() {
     setScriptLocations(Array.isArray(draft.locations) ? draft.locations : []);
 
     setVoiceOver(null);
+    setVoiceOverChunks([]);
     setVoiceDuration(null);
     setSavedVoiceId(null);
     setVoiceLibraryUrl(null);
@@ -4027,6 +4704,7 @@ export function GeneratePageInner() {
         scriptId: draft.id,
         sentences: mapped,
         voiceOver: null,
+        voiceOverChunks: [],
         voiceDuration: null,
         savedVoiceId: null,
         voiceLibraryUrl: null,
@@ -4039,26 +4717,26 @@ export function GeneratePageInner() {
       setSentences([]);
     }
 
-    if (draft.voice?.voice && draft.voice.id) {
-      void (async () => {
-        try {
-          const res = await fetch(draft.voice!.voice);
-          if (!res.ok) return;
-          const blob = await res.blob();
-          const file = new File([blob], 'draft-voice-over.mp3', {
-            type: blob.type || 'audio/mpeg',
-          });
+    const loadedVoiceState = await hydrateVoiceStateFromDraft({
+      voice: draft.voice ?? null,
+      voiceOverChunks: draft.voice_over_chunks,
+      fallbackBaseName: 'draft-voice-over',
+    });
+    setVoiceOver(loadedVoiceState.voiceFile);
+    setVoiceOverChunks(loadedVoiceState.voiceOverChunks);
+    setVoiceDuration(loadedVoiceState.voiceDuration);
+    setSavedVoiceId(loadedVoiceState.savedVoiceId);
+    setVoiceLibraryUrl(loadedVoiceState.voiceLibraryUrl);
 
-          setVoiceOver(file);
-          setSavedVoiceId(draft.voice!.id);
-          setVoiceLibraryUrl(draft.voice!.voice);
-
-          const duration = await getAudioDurationSeconds(file);
-          setVoiceDuration(duration);
-        } catch (error) {
-          console.error('Failed to load draft voice-over', error);
-        }
-      })();
+    if (tabSnapshotsRef.current.full) {
+      tabSnapshotsRef.current.full = {
+        ...tabSnapshotsRef.current.full,
+        voiceOver: loadedVoiceState.voiceFile,
+        voiceOverChunks: cloneVoiceOverChunks(loadedVoiceState.voiceOverChunks),
+        voiceDuration: loadedVoiceState.voiceDuration,
+        savedVoiceId: loadedVoiceState.savedVoiceId,
+        voiceLibraryUrl: loadedVoiceState.voiceLibraryUrl,
+      };
     }
 
     if (draft.video_url) {
@@ -4109,25 +4787,20 @@ export function GeneratePageInner() {
               : [];
             const mappedShort = normalizeShortTabSentences(mappedShortRaw);
 
-            const shortVoiceFile =
-              shortScript.voice?.voice
-                ? await downloadVoiceAsFile({
-                  url: shortScript.voice.voice,
-                  fileName: `draft-short-${idx + 1}-voice-over.mp3`,
-                })
-                : null;
-
-            const shortVoiceDuration = shortVoiceFile
-              ? await getAudioDurationSeconds(shortVoiceFile)
-              : null;
+            const shortVoiceState = await hydrateVoiceStateFromDraft({
+              voice: shortScript.voice ?? null,
+              voiceOverChunks: shortScript.voice_over_chunks,
+              fallbackBaseName: `draft-short-${idx + 1}-voice-over`,
+            });
 
             tabSnapshotsRef.current[tabKeyForIndex(idx)] = {
               scriptId: shortScript.id,
               sentences: mappedShort,
-              voiceOver: shortVoiceFile,
-              voiceDuration: shortVoiceDuration,
-              savedVoiceId: shortScript.voice?.id ?? null,
-              voiceLibraryUrl: shortScript.voice?.voice ?? null,
+              voiceOver: shortVoiceState.voiceFile,
+              voiceOverChunks: shortVoiceState.voiceOverChunks,
+              voiceDuration: shortVoiceState.voiceDuration,
+              savedVoiceId: shortVoiceState.savedVoiceId,
+              voiceLibraryUrl: shortVoiceState.voiceLibraryUrl,
               videoJobId: null,
               videoJobStatus: null,
               videoJobError: null,
@@ -5592,6 +6265,31 @@ export function GeneratePageInner() {
     });
   }, [getBulkEffectEligibleIndices, isApplyingBulkAiEffect, runBulkAiLookEffects, runBulkAiMotionEffects, sentences, showToast]);
 
+  const handleResetBulkLookEffects = useCallback(() => {
+    setSentences((prev) =>
+      prev.map((s) => ({
+        ...s,
+        visualEffect: null,
+        customImageFilterId: null,
+        imageFilterSettings: null,
+      })),
+    );
+    showToast('Look effects reset to none for all scenes.', 'success');
+  }, [setSentences, showToast]);
+
+  const handleResetBulkMotionEffects = useCallback(() => {
+    setSentences((prev) =>
+      prev.map((s) => ({
+        ...s,
+        imageMotionEffect: 'default' as const,
+        customMotionEffectId: null,
+        imageMotionSettings: null,
+        imageMotionSpeed: null,
+      })),
+    );
+    showToast('Motion effects reset to default scale for all scenes.', 'success');
+  }, [setSentences, showToast]);
+
   const handleVideoModelChange = (next: 'gemini' | 'grok') => {
     setVideoModel(next);
     if (next !== 'grok') return;
@@ -6610,6 +7308,18 @@ export function GeneratePageInner() {
       };
 
       const fullSentencePayload = await buildSentencePayload(fullSnapshot.sentences, 'full');
+      const fullVoiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(
+        fullSnapshot.voiceOverChunks,
+      );
+
+      const persistedFullVoiceChunks = fullVoiceOverChunksPayload
+        ? fullVoiceOverChunksPayload.map((chunk) => {
+            const sourceChunk = fullSnapshot.voiceOverChunks.find(
+              (candidate) => candidate.index === chunk.index,
+            );
+            return toVoiceOverChunkState(chunk, sourceChunk?.sourceFile ?? null);
+          })
+        : [];
 
       // Optionally attach a voice-over to the draft if available
       let voiceId = fullSnapshot.savedVoiceId;
@@ -6622,6 +7332,11 @@ export function GeneratePageInner() {
         if (activeShortTabIndex === null) {
           setSavedVoiceId(voiceId);
         }
+      }
+
+      fullSnapshot.voiceOverChunks = cloneVoiceOverChunks(persistedFullVoiceChunks);
+      if (activeShortTabIndex === null) {
+        setVoiceOverChunks(cloneVoiceOverChunks(persistedFullVoiceChunks));
       }
 
       const shouldSendShorts =
@@ -6670,6 +7385,17 @@ export function GeneratePageInner() {
             // Optionally attach a voice-over to the short if available
             let shortVoiceId = snap?.savedVoiceId ?? null;
             let shortVoiceLibraryUrl = snap?.voiceLibraryUrl ?? null;
+            const shortVoiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(
+              snap?.voiceOverChunks ?? [],
+            );
+            const persistedShortVoiceChunks = shortVoiceOverChunksPayload
+              ? shortVoiceOverChunksPayload.map((chunk) => {
+                  const sourceChunk = snap?.voiceOverChunks?.find(
+                    (candidate) => candidate.index === chunk.index,
+                  );
+                  return toVoiceOverChunkState(chunk, sourceChunk?.sourceFile ?? null);
+                })
+              : [];
 
             if (!shortVoiceId && snap?.voiceOver) {
               const saved = await persistVoiceToLibrary(snap.voiceOver);
@@ -6680,6 +7406,7 @@ export function GeneratePageInner() {
               if (activeShortTabIndex === i) {
                 setSavedVoiceId(shortVoiceId);
                 setVoiceLibraryUrl(shortVoiceLibraryUrl);
+                setVoiceOverChunks(cloneVoiceOverChunks(persistedShortVoiceChunks));
               }
             }
 
@@ -6697,6 +7424,7 @@ export function GeneratePageInner() {
                 .filter(Boolean)
                 .join(' '),
               voice_id: shortVoiceId ?? undefined,
+              voice_over_chunks: shortVoiceOverChunksPayload,
               title: `Short ${i + 1}`,
               video_url: snap?.videoUrl ?? undefined,
               language: scriptLanguage,
@@ -6754,6 +7482,7 @@ export function GeneratePageInner() {
               ...(tabSnapshotsRef.current[snapKey] ?? {
                 sentences: finalItems,
                 voiceOver: null,
+                voiceOverChunks: [],
                 voiceDuration: null,
                 savedVoiceId: null,
                 voiceLibraryUrl: null,
@@ -6763,9 +7492,14 @@ export function GeneratePageInner() {
                 videoUrl: snap?.videoUrl ?? null,
               }),
               scriptId: id,
+              voiceOverChunks: cloneVoiceOverChunks(persistedShortVoiceChunks),
               savedVoiceId: shortVoiceId,
               voiceLibraryUrl: shortVoiceLibraryUrl,
             };
+
+            if (activeShortTabIndex === i) {
+              setVoiceOverChunks(cloneVoiceOverChunks(persistedShortVoiceChunks));
+            }
           }
 
           shortsScriptIdsToLink = upsertedShortIds;
@@ -6782,6 +7516,7 @@ export function GeneratePageInner() {
       const payload: {
         script: string;
         voice_id?: string;
+        voice_over_chunks?: ScriptVoiceOverChunkDto[] | null;
         video_url?: string;
         characters?: ScriptCharacter[];
         locations?: ScriptLocation[];
@@ -6818,6 +7553,7 @@ export function GeneratePageInner() {
       } = {
         script,
         voice_id: voiceId ?? undefined,
+        voice_over_chunks: fullVoiceOverChunksPayload,
         video_url: existingFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
         locations: scriptLocations.length ? scriptLocations : undefined,
@@ -6950,12 +7686,14 @@ export function GeneratePageInner() {
     }
 
     setVoiceOver(null);
+  setVoiceOverChunks([]);
     setVoiceDuration(null);
     setVoiceError(null);
     setSavedVoiceId(null);
     setVoiceLibraryUrl(null);
     setIsPreviewingVoice(false);
     setIsGeneratingVoice(false);
+    setVoiceGenerationProgress(null);
 
     setSelectedVoiceIdByProvider({ google: null, elevenlabs: null });
   };
@@ -7619,8 +8357,10 @@ export function GeneratePageInner() {
                   isGeneratingAllImages={isGeneratingAllImages}
                   onGenerateBulkLookEffects={() => handleOpenBulkAiEffects('look')}
                   isApplyingBulkLookEffects={isApplyingBulkAiEffect === 'look'}
+                  onResetBulkLookEffects={handleResetBulkLookEffects}
                   onGenerateBulkMotionEffects={() => handleOpenBulkAiEffects('motion')}
                   isApplyingBulkMotionEffects={isApplyingBulkAiEffect === 'motion'}
+                  onResetBulkMotionEffects={handleResetBulkMotionEffects}
                   onSentenceTextChange={handleSentenceTextChange}
                   onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
                   onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
@@ -7644,9 +8384,11 @@ export function GeneratePageInner() {
                 <VoiceOverSection
                   script={script}
                   voiceOver={voiceOver}
+                  voicePreviewUrl={voiceOverPreviewUrl}
                   voiceDuration={voiceDuration}
                   voiceError={voiceError}
                   isGeneratingVoice={isGeneratingVoice}
+                  voiceGenerationProgress={voiceGenerationProgress}
                   isPreviewingVoice={isPreviewingVoice}
                   isSavingVoice={isSavingVoice}
                   savedVoiceId={savedVoiceId}
@@ -7698,6 +8440,7 @@ export function GeneratePageInner() {
                 videoJobStatus={videoJobStatus}
                 script={script}
                 voiceOver={voiceOver}
+                voicePreviewUrl={voiceOverPreviewUrl}
                 onGenerate={handleGenerate}
                 onUploadVideo={handleUploadFinalVideo}
                 isUploadingVideo={isUploadingVideo}

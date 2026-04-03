@@ -46,15 +46,75 @@ type MetaUploadResponse = {
   };
 };
 
-function isTokenExpired(expiresAt: string | null | undefined): boolean {
-  if (!expiresAt) return false;
-  return new Date(expiresAt).getTime() <= Date.now();
+type MetaConnectionStatus =
+  | 'not_connected'
+  | 'healthy'
+  | 'attention'
+  | 'reconnect_required'
+  | 'error';
+
+type MetaCredentialStatus = {
+  hasMetaAccessToken: boolean;
+  metaTokenExpiresAt: string | null;
+  daysUntilExpiry: number | null;
+  lastError: string | null;
+  canAutoRefresh: boolean;
+  connectionStatus: MetaConnectionStatus;
+  requiresReconnect: boolean;
+  connectedAt: string | null;
+  lastRefreshedAt: string | null;
+  lastRefreshAttemptAt: string | null;
+  lastRefreshSuccessAt: string | null;
+  lastRefreshErrorAt: string | null;
+  nextRefreshDueAt: string | null;
+  requiresReconnectAt: string | null;
+  minimumRecommendedLifetimeDays: number;
+  targetRefreshWindowDays: number;
+};
+
+function formatStatusDate(value: string | null | undefined): string {
+  if (!value) return 'unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown';
+  return date.toLocaleDateString();
 }
 
-function isTokenExpiringSoon(expiresAt: string | null | undefined): boolean {
-  if (!expiresAt) return false;
-  const sevenDays = 7 * 24 * 60 * 60 * 1000;
-  return new Date(expiresAt).getTime() - Date.now() <= sevenDays;
+function getCredentialTone(connectionStatus: MetaConnectionStatus): string {
+  switch (connectionStatus) {
+    case 'healthy':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'attention':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'not_connected':
+    case 'reconnect_required':
+    case 'error':
+    default:
+      return 'border-red-200 bg-red-50 text-red-800';
+  }
+}
+
+function getCredentialHeadline(status: MetaCredentialStatus): string {
+  switch (status.connectionStatus) {
+    case 'healthy':
+      return status.daysUntilExpiry !== null
+        ? `Shared Meta connection healthy with about ${status.daysUntilExpiry} days remaining.`
+        : 'Shared Meta connection healthy.';
+    case 'attention':
+      return status.daysUntilExpiry !== null
+        ? `Shared Meta connection is inside the ${status.targetRefreshWindowDays}-day refresh window.`
+        : 'Shared Meta connection needs attention soon.';
+    case 'error':
+      return status.lastError?.trim()
+        ? `Shared Meta connection hit an error: ${status.lastError}`
+        : 'Shared Meta connection hit an error and should be checked.';
+    case 'reconnect_required':
+      return status.lastError?.trim()
+        ? `Reconnect required before upload: ${status.lastError}`
+        : `Reconnect required before the token falls under the ${status.minimumRecommendedLifetimeDays}-day minimum lifetime.`;
+    case 'not_connected':
+    default:
+      return 'No shared Meta connection is configured yet.';
+  }
 }
 
 function isCloudinaryUrl(url: string) {
@@ -126,7 +186,7 @@ export function MetaUploadModal({
 }: MetaUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<MetaPlatform[]>(['facebook']);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<MetaPlatform[]>(['facebook','instagram']);
   const [facebookTitle, setFacebookTitle] = useState('');
   const [caption, setCaption] = useState('');
   const [metaTags, setMetaTags] = useState('');
@@ -136,18 +196,14 @@ export function MetaUploadModal({
   const [cloudinaryStage, setCloudinaryStage] = useState<'idle' | 'downloading' | 'uploading'>('idle');
   const [cloudinaryCachedForVideoUrl, setCloudinaryCachedForVideoUrl] = useState<string | null>(null);
   const [cloudinaryCachedUrl, setCloudinaryCachedUrl] = useState<string | null>(null);
-  const [credentialStatus, setCredentialStatus] = useState<{
-    hasMetaAccessToken: boolean;
-    metaTokenExpiresAt: string | null;
-    lastError: string | null;
-    canAutoRefresh: boolean;
-  } | null>(null);
+  const [credentialStatus, setCredentialStatus] = useState<MetaCredentialStatus | null>(null);
   const [isLoadingCredStatus, setIsLoadingCredStatus] = useState(false);
   const [showTokenPanel, setShowTokenPanel] = useState(false);
   const [newShortToken, setNewShortToken] = useState('');
   const [isExchangingToken, setIsExchangingToken] = useState(false);
+  const [isRefreshingCredentials, setIsRefreshingCredentials] = useState(false);
   const [tokenExchangeError, setTokenExchangeError] = useState<string | null>(null);
-  const [tokenExchangeSuccess, setTokenExchangeSuccess] = useState(false);
+  const [credentialActionNotice, setCredentialActionNotice] = useState<string | null>(null);
   const [seoError, setSeoError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<MetaUploadResponse | null>(null);
@@ -180,14 +236,13 @@ export function MetaUploadModal({
         },
       });
       if (res.ok) {
-        const data = await res.json() as {
-          hasMetaAccessToken: boolean;
-          metaTokenExpiresAt: string | null;
-          lastError: string | null;
-          canAutoRefresh: boolean;
-        };
+        const data = await res.json() as MetaCredentialStatus;
         setCredentialStatus(data);
-        if (!data.hasMetaAccessToken || isTokenExpired(data.metaTokenExpiresAt)) {
+        if (
+          !data.hasMetaAccessToken ||
+          data.requiresReconnect ||
+          data.connectionStatus === 'error'
+        ) {
           setShowTokenPanel(true);
         }
       }
@@ -200,7 +255,7 @@ export function MetaUploadModal({
 
   const handleExchangeToken = async () => {
     setTokenExchangeError(null);
-    setTokenExchangeSuccess(false);
+    setCredentialActionNotice(null);
     const trimmed = newShortToken.trim();
     if (!trimmed) {
       setTokenExchangeError('Paste a short-lived Meta access token first.');
@@ -232,7 +287,9 @@ export function MetaUploadModal({
       if (data?.status) {
         setCredentialStatus(data.status as typeof credentialStatus);
       }
-      setTokenExchangeSuccess(true);
+      setCredentialActionNotice(
+        'Shared Meta connection updated. The backend will now keep it inside the monthly safety window when auto-refresh is available.',
+      );
       setNewShortToken('');
       setShowTokenPanel(false);
     } catch (err: unknown) {
@@ -246,6 +303,45 @@ export function MetaUploadModal({
     }
   };
 
+  const handleRefreshCredentials = async () => {
+    setTokenExchangeError(null);
+    setCredentialActionNotice(null);
+    setIsRefreshingCredentials(true);
+    try {
+      const authToken = localStorage.getItem('token');
+      const res = await fetch(`${META_API_URL}/meta/credentials/refresh`, {
+        method: 'POST',
+        headers: {
+          Authorization: authToken ? `Bearer ${authToken}` : '',
+        },
+      });
+      const data = (await res.json().catch(() => null)) as {
+        refreshed?: boolean;
+        status?: MetaCredentialStatus;
+        message?: string;
+      } | null;
+      if (!res.ok) {
+        throw new Error(
+          data?.message && data.message.trim()
+            ? data.message
+            : 'Meta credential refresh failed.',
+        );
+      }
+      if (data?.status) {
+        setCredentialStatus(data.status);
+      }
+      setCredentialActionNotice('Shared Meta connection refreshed successfully.');
+    } catch (err: unknown) {
+      setTokenExchangeError(
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : 'Meta credential refresh failed.',
+      );
+    } finally {
+      setIsRefreshingCredentials(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -253,7 +349,7 @@ export function MetaUploadModal({
     setUploadError(null);
     setUploadResult(null);
     setTokenExchangeError(null);
-    setTokenExchangeSuccess(false);
+    setCredentialActionNotice(null);
     void loadCredentialStatus();
   }, [isOpen, loadCredentialStatus]);
 
@@ -266,7 +362,12 @@ export function MetaUploadModal({
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
-  const isBusy = isUploading || isGeneratingSeo || cloudinaryStage !== 'idle' || isExchangingToken;
+  const isBusy =
+    isUploading ||
+    isGeneratingSeo ||
+    cloudinaryStage !== 'idle' ||
+    isExchangingToken ||
+    isRefreshingCredentials;
 
   const togglePlatform = (platform: MetaPlatform) => {
     setSelectedPlatforms((current) => {
@@ -524,56 +625,60 @@ export function MetaUploadModal({
           {/* ── Token status banner ── */}
           {!isLoadingCredStatus && credentialStatus ? (
             <div
-              className={`rounded-2xl border px-4 py-3 text-sm flex items-center justify-between gap-3 ${
-                !credentialStatus.hasMetaAccessToken || isTokenExpired(credentialStatus.metaTokenExpiresAt)
-                  ? 'border-red-200 bg-red-50 text-red-800'
-                  : isTokenExpiringSoon(credentialStatus.metaTokenExpiresAt)
-                  ? 'border-amber-200 bg-amber-50 text-amber-800'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              }`}
+              className={`rounded-2xl border px-4 py-3 text-sm flex items-center justify-between gap-3 ${getCredentialTone(
+                credentialStatus.connectionStatus,
+              )}`}
             >
-              <div className="flex items-center gap-2">
-                {!credentialStatus.hasMetaAccessToken ? (
-                  <>
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>No Meta access token configured. Paste one below.</span>
-                  </>
-                ) : isTokenExpired(credentialStatus.metaTokenExpiresAt) ? (
-                  <>
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>
-                      Token expired on{' '}
-                      {new Date(credentialStatus.metaTokenExpiresAt!).toLocaleDateString()}.
-                      {' '}Paste a fresh token to continue posting.
-                    </span>
-                  </>
-                ) : isTokenExpiringSoon(credentialStatus.metaTokenExpiresAt) ? (
-                  <>
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>
-                      Token expires{' '}
-                      {new Date(credentialStatus.metaTokenExpiresAt!).toLocaleDateString()}.
-                    </span>
-                  </>
-                ) : (
-                  <>
+              <div className="flex-1 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  {credentialStatus.connectionStatus === 'healthy' ? (
                     <CheckCircle2 className="h-4 w-4 shrink-0" />
-                    <span>
-                      Token valid until{' '}
-                      {credentialStatus.metaTokenExpiresAt
-                        ? new Date(credentialStatus.metaTokenExpiresAt).toLocaleDateString()
-                        : 'unknown'}.
-                    </span>
-                  </>
-                )}
+                  ) : (
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                  )}
+                  <span>{getCredentialHeadline(credentialStatus)}</span>
+                </div>
+                <div className="text-xs opacity-90 space-y-1">
+                  <p>
+                    Expires: {formatStatusDate(credentialStatus.metaTokenExpiresAt)}. Last successful refresh:{' '}
+                    {formatStatusDate(credentialStatus.lastRefreshSuccessAt || credentialStatus.lastRefreshedAt)}.
+                  </p>
+                  <p>
+                    Next planned refresh: {formatStatusDate(credentialStatus.nextRefreshDueAt)}.{' '}
+                    {credentialStatus.canAutoRefresh
+                      ? 'Automatic refresh is enabled on the backend.'
+                      : 'Automatic refresh is unavailable until META_APP_SECRET is configured.'}
+                  </p>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowTokenPanel((v) => !v)}
-                className="text-xs underline font-medium whitespace-nowrap shrink-0"
-              >
-                {showTokenPanel ? 'Hide' : 'Manage token'}
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {credentialStatus.canAutoRefresh && credentialStatus.hasMetaAccessToken ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleRefreshCredentials()}
+                    disabled={isBusy}
+                    className="border-current/30 bg-white/60 text-current hover:bg-white"
+                  >
+                    {isRefreshingCredentials ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Refreshing...
+                      </>
+                    ) : (
+                      'Refresh now'
+                    )}
+                  </Button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setShowTokenPanel((v) => !v)}
+                  className="text-xs underline font-medium whitespace-nowrap"
+                >
+                  {showTokenPanel ? 'Hide' : 'Manage token'}
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -586,7 +691,7 @@ export function MetaUploadModal({
                 </div>
                 <div>
                   <h4 className="text-sm font-semibold text-blue-900">
-                    Exchange for a 60-day long-lived token
+                    Reconnect the shared Meta account
                   </h4>
                   <p className="text-xs text-blue-700 mt-1 leading-relaxed">
                     Open the{' '}
@@ -603,7 +708,8 @@ export function MetaUploadModal({
                     +{' '}
                     <code className="bg-blue-100 px-1 rounded text-xs">pages_read_engagement</code>{' '}
                     permissions. Paste the short-lived token below — the backend will exchange it
-                    for a ~60-day long-lived token automatically.
+                    for a long-lived token and keep the shared connection above the monthly
+                    safety threshold whenever automatic refresh is available.
                   </p>
                 </div>
               </div>
@@ -642,10 +748,25 @@ export function MetaUploadModal({
                 </div>
               ) : null}
 
-              {tokenExchangeSuccess ? (
+              {credentialActionNotice ? (
                 <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  <span>Token exchanged and saved. You can now upload to Meta.</span>
+                  <span>{credentialActionNotice}</span>
+                </div>
+              ) : null}
+
+              {credentialStatus ? (
+                <div className="rounded-2xl border border-blue-200 bg-white/80 px-4 py-3 text-xs text-blue-900 space-y-1">
+                  <p>
+                    Status: <span className="font-semibold capitalize">{credentialStatus.connectionStatus.replace('_', ' ')}</span>
+                  </p>
+                  <p>
+                    Minimum safe lifetime target: {credentialStatus.minimumRecommendedLifetimeDays} days.
+                    Reconnect by {formatStatusDate(credentialStatus.requiresReconnectAt)} if auto-refresh cannot recover the token.
+                  </p>
+                  {credentialStatus.lastError ? (
+                    <p>Last backend error: {credentialStatus.lastError}</p>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -823,7 +944,7 @@ export function MetaUploadModal({
           <Button
             type="button"
             onClick={() => void handleUpload()}
-            disabled={isBusy || selectedPlatforms.length === 0}
+            disabled={isBusy || selectedPlatforms.length === 0 || Boolean(credentialStatus?.requiresReconnect)}
             className="bg-linear-to-r from-sky-700 to-indigo-700 hover:from-sky-800 hover:to-indigo-800 text-white shadow-lg"
           >
             {isUploading ? (

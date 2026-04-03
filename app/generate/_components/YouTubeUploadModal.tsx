@@ -81,7 +81,7 @@ export function YouTubeUploadModal({
   const [useWebSearchForSeo, setUseWebSearchForSeo] = useState(false);
 
   // Wallpaper generation (only for non-shorts)
-  const [wallpaperPromptModel, setWallpaperPromptModel] = useState('claude-sonnet-4-5');
+  const [wallpaperPromptModel, setWallpaperPromptModel] = useState('gpt-5.2');
   const [wallpaperImageStyle, setWallpaperImageStyle] = useState<string>('cinematic');
   const [wallpaperImageModel, setWallpaperImageModel] = useState('leonardo');
   const [isGeneratingWallpaper, setIsGeneratingWallpaper] = useState(false);
@@ -97,7 +97,14 @@ export function YouTubeUploadModal({
   >([]);
   const [wallpaperUsedCharacterKeys, setWallpaperUsedCharacterKeys] = useState<string[]>([]);
 
-  const { imageModelOptions } = useImageModelOptions({
+  const {
+    providerOptions: wallpaperProviderOptions,
+    selectedProvider: wallpaperSelectedProvider,
+    selectedModelValue: wallpaperSelectedModelValue,
+    modelOptions: wallpaperModelOptions,
+    onProviderChange: onWallpaperProviderChange,
+    onModelChange: onWallpaperModelChange,
+  } = useImageModelOptions({
     selectedValue: wallpaperImageModel,
     onSelectedValueChange: setWallpaperImageModel,
     enabled: isOpen && !isShortVideo,
@@ -162,7 +169,7 @@ export function YouTubeUploadModal({
       const res = await api.post('/ai/youtube-wallpaper', {
         script: trimmedScript,
         title: (youtubeTitle || '').trim() || undefined,
-        promptModel: wallpaperPromptModel,
+        promptModel: wallpaperPromptModel || undefined,
         imageModel: wallpaperImageModel,
         style: stylePreset.style,
         characters: Array.isArray(scriptCharacters) ? scriptCharacters : [],
@@ -1025,11 +1032,12 @@ export function YouTubeUploadModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <LlmModelSelect
                   value={wallpaperPromptModel}
                   onValueChange={setWallpaperPromptModel}
                   label="Prompt Model"
+                  placeholder="Server Default"
                   disabled={isBusy}
                 />
 
@@ -1051,15 +1059,32 @@ export function YouTubeUploadModal({
                 </Select>
 
                 <Select
-                  value={wallpaperImageModel}
-                  onValueChange={setWallpaperImageModel}
+                  value={wallpaperSelectedProvider}
+                  onValueChange={(value) => onWallpaperProviderChange(value as typeof wallpaperSelectedProvider)}
+                  disabled={isBusy}
+                >
+                  <SelectTrigger label="Image Provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {wallpaperProviderOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={wallpaperSelectedModelValue}
+                  onValueChange={onWallpaperModelChange}
                   disabled={isBusy}
                 >
                   <SelectTrigger label="Image Model">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {imageModelOptions.map((option) => (
+                    {wallpaperModelOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
