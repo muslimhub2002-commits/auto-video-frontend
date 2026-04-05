@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AlertDialog } from '@/components/ui/alert-dialog';
@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Clapperboard, Clock3, Loader2, Save, SlidersHorizontal, Sparkles, Timer, Trash2, Wand2, X } from 'lucide-react';
+import { Clapperboard, Clock3, Loader2, Save, SlidersHorizontal, Sparkles, Timer, Trash2, Upload, Wand2, X } from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import {
@@ -36,7 +36,19 @@ import {
   resolveMotionEffectFromSettings,
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
+import {
+  getDefaultTextAnimationSettings,
+  getTextAnimationEffectLabel,
+  normalizeTextAnimationSettings,
+  resolveTextAnimationEffectFromSettings,
+  resolveTextAnimationText,
+  TextAnimationPreview,
+  TEXT_ANIMATION_EFFECT_VALUES,
+  type TextAnimationPresetDto,
+  type TextAnimationSettings,
+} from './TextAnimationPreview';
 import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
+import { useManagedObjectUrl } from './useManagedObjectUrl';
 
 const LOOK_EFFECT_VALUES = [
   'none',
@@ -47,7 +59,7 @@ const LOOK_EFFECT_VALUES = [
   'glassStrong',
 ] as const;
 
-type DetailTab = 'visual' | 'motion';
+type DetailTab = 'visual' | 'motion' | 'text';
 
 type DebouncedPreviewState = {
   visualEffect: SentenceItem['visualEffect'] | null;
@@ -65,13 +77,26 @@ type ImageEffectsDetailModalProps = {
   isShortVideo: boolean;
   activeTab: DetailTab;
   previewImageUrl: string | null;
+  previewTextInheritedImageUrl?: string | null;
+  previewTextInheritedVideoUrl?: string | null;
+  sentenceText?: string;
   visualEffect: SentenceItem['visualEffect'] | null | undefined;
   imageMotionEffect: SentenceItem['imageMotionEffect'] | null | undefined;
   imageMotionSpeed: number | null | undefined;
+  textAnimationEffect: SentenceItem['textAnimationEffect'] | null | undefined;
+  textAnimationText: string | null | undefined;
+  textBackgroundImage?: File | null;
+  textBackgroundImageUrl?: string | null;
+  textBackgroundSavedImageId?: string | null;
+  textBackgroundVideo?: File | null;
+  textBackgroundVideoUrl?: string | null;
+  textBackgroundSavedVideoId?: string | null;
   customImageFilterId: string | null | undefined;
   customMotionEffectId: string | null | undefined;
+  customTextAnimationId: string | null | undefined;
   imageFilterSettings: Record<string, unknown> | null | undefined;
   imageMotionSettings: Record<string, unknown> | null | undefined;
+  textAnimationSettings: Record<string, unknown> | null | undefined;
   retainedTemporaryLook?: {
     visualEffect: SentenceItem['visualEffect'] | null;
     imageFilterSettings: ImageFilterSettings;
@@ -83,6 +108,7 @@ type ImageEffectsDetailModalProps = {
   } | null;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
+  textAnimationPresets: TextAnimationPresetDto[];
   onClose: () => void;
   onApply: (params: {
     visualEffect: SentenceItem['visualEffect'] | null;
@@ -92,6 +118,16 @@ type ImageEffectsDetailModalProps = {
     customMotionEffectId: string | null;
     imageMotionSettings: ImageMotionSettings;
     imageMotionSpeed: number;
+    textAnimationEffect: SentenceItem['textAnimationEffect'] | null;
+    customTextAnimationId: string | null;
+    textAnimationSettings: TextAnimationSettings;
+    textAnimationText: string | null;
+    textBackgroundImage: File | null;
+    textBackgroundImageUrl: string | null;
+    textBackgroundSavedImageId: string | null;
+    textBackgroundVideo: File | null;
+    textBackgroundVideoUrl: string | null;
+    textBackgroundSavedVideoId: string | null;
   }) => void;
   onSaveImageFilterPreset: (
     title: string,
@@ -111,6 +147,15 @@ type ImageEffectsDetailModalProps = {
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
   onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onSaveTextAnimationPreset: (
+    title: string,
+    settings: TextAnimationSettings,
+  ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
+  onUpdateTextAnimationPreset: (
+    presetId: string,
+    settings: TextAnimationSettings,
+  ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
+  onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
   onGenerateLookWithAi: (params: {
     visualEffect: SentenceItem['visualEffect'] | null;
     customImageFilterId: string | null;
@@ -230,17 +275,31 @@ export function ImageEffectsDetailModal({
   isShortVideo,
   activeTab,
   previewImageUrl,
+  previewTextInheritedImageUrl = null,
+  previewTextInheritedVideoUrl = null,
+  sentenceText,
   visualEffect,
   imageMotionEffect,
   imageMotionSpeed,
+  textAnimationEffect,
+  textAnimationText,
+  textBackgroundImage = null,
+  textBackgroundImageUrl = null,
+  textBackgroundSavedImageId = null,
+  textBackgroundVideo = null,
+  textBackgroundVideoUrl = null,
+  textBackgroundSavedVideoId = null,
   customImageFilterId,
   customMotionEffectId,
+  customTextAnimationId,
   imageFilterSettings,
   imageMotionSettings,
+  textAnimationSettings,
   retainedTemporaryLook,
   retainedTemporaryMotion,
   imageFilterPresets,
   motionEffectPresets,
+  textAnimationPresets,
   onClose,
   onApply,
   onSaveImageFilterPreset,
@@ -249,6 +308,9 @@ export function ImageEffectsDetailModal({
   onSaveMotionEffectPreset,
   onUpdateMotionEffectPreset,
   onDeleteMotionEffectPreset,
+  onSaveTextAnimationPreset,
+  onUpdateTextAnimationPreset,
+  onDeleteTextAnimationPreset,
   onGenerateLookWithAi,
   onGenerateMotionWithAi,
 }: ImageEffectsDetailModalProps) {
@@ -257,19 +319,26 @@ export function ImageEffectsDetailModal({
     imageMotionSettings,
     isShortVideo,
   );
+  const textBackgroundInputRef = useRef<HTMLInputElement | null>(null);
+  const textBackgroundVideoInputRef = useRef<HTMLInputElement | null>(null);
   const [currentTab, setCurrentTab] = useState<DetailTab>(activeTab);
   const [lookSaveTitle, setLookSaveTitle] = useState('');
   const [motionSaveTitle, setMotionSaveTitle] = useState('');
+  const [textSaveTitle, setTextSaveTitle] = useState('');
   const [isSavingLookPreset, setIsSavingLookPreset] = useState(false);
   const [isSavingMotionPreset, setIsSavingMotionPreset] = useState(false);
+  const [isSavingTextPreset, setIsSavingTextPreset] = useState(false);
   const [isOverridingLookPreset, setIsOverridingLookPreset] = useState(false);
   const [isOverridingMotionPreset, setIsOverridingMotionPreset] = useState(false);
+  const [isOverridingTextPreset, setIsOverridingTextPreset] = useState(false);
   const [isDeletingLookPreset, setIsDeletingLookPreset] = useState(false);
   const [isDeletingMotionPreset, setIsDeletingMotionPreset] = useState(false);
+  const [isDeletingTextPreset, setIsDeletingTextPreset] = useState(false);
   const [isGeneratingLookWithAi, setIsGeneratingLookWithAi] = useState(false);
   const [isGeneratingMotionWithAi, setIsGeneratingMotionWithAi] = useState(false);
   const [lookActionError, setLookActionError] = useState<string | null>(null);
   const [motionActionError, setMotionActionError] = useState<string | null>(null);
+  const [textActionError, setTextActionError] = useState<string | null>(null);
   const [deletePresetKind, setDeletePresetKind] = useState<DetailTab | null>(null);
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isClosing, setIsClosing] = useState(false);
@@ -288,6 +357,35 @@ export function ImageEffectsDetailModal({
   const [draftCustomMotionEffectId, setDraftCustomMotionEffectId] = useState<string | null>(
     customMotionEffectId ?? null,
   );
+  const [draftTextAnimationEffect, setDraftTextAnimationEffect] = useState<
+    SentenceItem['textAnimationEffect'] | null
+  >(
+    resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
+  );
+  const [draftTextAnimationText, setDraftTextAnimationText] = useState<string>(
+    resolveTextAnimationText(textAnimationText, sentenceText),
+  );
+  const [draftTextBackgroundImage, setDraftTextBackgroundImage] = useState<File | null>(
+    textBackgroundImage ?? null,
+  );
+  const [draftTextBackgroundImageUrl, setDraftTextBackgroundImageUrl] = useState<string | null>(
+    textBackgroundImageUrl ?? null,
+  );
+  const [draftTextBackgroundSavedImageId, setDraftTextBackgroundSavedImageId] = useState<string | null>(
+    textBackgroundSavedImageId ?? null,
+  );
+  const [draftTextBackgroundVideo, setDraftTextBackgroundVideo] = useState<File | null>(
+    textBackgroundVideo ?? null,
+  );
+  const [draftTextBackgroundVideoUrl, setDraftTextBackgroundVideoUrl] = useState<string | null>(
+    textBackgroundVideoUrl ?? null,
+  );
+  const [draftTextBackgroundSavedVideoId, setDraftTextBackgroundSavedVideoId] = useState<string | null>(
+    textBackgroundSavedVideoId ?? null,
+  );
+  const [draftCustomTextAnimationId, setDraftCustomTextAnimationId] = useState<string | null>(
+    customTextAnimationId ?? null,
+  );
   const [draftImageFilterSettings, setDraftImageFilterSettings] = useState<ImageFilterSettings>(
     () => normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
   );
@@ -297,6 +395,14 @@ export function ImageEffectsDetailModal({
         imageMotionSettings,
         imageMotionEffect ?? 'default',
         incomingImageMotionSpeed,
+        isShortVideo,
+      ),
+  );
+  const [draftTextAnimationSettings, setDraftTextAnimationSettings] = useState<TextAnimationSettings>(
+    () =>
+      normalizeTextAnimationSettings(
+        textAnimationSettings,
+        resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
         isShortVideo,
       ),
   );
@@ -324,6 +430,36 @@ export function ImageEffectsDetailModal({
       ),
     [draftImageMotionEffect, draftImageMotionSettings, draftImageMotionSpeed, isShortVideo],
   );
+  const resolvedText = useMemo(
+    () =>
+      normalizeTextAnimationSettings(
+        draftTextAnimationSettings,
+        draftTextAnimationEffect,
+        isShortVideo,
+      ),
+    [draftTextAnimationEffect, draftTextAnimationSettings, isShortVideo],
+  );
+  const draftTextBackgroundObjectUrl = useManagedObjectUrl(draftTextBackgroundImage);
+  const draftTextBackgroundVideoObjectUrl = useManagedObjectUrl(draftTextBackgroundVideo);
+  const customTextBackgroundPreviewUrl =
+    draftTextBackgroundObjectUrl ?? draftTextBackgroundImageUrl ?? null;
+  const customTextBackgroundVideoPreviewUrl =
+    draftTextBackgroundVideoObjectUrl ?? draftTextBackgroundVideoUrl ?? null;
+  const resolvedTextPreviewBackgroundUrl =
+    resolvedText.backgroundMode === 'image'
+      ? customTextBackgroundPreviewUrl
+      : resolvedText.backgroundMode === 'inheritImage'
+        ? previewTextInheritedImageUrl
+        : null;
+  const resolvedTextPreviewBackgroundVideoUrl =
+    resolvedText.backgroundMode === 'video'
+      ? customTextBackgroundVideoPreviewUrl
+      : resolvedText.backgroundMode === 'inheritVideo'
+        ? previewTextInheritedVideoUrl
+        : null;
+  const textPreviewFrameClass = isShortVideo
+    ? 'w-full max-w-[22rem] aspect-[9/16]'
+    : 'w-full max-w-4xl aspect-video';
   const selectedLookPreset = useMemo(
     () => imageFilterPresets.find((item) => item.id === draftCustomImageFilterId) ?? null,
     [draftCustomImageFilterId, imageFilterPresets],
@@ -331,6 +467,10 @@ export function ImageEffectsDetailModal({
   const selectedMotionPreset = useMemo(
     () => motionEffectPresets.find((item) => item.id === draftCustomMotionEffectId) ?? null,
     [draftCustomMotionEffectId, motionEffectPresets],
+  );
+  const selectedTextPreset = useMemo(
+    () => textAnimationPresets.find((item) => item.id === draftCustomTextAnimationId) ?? null,
+    [draftCustomTextAnimationId, textAnimationPresets],
   );
   const selectedLookPresetEffect = useMemo(
     () =>
@@ -348,6 +488,19 @@ export function ImageEffectsDetailModal({
           )
         : 'default',
     [draftImageMotionEffect, selectedMotionPreset],
+  );
+  const selectedTextPresetEffect = useMemo(
+    () =>
+      selectedTextPreset
+        ? resolveTextAnimationEffectFromSettings(
+            selectedTextPreset.settings,
+            draftTextAnimationEffect,
+          )
+        : resolveTextAnimationEffectFromSettings(
+            draftTextAnimationSettings,
+            draftTextAnimationEffect,
+          ),
+    [draftTextAnimationEffect, draftTextAnimationSettings, selectedTextPreset],
   );
   const selectedLookPresetSettings = useMemo(
     () =>
@@ -368,6 +521,17 @@ export function ImageEffectsDetailModal({
         : null,
     [draftImageMotionSpeed, isShortVideo, selectedMotionPreset, selectedMotionPresetEffect],
   );
+  const selectedTextPresetSettings = useMemo(
+    () =>
+      selectedTextPreset
+        ? normalizeTextAnimationSettings(
+            selectedTextPreset.settings,
+            selectedTextPresetEffect,
+            isShortVideo,
+          )
+        : null,
+    [isShortVideo, selectedTextPreset, selectedTextPresetEffect],
+  );
   const isLookDirtyFromSelectedPreset = Boolean(
     selectedLookPreset &&
       ((selectedLookPresetEffect ?? null) !== (draftVisualEffect ?? null) ||
@@ -378,18 +542,29 @@ export function ImageEffectsDetailModal({
       (selectedMotionPresetEffect !== (draftImageMotionEffect ?? 'default') ||
         JSON.stringify(selectedMotionPresetSettings) !== JSON.stringify(resolvedMotion)),
   );
+  const isTextDirtyFromSelectedPreset = Boolean(
+    selectedTextPreset &&
+      (selectedTextPresetEffect !== draftTextAnimationEffect ||
+        JSON.stringify(selectedTextPresetSettings) !== JSON.stringify(resolvedText)),
+  );
   const canOverrideLookPreset = Boolean(selectedLookPreset && isLookDirtyFromSelectedPreset);
   const canOverrideMotionPreset = Boolean(selectedMotionPreset && isMotionDirtyFromSelectedPreset);
+  const canOverrideTextPreset = Boolean(selectedTextPreset && isTextDirtyFromSelectedPreset);
   const trimmedLookSaveTitle = lookSaveTitle.trim();
   const trimmedMotionSaveTitle = motionSaveTitle.trim();
+  const trimmedTextSaveTitle = textSaveTitle.trim();
   const canSaveLookAsNew = (draftVisualEffect ?? null) !== null;
   const canSaveMotionAsNew = true;
+  const canSaveTextAsNew = Boolean(draftTextAnimationEffect);
   const isLookSaveTitleValid =
     trimmedLookSaveTitle.length > 0 &&
     (!selectedLookPreset || trimmedLookSaveTitle !== selectedLookPreset.title.trim());
   const isMotionSaveTitleValid =
     trimmedMotionSaveTitle.length > 0 &&
     (!selectedMotionPreset || trimmedMotionSaveTitle !== selectedMotionPreset.title.trim());
+  const isTextSaveTitleValid =
+    trimmedTextSaveTitle.length > 0 &&
+    (!selectedTextPreset || trimmedTextSaveTitle !== selectedTextPreset.title.trim());
   const [debouncedPreview, setDebouncedPreview] = useState<DebouncedPreviewState>(() => ({
     visualEffect: visualEffect ?? null,
     imageMotionEffect: imageMotionEffect ?? 'default',
@@ -424,6 +599,17 @@ export function ImageEffectsDetailModal({
     setDraftImageMotionSpeed(incomingImageMotionSpeed);
     setDraftCustomImageFilterId(customImageFilterId ?? null);
     setDraftCustomMotionEffectId(customMotionEffectId ?? null);
+    setDraftTextAnimationEffect(
+      resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
+    );
+    setDraftTextAnimationText(resolveTextAnimationText(textAnimationText, sentenceText));
+    setDraftTextBackgroundImage(textBackgroundImage ?? null);
+    setDraftTextBackgroundImageUrl(textBackgroundImageUrl ?? null);
+    setDraftTextBackgroundSavedImageId(textBackgroundSavedImageId ?? null);
+    setDraftTextBackgroundVideo(textBackgroundVideo ?? null);
+    setDraftTextBackgroundVideoUrl(textBackgroundVideoUrl ?? null);
+    setDraftTextBackgroundSavedVideoId(textBackgroundSavedVideoId ?? null);
+    setDraftCustomTextAnimationId(customTextAnimationId ?? null);
     setDraftImageFilterSettings(
       normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
     );
@@ -435,12 +621,21 @@ export function ImageEffectsDetailModal({
         isShortVideo,
       ),
     );
+    setDraftTextAnimationSettings(
+      normalizeTextAnimationSettings(
+        textAnimationSettings,
+        resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
+        isShortVideo,
+      ),
+    );
     setRetainedDraftTemporaryLook(retainedTemporaryLook ?? null);
     setRetainedDraftTemporaryMotion(retainedTemporaryMotion ?? null);
     setLookSaveTitle('');
     setMotionSaveTitle('');
+    setTextSaveTitle('');
     setLookActionError(null);
     setMotionActionError(null);
+    setTextActionError(null);
     setDeletePresetKind(null);
     setDebouncedPreview((prev) => ({
       visualEffect: visualEffect ?? null,
@@ -459,6 +654,7 @@ export function ImageEffectsDetailModal({
     activeTab,
     customImageFilterId,
     customMotionEffectId,
+    customTextAnimationId,
     imageFilterSettings,
     imageMotionEffect,
     imageMotionSettings,
@@ -467,6 +663,16 @@ export function ImageEffectsDetailModal({
     isOpen,
     retainedTemporaryLook,
     retainedTemporaryMotion,
+    textBackgroundImage,
+    textBackgroundImageUrl,
+    textBackgroundSavedImageId,
+    textBackgroundVideo,
+    textBackgroundVideoUrl,
+    textBackgroundSavedVideoId,
+    textAnimationEffect,
+    textAnimationSettings,
+    textAnimationText,
+    sentenceText,
     visualEffect,
   ]);
 
@@ -551,6 +757,11 @@ export function ImageEffectsDetailModal({
     : draftImageMotionSettings?.presetKey === 'custom'
       ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
     : `builtin:${resolveMotionEffectFromSettings(draftImageMotionSettings, draftImageMotionEffect ?? 'default')}`;
+  const textSelectValue = draftCustomTextAnimationId
+    ? `custom:${draftCustomTextAnimationId}`
+    : draftTextAnimationSettings?.presetKey === 'custom'
+      ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
+      : `builtin:${resolveTextAnimationEffectFromSettings(draftTextAnimationSettings, draftTextAnimationEffect)}`;
   const isBuiltinDefaultScaleMotion =
     !draftCustomMotionEffectId &&
     resolveMotionEffectFromSettings(
@@ -629,6 +840,38 @@ export function ImageEffectsDetailModal({
     setDraftImageMotionSpeed(settings.speed ?? getDefaultImageMotionSpeed(isShortVideo));
   };
 
+  const handleTextPresetChange = (value: string) => {
+    if (value.startsWith('custom:')) {
+      const presetId = value.slice('custom:'.length);
+      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) return;
+
+      const preset = textAnimationPresets.find((item) => item.id === presetId);
+      if (!preset) return;
+
+      const effect = resolveTextAnimationEffectFromSettings(
+        preset.settings,
+        draftTextAnimationEffect,
+      );
+      const settings = normalizeTextAnimationSettings(
+        preset.settings,
+        effect,
+        isShortVideo,
+      );
+
+      setDraftTextAnimationEffect(effect);
+      setDraftCustomTextAnimationId(preset.id);
+      setDraftTextAnimationSettings({ ...settings, presetKey: 'custom' });
+      setTextActionError(null);
+      return;
+    }
+
+    const effect = value.replace('builtin:', '') as SentenceItem['textAnimationEffect'];
+    setDraftTextAnimationEffect(effect);
+    setDraftCustomTextAnimationId(null);
+    setDraftTextAnimationSettings(getDefaultTextAnimationSettings(effect, isShortVideo));
+    setTextActionError(null);
+  };
+
   const updateLookSettings = (patch: Partial<ImageFilterSettings>) => {
     const nextSettings: ImageFilterSettings = {
       ...resolvedLook,
@@ -652,6 +895,79 @@ export function ImageEffectsDetailModal({
     setDraftImageMotionSettings(nextSettings);
     setDraftImageMotionSpeed(nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo));
     setMotionActionError(null);
+  };
+
+  const updateTextSettings = (patch: Partial<TextAnimationSettings>) => {
+    const nextSettings: TextAnimationSettings = {
+      ...resolvedText,
+      ...patch,
+      presetKey: 'custom',
+    };
+    setDraftTextAnimationEffect(
+      resolveTextAnimationEffectFromSettings(nextSettings, draftTextAnimationEffect),
+    );
+    setDraftTextAnimationSettings(nextSettings);
+    setTextActionError(null);
+  };
+
+  const handleTextBackgroundUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file || !file.type.startsWith('image/')) return;
+
+    setDraftTextBackgroundImage(file);
+    setDraftTextBackgroundImageUrl(null);
+    setDraftTextBackgroundSavedImageId(null);
+    setDraftCustomTextAnimationId(null);
+    setDraftTextAnimationSettings({
+      ...resolvedText,
+      backgroundMode: 'image',
+      presetKey: 'custom',
+    });
+    setTextActionError(null);
+    event.target.value = '';
+  };
+
+  const handleTextBackgroundVideoUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file || !file.type.startsWith('video/')) return;
+
+    setDraftTextBackgroundVideo(file);
+    setDraftTextBackgroundVideoUrl(null);
+    setDraftTextBackgroundSavedVideoId(null);
+    setDraftCustomTextAnimationId(null);
+    setDraftTextAnimationSettings({
+      ...resolvedText,
+      backgroundMode: 'video',
+      presetKey: 'custom',
+    });
+    setTextActionError(null);
+    event.target.value = '';
+  };
+
+  const handleRemoveTextBackground = () => {
+    setDraftTextBackgroundImage(null);
+    setDraftTextBackgroundImageUrl(null);
+    setDraftTextBackgroundSavedImageId(null);
+    setDraftCustomTextAnimationId(null);
+    setDraftTextAnimationSettings({
+      ...resolvedText,
+      backgroundMode: 'image',
+      presetKey: 'custom',
+    });
+    setTextActionError(null);
+  };
+
+  const handleRemoveTextBackgroundVideo = () => {
+    setDraftTextBackgroundVideo(null);
+    setDraftTextBackgroundVideoUrl(null);
+    setDraftTextBackgroundSavedVideoId(null);
+    setDraftCustomTextAnimationId(null);
+    setDraftTextAnimationSettings({
+      ...resolvedText,
+      backgroundMode: 'video',
+      presetKey: 'custom',
+    });
+    setTextActionError(null);
   };
 
   const updateAllEndValueModes = (value: 'loop' | 'continue') => {
@@ -698,6 +1014,23 @@ export function ImageEffectsDetailModal({
     setIsSavingMotionPreset(false);
   };
 
+  const handleSaveTextPreset = async () => {
+    if (!isTextSaveTitleValid || isSavingTextPreset) return;
+    setIsSavingTextPreset(true);
+    setTextActionError(null);
+    try {
+      const saved = await onSaveTextAnimationPreset(trimmedTextSaveTitle, resolvedText);
+      if (saved) {
+        setDraftCustomTextAnimationId(saved.id);
+        setDraftTextAnimationSettings({ ...resolvedText, presetKey: 'custom' });
+        setTextSaveTitle('');
+      }
+    } catch (error) {
+      setTextActionError(error instanceof Error ? error.message : 'Failed to save text preset.');
+    }
+    setIsSavingTextPreset(false);
+  };
+
   const handleOverrideLookPreset = async () => {
     if (!selectedLookPreset || !canOverrideLookPreset || isOverridingLookPreset) return;
     setIsOverridingLookPreset(true);
@@ -730,6 +1063,22 @@ export function ImageEffectsDetailModal({
       );
     }
     setIsOverridingMotionPreset(false);
+  };
+
+  const handleOverrideTextPreset = async () => {
+    if (!selectedTextPreset || !canOverrideTextPreset || isOverridingTextPreset) return;
+    setIsOverridingTextPreset(true);
+    setTextActionError(null);
+    try {
+      const saved = await onUpdateTextAnimationPreset(selectedTextPreset.id, resolvedText);
+      if (saved) {
+        setDraftCustomTextAnimationId(saved.id);
+        setDraftTextAnimationSettings({ ...resolvedText, presetKey: 'custom' });
+      }
+    } catch (error) {
+      setTextActionError(error instanceof Error ? error.message : 'Failed to override text preset.');
+    }
+    setIsOverridingTextPreset(false);
   };
 
   const handleDeleteLookPreset = async () => {
@@ -776,6 +1125,28 @@ export function ImageEffectsDetailModal({
       );
     }
     setIsDeletingMotionPreset(false);
+  };
+
+  const handleDeleteTextPreset = async () => {
+    if (!selectedTextPreset || isDeletingTextPreset) return;
+    setIsDeletingTextPreset(true);
+    setTextActionError(null);
+    try {
+      const deleted = await onDeleteTextAnimationPreset(selectedTextPreset.id);
+      if (deleted) {
+        const fallbackEffect = draftTextAnimationEffect ?? 'popInBounceHook';
+        setDraftTextAnimationEffect(fallbackEffect);
+        setDraftCustomTextAnimationId(null);
+        setDraftTextAnimationSettings(
+          getDefaultTextAnimationSettings(fallbackEffect, isShortVideo),
+        );
+        setTextSaveTitle('');
+        setDeletePresetKind(null);
+      }
+    } catch (error) {
+      setTextActionError(error instanceof Error ? error.message : 'Failed to delete text preset.');
+    }
+    setIsDeletingTextPreset(false);
   };
 
   const handleGenerateLookWithAi = async () => {
@@ -833,6 +1204,10 @@ export function ImageEffectsDetailModal({
       draftCustomMotionEffectId && !isMotionDirtyFromSelectedPreset
         ? draftCustomMotionEffectId
         : null;
+    const nextCustomTextAnimationId =
+      draftCustomTextAnimationId && !isTextDirtyFromSelectedPreset
+        ? draftCustomTextAnimationId
+        : null;
 
     onApply({
       visualEffect: draftVisualEffect,
@@ -847,6 +1222,19 @@ export function ImageEffectsDetailModal({
           : { ...resolvedMotion, presetKey: 'custom' },
       imageMotionSpeed:
         resolvedMotion.speed ?? draftImageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
+      textAnimationEffect: draftTextAnimationEffect,
+      customTextAnimationId: nextCustomTextAnimationId,
+      textAnimationSettings:
+        nextCustomTextAnimationId
+          ? resolvedText
+          : { ...resolvedText, presetKey: 'custom' },
+      textAnimationText: String(draftTextAnimationText ?? '').trim() || null,
+      textBackgroundImage: draftTextBackgroundImage,
+      textBackgroundImageUrl: draftTextBackgroundImageUrl,
+      textBackgroundSavedImageId: draftTextBackgroundSavedImageId,
+      textBackgroundVideo: draftTextBackgroundVideo,
+      textBackgroundVideoUrl: draftTextBackgroundVideoUrl,
+      textBackgroundSavedVideoId: draftTextBackgroundSavedVideoId,
     });
     handleRequestClose();
   };
@@ -870,9 +1258,13 @@ export function ImageEffectsDetailModal({
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-300">Detailed settings</p>
-              <h3 className="mt-2 text-2xl font-semibold">Image effects studio</h3>
+              <h3 className="mt-2 text-2xl font-semibold">
+                {currentTab === 'text' ? 'Text animation studio' : 'Image effects studio'}
+              </h3>
               <p className="mt-1 text-sm text-slate-300">
-                Look edits preview as a still. Motion edits preview with your current look applied.
+                {currentTab === 'text'
+                  ? 'Tune flashy hook text, background modes, and reusable animation presets.'
+                  : 'Look edits preview as a still. Motion edits preview with your current look applied.'}
               </p>
             </div>
             <button
@@ -909,10 +1301,36 @@ export function ImageEffectsDetailModal({
               <Clapperboard className="mr-2 h-4 w-4" />
               Motion
             </Button>
+            <Button
+              type="button"
+              onClick={() => setCurrentTab('text')}
+              className={
+                currentTab === 'text'
+                  ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
+                  : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
+              }
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              Text
+            </Button>
           </div>
 
           <div className="mt-6 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/30 p-4">
-            {previewImageUrl ? (
+            {currentTab === 'text' ? (
+              <TextAnimationPreview
+                sentenceText={sentenceText}
+                text={draftTextAnimationText}
+                effect={draftTextAnimationEffect}
+                settings={resolvedText}
+                backgroundImageUrl={resolvedTextPreviewBackgroundUrl}
+                backgroundVideoUrl={resolvedTextPreviewBackgroundVideoUrl}
+                isShortVideo={isShortVideo}
+                className={`${textPreviewFrameClass} overflow-hidden rounded-[1.5rem]`}
+                contentClassName="p-[7%]"
+                enableMotion
+                motionResetKey={`${currentTab}-${draftTextAnimationEffect}-${resolvedText.speed ?? 1}-${resolvedText.animationIntensity ?? 1}`}
+              />
+            ) : previewImageUrl ? (
               <ImageEffectPreview
                 visualEffect={debouncedPreview.visualEffect}
                 imageMotionEffect={debouncedPreview.imageMotionEffect}
@@ -941,12 +1359,18 @@ export function ImageEffectsDetailModal({
         <div className="flex w-107.5 shrink-0 flex-col border-l border-slate-200 bg-slate-50">
           <div className="border-b border-slate-200 px-6 py-5">
             <h4 className="text-lg font-semibold text-slate-900">
-              {currentTab === 'visual' ? 'Look controls' : 'Motion controls'}
+              {currentTab === 'visual'
+                ? 'Look controls'
+                : currentTab === 'motion'
+                  ? 'Motion controls'
+                  : 'Text controls'}
             </h4>
             <p className="mt-1 text-sm text-slate-500">
               {currentTab === 'visual'
                 ? 'Blend preset selection with direct filter tuning.'
-                : 'Tune transform values and save reusable motion presets.'}
+                : currentTab === 'motion'
+                  ? 'Tune transform values and save reusable motion presets.'
+                  : 'Edit hook text, layout, colors, and reusable animation presets.'}
             </p>
           </div>
 
@@ -961,7 +1385,329 @@ export function ImageEffectsDetailModal({
           </div>
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-            {currentTab === 'visual' ? (
+            {currentTab === 'text' ? (
+              <>
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-amber-600" />
+                      Text preset
+                    </div>
+                    {selectedTextPreset ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                        onClick={() => setDeletePresetKind('text')}
+                        disabled={isDeletingTextPreset || isOverridingTextPreset || isSavingTextPreset}
+                      >
+                        {isDeletingTextPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Select value={textSelectValue} onValueChange={handleTextPresetChange}>
+                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                      <SelectValue placeholder="Choose text preset" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      {TEXT_ANIMATION_EFFECT_VALUES.map((value) => (
+                        <SelectItem key={value} value={`builtin:${value}`}>
+                          {getTextAnimationEffectLabel(value)}
+                        </SelectItem>
+                      ))}
+                      {draftTextAnimationSettings?.presetKey === 'custom' ? (
+                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                          Custom
+                        </SelectItem>
+                      ) : null}
+                      {textAnimationPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                          {preset.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <SlidersHorizontal className="h-4 w-4 text-amber-600" />
+                    Text tuning
+                  </div>
+                  <label className="space-y-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Hook text</span>
+                    <Input
+                      value={draftTextAnimationText}
+                      onChange={(e) => setDraftTextAnimationText(e.target.value)}
+                      placeholder={resolveTextAnimationText(null, sentenceText)}
+                      className="h-11 rounded-xl border-slate-200"
+                    />
+                  </label>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-3">
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Horizontal align</div>
+                      <Select
+                        value={resolvedText.horizontalAlign ?? 'center'}
+                        onValueChange={(value) => updateTextSettings({ horizontalAlign: value as TextAnimationSettings['horizontalAlign'] })}
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Horizontal align" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="left">Left</SelectItem>
+                          <SelectItem value="center">Center</SelectItem>
+                          <SelectItem value="right">Right</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Vertical align</div>
+                      <Select
+                        value={resolvedText.verticalAlign ?? 'middle'}
+                        onValueChange={(value) => updateTextSettings({ verticalAlign: value as TextAnimationSettings['verticalAlign'] })}
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Vertical align" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="top">Top</SelectItem>
+                          <SelectItem value="middle">Middle</SelectItem>
+                          <SelectItem value="bottom">Bottom</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text color</span>
+                      <Input type="color" value={resolvedText.textColor ?? '#ffffff'} onChange={(e) => updateTextSettings({ textColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                    </div>
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Accent color</span>
+                      <Input type="color" value={resolvedText.accentColor ?? '#facc15'} onChange={(e) => updateTextSettings({ accentColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Background mode</div>
+                    <Select
+                      value={resolvedText.backgroundMode ?? 'inheritImage'}
+                      onValueChange={(value) => updateTextSettings({ backgroundMode: value as TextAnimationSettings['backgroundMode'] })}
+                    >
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                        <SelectValue placeholder="Background mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="inheritImage">Use image tab image</SelectItem>
+                        <SelectItem value="image">Custom background image</SelectItem>
+                        <SelectItem value="inheritVideo">Use video tab video</SelectItem>
+                        <SelectItem value="video">Custom background video</SelectItem>
+                        <SelectItem value="solid">Solid color</SelectItem>
+                        <SelectItem value="gradient">Gradient</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <input
+                    ref={textBackgroundInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleTextBackgroundUpload}
+                    className="hidden"
+                  />
+                  <input
+                    ref={textBackgroundVideoInputRef}
+                    type="file"
+                    accept="video/*"
+                    onChange={handleTextBackgroundVideoUpload}
+                    className="hidden"
+                  />
+                  {resolvedText.backgroundMode === 'inheritImage' ? (
+                    previewTextInheritedImageUrl ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        This text scene is using the current image tab image as its background.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        No image is currently available on the image tab. Upload one there or switch this text scene to a custom image, solid color, or gradient background.
+                      </div>
+                    )
+                  ) : null}
+                  {resolvedText.backgroundMode === 'inheritVideo' ? (
+                    resolvedTextPreviewBackgroundVideoUrl ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        This text scene is using the current video tab video as its background.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        No video is currently available on the video tab. Upload one there or switch this text scene to a custom video, image, solid color, or gradient background.
+                      </div>
+                    )
+                  ) : null}
+                  {resolvedText.backgroundMode === 'image' ? (
+                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Background image</p>
+                          <p className="text-xs text-slate-500">Upload a dedicated image for this text scene.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => textBackgroundInputRef.current?.click()}
+                            className="h-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload
+                          </Button>
+                          {customTextBackgroundPreviewUrl ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleRemoveTextBackground}
+                              className="h-9 rounded-xl border-red-200 bg-white text-red-600 hover:bg-red-50"
+                            >
+                              <X className="mr-2 h-4 w-4" />
+                              Remove
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {customTextBackgroundPreviewUrl ? (
+                        <img
+                          src={customTextBackgroundPreviewUrl}
+                          alt="Text scene background"
+                          className="h-36 w-full rounded-xl object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-sm text-slate-500">
+                          Upload a background image to preview this text scene.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  {resolvedText.backgroundMode === 'video' ? (
+                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Background video</p>
+                          <p className="text-xs text-slate-500">Upload a dedicated looping video for this text scene.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => textBackgroundVideoInputRef.current?.click()}
+                            className="h-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload
+                          </Button>
+                          {customTextBackgroundVideoPreviewUrl ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleRemoveTextBackgroundVideo}
+                              className="h-9 rounded-xl border-red-200 bg-white text-red-600 hover:bg-red-50"
+                            >
+                              <X className="mr-2 h-4 w-4" />
+                              Remove
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {customTextBackgroundVideoPreviewUrl ? (
+                        <video
+                          src={customTextBackgroundVideoPreviewUrl}
+                          className="h-36 w-full rounded-xl object-cover"
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                        />
+                      ) : (
+                        <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white text-sm text-slate-500">
+                          Upload a background video to preview this text scene.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  {resolvedText.backgroundMode === 'solid' ? (
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Background color</span>
+                      <Input type="color" value={resolvedText.backgroundColor ?? '#0f172a'} onChange={(e) => updateTextSettings({ backgroundColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                    </div>
+                  ) : null}
+                  {resolvedText.backgroundMode === 'gradient' ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Gradient from</span>
+                        <Input type="color" value={resolvedText.gradientFrom ?? '#0f172a'} onChange={(e) => updateTextSettings({ gradientFrom: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                      </div>
+                      <div className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Gradient to</span>
+                        <Input type="color" value={resolvedText.gradientTo ?? '#1d4ed8'} onChange={(e) => updateTextSettings({ gradientTo: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                      </div>
+                    </div>
+                  ) : null}
+                  <RangeField label="Speed" value={resolvedText.speed ?? 1} min={0.4} max={2.4} step={0.1} onChange={(value) => updateTextSettings({ speed: value })} />
+                  <RangeField label="Font size" value={resolvedText.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateTextSettings({ fontSizePercent: value })} />
+                  <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
+                  <RangeField label="Offset X" value={resolvedText.offsetX ?? 0} min={-35} max={35} step={1} onChange={(value) => updateTextSettings({ offsetX: value })} />
+                  <RangeField label="Offset Y" value={resolvedText.offsetY ?? 0} min={-35} max={35} step={1} onChange={(value) => updateTextSettings({ offsetY: value })} />
+                  <RangeField label="Background dim" value={resolvedText.backgroundDim ?? 0.38} min={0} max={0.92} step={0.01} onChange={(value) => updateTextSettings({ backgroundDim: value })} />
+                  <RangeField label="Animation intensity" value={resolvedText.animationIntensity ?? 0.82} min={0} max={1.2} step={0.01} onChange={(value) => updateTextSettings({ animationIntensity: value })} />
+                </div>
+
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <Save className="h-4 w-4 text-amber-600" />
+                    Output actions
+                  </div>
+                  <div className="space-y-2 text-sm text-slate-600">
+                    <p>Apply updates only this text scene in the editor.</p>
+                    <p>Save as new preset creates a reusable text animation preset with a different title.</p>
+                    {selectedTextPreset ? (
+                      <p>Override preset updates {selectedTextPreset.title} in your preset library.</p>
+                    ) : null}
+                  </div>
+                  {textActionError ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {textActionError}
+                    </div>
+                  ) : null}
+                  {canSaveTextAsNew ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={textSaveTitle}
+                        onChange={(e) => setTextSaveTitle(e.target.value)}
+                        placeholder={selectedTextPreset ? 'New preset title' : 'Preset title'}
+                        className="h-11 rounded-xl border-slate-200"
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleSaveTextPreset}
+                        disabled={!isTextSaveTitleValid || isSavingTextPreset}
+                        className="h-11 rounded-xl bg-amber-600 px-4 text-white hover:bg-amber-700"
+                      >
+                        {isSavingTextPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        Save as new preset
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleOverrideTextPreset}
+                    disabled={!canOverrideTextPreset || isOverridingTextPreset}
+                    className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  >
+                    {isOverridingTextPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Override preset
+                  </Button>
+                </div>
+              </>
+            ) : currentTab === 'visual' ? (
               <>
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
@@ -1226,18 +1972,37 @@ export function ImageEffectsDetailModal({
 
           if (deletePresetKind === 'motion') {
             void handleDeleteMotionPreset();
+            return;
+          }
+
+          if (deletePresetKind === 'text') {
+            void handleDeleteTextPreset();
           }
         }}
         variant="danger"
-        title={deletePresetKind === 'visual' ? 'Delete look preset?' : 'Delete motion preset?'}
+        title={
+          deletePresetKind === 'visual'
+            ? 'Delete look preset?'
+            : deletePresetKind === 'motion'
+              ? 'Delete motion preset?'
+              : 'Delete text preset?'
+        }
         description={
           deletePresetKind === 'visual'
             ? 'This deletes the selected look preset from your library and resets this image to the built-in none look.'
-            : 'This deletes the selected motion preset from your library and resets this image to the built-in default motion.'
+            : deletePresetKind === 'motion'
+              ? 'This deletes the selected motion preset from your library and resets this image to the built-in default motion.'
+              : 'This deletes the selected text preset from your library and resets this scene to the built-in pop-in / bounce text animation.'
         }
-        confirmText={deletePresetKind === 'visual' ? 'Delete look preset' : 'Delete motion preset'}
+        confirmText={
+          deletePresetKind === 'visual'
+            ? 'Delete look preset'
+            : deletePresetKind === 'motion'
+              ? 'Delete motion preset'
+              : 'Delete text preset'
+        }
         cancelText="Cancel"
-        isLoading={isDeletingLookPreset || isDeletingMotionPreset}
+        isLoading={isDeletingLookPreset || isDeletingMotionPreset || isDeletingTextPreset}
       />
     </div>
   );

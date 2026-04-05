@@ -84,8 +84,20 @@ import {
   type ImageMotionSettings,
   type MotionEffectPresetDto,
 } from './ImageEffectPreview';
+import {
+  getDefaultTextAnimationSettings,
+  getTextAnimationEffectLabel,
+  normalizeTextAnimationSettings,
+  resolveTextAnimationEffectFromSettings,
+  resolveTextAnimationText,
+  TextAnimationPreview,
+  TEXT_ANIMATION_EFFECT_VALUES,
+  type TextAnimationPresetDto,
+  type TextAnimationSettings,
+} from './TextAnimationPreview';
 import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
+import { TextPreviewOverlay } from './TextPreviewOverlay';
 import {
   DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
   cloneSoundEffectAudioSettings,
@@ -401,8 +413,10 @@ type SentenceEditorCardProps = {
   onForcedLocationKeyChange: (next: string | null) => void;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
+  textAnimationPresets: TextAnimationPresetDto[];
   isLoadingImageFilterPresets: boolean;
   isLoadingMotionEffectPresets: boolean;
+  isLoadingTextAnimationPresets: boolean;
   onSentencePatch: (patch: Partial<SentenceItem>) => void;
   onSaveImageFilterPreset: (
     title: string,
@@ -422,6 +436,15 @@ type SentenceEditorCardProps = {
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
   onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onSaveTextAnimationPreset: (
+    title: string,
+    settings: TextAnimationSettings,
+  ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
+  onUpdateTextAnimationPreset: (
+    presetId: string,
+    settings: TextAnimationSettings,
+  ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
+  onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
   onGenerateSingleImageLookWithAi: (
     sentenceId: string,
     params: {
@@ -544,8 +567,10 @@ function SentenceEditorCardComponent({
   onForcedLocationKeyChange,
   imageFilterPresets,
   motionEffectPresets,
+  textAnimationPresets,
   isLoadingImageFilterPresets,
   isLoadingMotionEffectPresets,
+  isLoadingTextAnimationPresets,
   onSentencePatch,
   onSaveImageFilterPreset,
   onUpdateImageFilterPreset,
@@ -553,6 +578,9 @@ function SentenceEditorCardComponent({
   onSaveMotionEffectPreset,
   onUpdateMotionEffectPreset,
   onDeleteMotionEffectPreset,
+  onSaveTextAnimationPreset,
+  onUpdateTextAnimationPreset,
+  onDeleteTextAnimationPreset,
   onGenerateSingleImageLookWithAi,
   onGenerateSingleImageMotionWithAi,
 
@@ -613,7 +641,12 @@ function SentenceEditorCardComponent({
   const hasAnyImage = Boolean(
     item.image || item.imageUrl || item.secondaryImage || item.secondaryImageUrl,
   );
-  const mediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
+  const legacyMediaMode: 'single' | 'frames' = item.mediaMode ?? 'single';
+  const sceneTab = item.sceneTab ?? (legacyMediaMode === 'frames' ? 'video' : 'image');
+  const isImageSceneTab = sceneTab === 'image';
+  const isVideoSceneTab = sceneTab === 'video';
+  const isTextSceneTab = sceneTab === 'text';
+  const mediaMode: 'single' | 'frames' = isVideoSceneTab ? 'frames' : 'single';
 
   const soundEffects = useMemo(
     () => (Array.isArray(item.soundEffects) ? item.soundEffects : []),
@@ -1018,21 +1051,30 @@ function SentenceEditorCardComponent({
 
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
   const [isForcedLocationOpen, setIsForcedLocationOpen] = useState(false);
-  const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion'>('visual');
+  const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion' | 'text'>('visual');
   const [isImageEffectsDetailModalOpen, setIsImageEffectsDetailModalOpen] = useState(false);
+  const [isTextPreviewOverlayOpen, setIsTextPreviewOverlayOpen] = useState(false);
+  const [isTextPreviewOverlayClosing, setIsTextPreviewOverlayClosing] = useState(false);
   const isUploadingSoundEffectActive = isUploadingSoundEffect || isUploadingSoundEffectLocal;
-  const isImageSceneTab = mediaMode === 'single';
   const imageEffectsMode = item.imageEffectsMode ?? 'quick';
   const shouldAnimateImagePreview = isImageSceneTab;
 
   useEffect(() => {
-    if (isImageSceneTab) return;
-    if (imageEffectsTab !== 'motion') return;
-    setImageEffectsTab('visual');
-  }, [imageEffectsTab, isImageSceneTab]);
+    if (isTextSceneTab) {
+      if (imageEffectsTab === 'motion') {
+        setImageEffectsTab('text');
+      }
+      return;
+    }
+
+    if (!isImageSceneTab && imageEffectsTab === 'motion') {
+      setImageEffectsTab('visual');
+    }
+  }, [imageEffectsTab, isImageSceneTab, isTextSceneTab]);
 
   const handleSoundEffectsDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+
     if (!over || active.id === over.id) return;
 
     const oldIndex = soundEffects.findIndex(
@@ -1193,18 +1235,64 @@ function SentenceEditorCardComponent({
           : `builtin:${resolveMotionEffectFromSettings(item.imageMotionSettings, item.imageMotionEffect ?? 'default')}`,
     [item.customMotionEffectId, item.imageMotionEffect, item.imageMotionSettings],
   );
+  const resolvedTextAnimationEffect = useMemo(
+    () => resolveTextAnimationEffectFromSettings(item.textAnimationSettings, item.textAnimationEffect),
+    [item.textAnimationEffect, item.textAnimationSettings],
+  );
+  const resolvedTextAnimationSettings = useMemo(
+    () =>
+      normalizeTextAnimationSettings(
+        item.textAnimationSettings,
+        resolvedTextAnimationEffect,
+        isShortVideo,
+      ),
+    [isShortVideo, item.textAnimationSettings, resolvedTextAnimationEffect],
+  );
+  const resolvedTextAnimationLabel = useMemo(
+    () => getTextAnimationEffectLabel(resolvedTextAnimationEffect),
+    [resolvedTextAnimationEffect],
+  );
+  const quickTextAnimationSelectValue = useMemo(
+    () =>
+      item.customTextAnimationId
+        ? `custom:${item.customTextAnimationId}`
+        : item.textAnimationSettings?.presetKey === 'custom'
+          ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
+          : `builtin:${resolvedTextAnimationEffect}`,
+    [item.customTextAnimationId, item.textAnimationSettings?.presetKey, resolvedTextAnimationEffect],
+  );
 
   const imagePreviewObjectUrl = useManagedObjectUrl(item.image);
+  const videoPreviewObjectUrl = useManagedObjectUrl(item.video);
   const secondaryImagePreviewObjectUrl = useManagedObjectUrl(item.secondaryImage);
   const startPreviewObjectUrl = useManagedObjectUrl(item.startImage);
   const endPreviewObjectUrl = useManagedObjectUrl(item.endImage);
   const referencePreviewObjectUrl = useManagedObjectUrl(item.referenceImage);
+  const textBackgroundPreviewObjectUrl = useManagedObjectUrl(item.textBackgroundImage);
+  const textBackgroundVideoPreviewObjectUrl = useManagedObjectUrl(item.textBackgroundVideo);
 
   const imagePreviewUrl = imagePreviewObjectUrl ?? item.imageUrl ?? null;
+  const videoPreviewUrl = videoPreviewObjectUrl ?? item.videoUrl ?? null;
   const secondaryImagePreviewUrl = secondaryImagePreviewObjectUrl ?? item.secondaryImageUrl ?? null;
   const startPreviewUrl = startPreviewObjectUrl ?? item.startImageUrl ?? null;
   const endPreviewUrl = endPreviewObjectUrl ?? item.endImageUrl ?? null;
   const referencePreviewUrl = referencePreviewObjectUrl ?? item.referenceImageUrl ?? null;
+  const textBackgroundPreviewUrl =
+    textBackgroundPreviewObjectUrl ?? item.textBackgroundImageUrl ?? null;
+  const textBackgroundVideoPreviewUrl =
+    textBackgroundVideoPreviewObjectUrl ?? item.textBackgroundVideoUrl ?? null;
+  const textPreviewBackgroundUrl =
+    resolvedTextAnimationSettings.backgroundMode === 'image'
+      ? textBackgroundPreviewUrl
+      : resolvedTextAnimationSettings.backgroundMode === 'inheritImage'
+        ? imagePreviewUrl
+        : null;
+  const textPreviewBackgroundVideoUrl =
+    resolvedTextAnimationSettings.backgroundMode === 'video'
+      ? textBackgroundVideoPreviewUrl
+      : resolvedTextAnimationSettings.backgroundMode === 'inheritVideo'
+        ? videoPreviewUrl
+        : null;
   const detailPreviewUrl =
     imagePreviewUrl ??
     secondaryImagePreviewUrl ??
@@ -1213,13 +1301,13 @@ function SentenceEditorCardComponent({
     endPreviewUrl ??
     null;
   const showSecondaryImageSlot =
-    mediaMode === 'single' &&
+    isImageSceneTab &&
     !hasAnyVideo &&
     (item.hasSecondaryImageSlot === true || Boolean(secondaryImagePreviewUrl));
   const hasStart = Boolean(startPreviewUrl);
   const hasEnd = Boolean(endPreviewUrl);
   const canGenerateVideo =
-    mediaMode === 'frames' &&
+    isVideoSceneTab &&
     (effectiveVideoGenerationMode === 'frames'
       ? hasStart && hasEnd
       : effectiveVideoGenerationMode === 'text'
@@ -1327,9 +1415,107 @@ function SentenceEditorCardComponent({
     });
   };
 
-  const openImageEffectsModal = (tab: 'visual' | 'motion') => {
+  const handleTextAnimationPresetSelect = (value: string) => {
+    if (value.startsWith('custom:')) {
+      const presetId = value.slice('custom:'.length);
+      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) return;
+
+      const preset = textAnimationPresets.find((candidate) => candidate.id === presetId);
+      if (!preset) return;
+
+      const nextEffect = resolveTextAnimationEffectFromSettings(
+        preset.settings,
+        item.textAnimationEffect ?? resolvedTextAnimationEffect,
+      );
+      const nextSettings = normalizeTextAnimationSettings(
+        preset.settings,
+        nextEffect,
+        isShortVideo,
+      );
+
+      onSentencePatch({
+        textAnimationEffect: nextEffect,
+        customTextAnimationId: preset.id,
+        textAnimationSettings: { ...nextSettings, presetKey: 'custom' },
+      });
+      return;
+    }
+
+    const effect = value.slice('builtin:'.length) as SentenceItem['textAnimationEffect'];
+    onSentencePatch({
+      textAnimationEffect: effect,
+      customTextAnimationId: null,
+      textAnimationSettings: getDefaultTextAnimationSettings(effect, isShortVideo),
+    });
+  };
+
+  const updateTextAnimationSettings = (patch: Partial<TextAnimationSettings>) => {
+    onSentencePatch({
+      customTextAnimationId: null,
+      textAnimationSettings: {
+        ...resolvedTextAnimationSettings,
+        ...patch,
+        presetKey: 'custom',
+      },
+    });
+  };
+
+  const handleTextBackgroundUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file || !file.type.startsWith('image/')) return;
+
+    onSentencePatch({
+      textBackgroundImage: file,
+      textBackgroundImageUrl: null,
+      textBackgroundSavedImageId: null,
+      customTextAnimationId: null,
+      textAnimationSettings: {
+        ...resolvedTextAnimationSettings,
+        backgroundMode: 'image',
+        presetKey: 'custom',
+      },
+    });
+
+    event.target.value = '';
+  };
+
+  const handleTextBackgroundVideoUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file || !file.type.startsWith('video/')) return;
+
+    onSentencePatch({
+      textBackgroundVideo: file,
+      textBackgroundVideoUrl: null,
+      textBackgroundSavedVideoId: null,
+      customTextAnimationId: null,
+      textAnimationSettings: {
+        ...resolvedTextAnimationSettings,
+        backgroundMode: 'video',
+        presetKey: 'custom',
+      },
+    });
+
+    event.target.value = '';
+  };
+
+  const openImageEffectsModal = (tab: 'visual' | 'motion' | 'text') => {
     setImageEffectsTab(tab);
     setIsImageEffectsDetailModalOpen(true);
+  };
+
+  const openTextPreviewOverlay = () => {
+    setIsTextPreviewOverlayClosing(false);
+    setIsTextPreviewOverlayOpen(true);
+  };
+
+  const closeTextPreviewOverlay = () => {
+    if (isTextPreviewOverlayClosing) return;
+
+    setIsTextPreviewOverlayClosing(true);
+    window.setTimeout(() => {
+      setIsTextPreviewOverlayOpen(false);
+      setIsTextPreviewOverlayClosing(false);
+    }, 200);
   };
 
   const openVideoModeMenu = () => {
@@ -1389,7 +1575,7 @@ function SentenceEditorCardComponent({
               variant="ghost"
               onClick={() => onSentenceMediaModeChange('single')}
               className={
-                mediaMode === 'single'
+                isImageSceneTab
                   ? 'h-9 px-4 text-sm font-bold rounded-xl bg-white text-indigo-600 shadow-md hover:bg-white hover:text-indigo-600'
                   : 'h-9 px-4 text-sm font-semibold rounded-xl text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }
@@ -1403,7 +1589,7 @@ function SentenceEditorCardComponent({
               variant="ghost"
               onClick={() => onSentenceMediaModeChange('frames')}
               className={
-                mediaMode === 'frames'
+                isVideoSceneTab
                   ? 'h-9 px-4 text-sm font-bold rounded-xl bg-white text-indigo-600 shadow-md hover:bg-white hover:text-indigo-600'
                   : 'h-9 px-4 text-sm font-semibold rounded-xl text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }
@@ -1411,135 +1597,197 @@ function SentenceEditorCardComponent({
               <VideoIcon className="h-4 w-4 mr-2" />
               Video
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onSentencePatch({ sceneTab: 'text', mediaMode: 'single' })}
+              className={
+                isTextSceneTab
+                  ? 'h-9 px-4 text-sm font-bold rounded-xl bg-white text-indigo-600 shadow-md hover:bg-white hover:text-indigo-600'
+                  : 'h-9 px-4 text-sm font-semibold rounded-xl text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Text
+            </Button>
           </div>
 
-          <div className="shrink-0 flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50/80 p-1.5 shadow-sm">
-            <div className="inline-flex items-center gap-1 rounded-xl bg-white p-1 shadow-inner">
+          {isTextSceneTab ? (
+            <div className="shrink-0 flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50/80 p-1.5 shadow-sm">
+              <Select
+                value={quickTextAnimationSelectValue}
+                onValueChange={handleTextAnimationPresetSelect}
+                disabled={isLoadingTextAnimationPresets}
+              >
+                <SelectTrigger
+                  className="h-9 min-w-72 border-amber-200 bg-white text-gray-700 shadow-sm"
+                  title={`Text animation preset: ${resolvedTextAnimationLabel}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    <SelectValue placeholder="Text animation" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  {TEXT_ANIMATION_EFFECT_VALUES.map((value) => (
+                    <SelectItem key={value} value={`builtin:${value}`}>
+                      {getTextAnimationEffectLabel(value)}
+                    </SelectItem>
+                  ))}
+                  {item.textAnimationSettings?.presetKey === 'custom' ? (
+                    <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                      Custom
+                    </SelectItem>
+                  ) : null}
+                  {textAnimationPresets.map((preset) => (
+                    <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                      {preset.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
-                onClick={() => onSentencePatch({ imageEffectsMode: 'quick' })}
-                className={
-                  imageEffectsMode === 'quick'
-                    ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
-                    : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                }
-                title="Use quick image effect presets"
+                variant="outline"
+                onClick={() => openImageEffectsModal('text')}
+                className="h-9 rounded-xl border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
               >
-                Quick
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => onSentencePatch({ imageEffectsMode: 'detailed' })}
-                className={
-                  imageEffectsMode === 'detailed'
-                    ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-sky-600 to-cyan-600 text-white hover:from-sky-700 hover:to-cyan-700'
-                    : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                }
-                title="Open detailed image effect controls"
-              >
-                Detailed
+                <SlidersHorizontal className="mr-2 h-4 w-4" />
+                Edit animation
               </Button>
             </div>
-
-            {imageEffectsMode === 'quick' ? (
-              <div className="grid min-w-88 grid-cols-1 gap-2 md:grid-cols-2">
-                <Select value={quickLookSelectValue} onValueChange={handleLookPresetSelect}>
-                  <SelectTrigger
-                    className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
-                    title={`Look preset: ${visualEffectLabel}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4" />
-                      <SelectValue placeholder="Look" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-80">
-                    <SelectItem value="builtin:none">None</SelectItem>
-                    {VISUAL_EFFECT_SELECT_VALUES.map((value) => (
-                      <SelectItem key={value} value={`builtin:${value}`}>
-                        {getVisualEffectLabel(value)}
-                      </SelectItem>
-                    ))}
-                    {retainedTemporaryLook ? (
-                      <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
-                        Custom
-                      </SelectItem>
-                    ) : null}
-                    {imageFilterPresets.map((preset) => (
-                      <SelectItem key={preset.id} value={`custom:${preset.id}`}>
-                        {preset.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select
-                  value={quickMotionSelectValue}
-                  onValueChange={handleMotionPresetSelect}
-                  disabled={!isImageSceneTab}
-                >
-                  <SelectTrigger
-                    className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
-                    title={
-                      isImageSceneTab
-                        ? `Motion preset: ${imageMotionEffectLabel}`
-                        : 'Motion presets are available on image scenes only'
-                    }
-                  >
-                    <div className="flex items-center gap-2">
-                      <Clapperboard className="h-4 w-4" />
-                      <SelectValue placeholder="Motion" />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-80">
-                    {IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => (
-                      <SelectItem key={value} value={`builtin:${value}`}>
-                        {getImageMotionEffectLabel(value)}
-                      </SelectItem>
-                    ))}
-                    {retainedTemporaryMotion ? (
-                      <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
-                        Custom
-                      </SelectItem>
-                    ) : null}
-                    {motionEffectPresets.map((preset) => (
-                      <SelectItem key={preset.id} value={`custom:${preset.id}`}>
-                        {preset.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
+          ) : (
+            <div className="shrink-0 flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50/80 p-1.5 shadow-sm">
+              <div className="inline-flex items-center gap-1 rounded-xl bg-white p-1 shadow-inner">
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
-                  onClick={() => openImageEffectsModal('visual')}
-                  className="h-9 rounded-xl border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"
+                  variant="ghost"
+                  onClick={() => onSentencePatch({ imageEffectsMode: 'quick' })}
+                  className={
+                    imageEffectsMode === 'quick'
+                      ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
+                      : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }
+                  title="Use quick image effect presets"
                 >
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Edit look
+                  Quick
                 </Button>
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
-                  onClick={() => openImageEffectsModal('motion')}
-                  disabled={!isImageSceneTab}
-                  className="h-9 rounded-xl border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  variant="ghost"
+                  onClick={() => onSentencePatch({ imageEffectsMode: 'detailed' })}
+                  className={
+                    imageEffectsMode === 'detailed'
+                      ? 'h-8 px-3 rounded-lg bg-linear-to-r hover:text-white from-sky-600 to-cyan-600 text-white hover:from-sky-700 hover:to-cyan-700'
+                      : 'h-8 px-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }
+                  title="Open detailed image effect controls"
                 >
-                  <Clapperboard className="mr-2 h-4 w-4" />
-                  Edit motion
+                  Detailed
                 </Button>
               </div>
-            )}
-          </div>
+
+              {imageEffectsMode === 'quick' ? (
+                <div className="grid min-w-88 grid-cols-1 gap-2 md:grid-cols-2">
+                  <Select value={quickLookSelectValue} onValueChange={handleLookPresetSelect}>
+                    <SelectTrigger
+                      className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
+                      title={`Look preset: ${visualEffectLabel}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4" />
+                        <SelectValue placeholder="Look" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      <SelectItem value="builtin:none">None</SelectItem>
+                      {VISUAL_EFFECT_SELECT_VALUES.map((value) => (
+                        <SelectItem key={value} value={`builtin:${value}`}>
+                          {getVisualEffectLabel(value)}
+                        </SelectItem>
+                      ))}
+                      {retainedTemporaryLook ? (
+                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                          Custom
+                        </SelectItem>
+                      ) : null}
+                      {imageFilterPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                          {preset.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={quickMotionSelectValue}
+                    onValueChange={handleMotionPresetSelect}
+                    disabled={!isImageSceneTab}
+                  >
+                    <SelectTrigger
+                      className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
+                      title={
+                        isImageSceneTab
+                          ? `Motion preset: ${imageMotionEffectLabel}`
+                          : 'Motion presets are available on image scenes only'
+                      }
+                    >
+                      <div className="flex items-center gap-2">
+                        <Clapperboard className="h-4 w-4" />
+                        <SelectValue placeholder="Motion" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      {IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => (
+                        <SelectItem key={value} value={`builtin:${value}`}>
+                          {getImageMotionEffectLabel(value)}
+                        </SelectItem>
+                      ))}
+                      {retainedTemporaryMotion ? (
+                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                          Custom
+                        </SelectItem>
+                      ) : null}
+                      {motionEffectPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                          {preset.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openImageEffectsModal('visual')}
+                    className="h-9 rounded-xl border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Edit look
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openImageEffectsModal('motion')}
+                    disabled={!isImageSceneTab}
+                    className="h-9 rounded-xl border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Clapperboard className="mr-2 h-4 w-4" />
+                    Edit motion
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-6 gap-0">
@@ -2364,8 +2612,277 @@ function SentenceEditorCardComponent({
 
           {/* Media Section */}
           <div className="space-y-4 lg:col-span-2 lg:pl-4">
+            {isTextSceneTab ? (
+              <div className="space-y-4">
+                <div
+                  className="group/text-preview relative overflow-hidden rounded-2xl border-2 border-amber-200 bg-slate-950 shadow-lg transition-all duration-200 hover:border-amber-300 hover:shadow-xl cursor-zoom-in"
+                  role="button"
+                  tabIndex={0}
+                  onClick={openTextPreviewOverlay}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    openTextPreviewOverlay();
+                  }}
+                  aria-label="Open full text scene preview"
+                >
+                  <TextAnimationPreview
+                    sentenceText={item.text}
+                    text={item.textAnimationText}
+                    effect={resolvedTextAnimationEffect}
+                    settings={item.textAnimationSettings}
+                    backgroundImageUrl={textPreviewBackgroundUrl}
+                    backgroundVideoUrl={textPreviewBackgroundVideoUrl}
+                    isShortVideo={isShortVideo}
+                    className={`w-full ${videoAspectClass}`}
+                    contentClassName="p-[7%]"
+                    enableMotion
+                    motionResetKey={`${item.id}-${resolvedTextAnimationEffect}-${resolvedTextAnimationSettings.speed ?? 1}`}
+                  />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/70 via-black/15 to-transparent px-4 py-3 opacity-0 transition-opacity duration-200 group-hover/text-preview:opacity-100 group-focus-within/text-preview:opacity-100">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">
+                      Open full preview
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                      Hook text
+                    </label>
+                    <Input
+                      value={item.textAnimationText ?? ''}
+                      onChange={(event) =>
+                        onSentencePatch({ textAnimationText: event.target.value || null })
+                      }
+                      placeholder={resolveTextAnimationText(null, item.text)}
+                      className="h-11 rounded-xl border-amber-200 bg-white"
+                    />
+                    <p className="text-xs text-amber-900/80">
+                      Leave blank to use the first 5 words from the sentence.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                      Background mode
+                    </label>
+                    <Select
+                      value={resolvedTextAnimationSettings.backgroundMode ?? 'inheritImage'}
+                      onValueChange={(value) =>
+                        updateTextAnimationSettings({
+                          backgroundMode: value as NonNullable<TextAnimationSettings['backgroundMode']>,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-11 rounded-xl border-amber-200 bg-white">
+                        <SelectValue placeholder="Choose background mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="inheritImage">Use image tab image</SelectItem>
+                        <SelectItem value="image">Custom background image</SelectItem>
+                        <SelectItem value="inheritVideo">Use video tab video</SelectItem>
+                        <SelectItem value="video">Custom background video</SelectItem>
+                        <SelectItem value="solid">Solid color</SelectItem>
+                        <SelectItem value="gradient">Gradient</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {resolvedTextAnimationSettings.backgroundMode === 'inheritImage' ? (
+                    imagePreviewUrl ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        This text scene is using the current image tab image as its background.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-amber-900">
+                        No image is available on the image tab yet. Upload one there or switch this text scene to a custom image, solid, or gradient background.
+                      </div>
+                    )
+                  ) : null}
+
+                  {resolvedTextAnimationSettings.backgroundMode === 'inheritVideo' ? (
+                    videoPreviewUrl ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        This text scene is using the current video tab video as its background.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-amber-900">
+                        No video is available on the video tab yet. Upload or generate one there, or switch this text scene to a custom image, custom video, solid, or gradient background.
+                      </div>
+                    )
+                  ) : null}
+
+                  {resolvedTextAnimationSettings.backgroundMode === 'image' ? (
+                    <div className="space-y-3 rounded-2xl border border-amber-200 bg-white p-4">
+                      <input
+                        type="file"
+                        id={`sentence-text-background-${item.id}`}
+                        accept="image/*"
+                        onChange={handleTextBackgroundUpload}
+                        className="hidden"
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Background image</p>
+                          <p className="text-xs text-slate-500">Upload a dedicated image for this text scene.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => document.getElementById(`sentence-text-background-${item.id}`)?.click()}
+                            className="h-9 rounded-xl border-amber-200 text-amber-800 hover:bg-amber-50"
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload
+                          </Button>
+                          {textBackgroundPreviewUrl ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                onSentencePatch({
+                                  textBackgroundImage: null,
+                                  textBackgroundImageUrl: null,
+                                  textBackgroundSavedImageId: null,
+                                })
+                              }
+                              className="h-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                            >
+                              <X className="mr-2 h-4 w-4" />
+                              Remove
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {textBackgroundPreviewUrl ? (
+                        <img
+                          src={textBackgroundPreviewUrl}
+                          alt="Text scene background"
+                          className="h-40 w-full rounded-xl object-cover"
+                        />
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {resolvedTextAnimationSettings.backgroundMode === 'video' ? (
+                    <div className="space-y-3 rounded-2xl border border-amber-200 bg-white p-4">
+                      <input
+                        type="file"
+                        id={`sentence-text-background-video-${item.id}`}
+                        accept="video/*"
+                        onChange={handleTextBackgroundVideoUpload}
+                        className="hidden"
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Background video</p>
+                          <p className="text-xs text-slate-500">Upload a dedicated looping video for this text scene.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => document.getElementById(`sentence-text-background-video-${item.id}`)?.click()}
+                            className="h-9 rounded-xl border-amber-200 text-amber-800 hover:bg-amber-50"
+                          >
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload
+                          </Button>
+                          {textBackgroundVideoPreviewUrl ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                onSentencePatch({
+                                  textBackgroundVideo: null,
+                                  textBackgroundVideoUrl: null,
+                                  textBackgroundSavedVideoId: null,
+                                })
+                              }
+                              className="h-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                            >
+                              <X className="mr-2 h-4 w-4" />
+                              Remove
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {textBackgroundVideoPreviewUrl ? (
+                        <video
+                          src={textBackgroundVideoPreviewUrl}
+                          className="h-40 w-full rounded-xl object-cover"
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                        />
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {resolvedTextAnimationSettings.backgroundMode === 'solid' ? (
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                        Solid background color
+                      </label>
+                      <Input
+                        type="color"
+                        value={resolvedTextAnimationSettings.backgroundColor ?? '#0f172a'}
+                        onChange={(event) =>
+                          updateTextAnimationSettings({ backgroundColor: event.target.value })
+                        }
+                        className="h-11 rounded-xl border-amber-200 bg-white p-2"
+                      />
+                    </div>
+                  ) : null}
+
+                  {resolvedTextAnimationSettings.backgroundMode === 'gradient' ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                          Gradient from
+                        </label>
+                        <Input
+                          type="color"
+                          value={resolvedTextAnimationSettings.gradientFrom ?? '#0f172a'}
+                          onChange={(event) =>
+                            updateTextAnimationSettings({ gradientFrom: event.target.value })
+                          }
+                          className="h-11 rounded-xl border-amber-200 bg-white p-2"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                          Gradient to
+                        </label>
+                        <Input
+                          type="color"
+                          value={resolvedTextAnimationSettings.gradientTo ?? '#1d4ed8'}
+                          onChange={(event) =>
+                            updateTextAnimationSettings({ gradientTo: event.target.value })
+                          }
+                          className="h-11 rounded-xl border-amber-200 bg-white p-2"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-800">
+                  Subtitles are suppressed automatically for text animation scenes in the final render.
+                </div>
+              </div>
+            ) : null}
+
             {/* Upload/Generate Area for Single Mode */}
-            {mediaMode === 'single' && !(imagePreviewUrl || item.video || item.videoUrl) && (
+            {isImageSceneTab && !(imagePreviewUrl || item.video || item.videoUrl) && (
               <div className={showSecondaryImageSlot ? 'grid grid-cols-1 gap-4' : 'space-y-4'}>
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -2525,7 +3042,7 @@ function SentenceEditorCardComponent({
             )}
 
             {/* Video inputs */}
-            {mediaMode === 'frames' && (
+            {isVideoSceneTab && (
               <div className="space-y-4">
                 <input
                   type="file"
@@ -3307,7 +3824,7 @@ function SentenceEditorCardComponent({
             )}
 
             {/* Media Preview (image or video) */}
-            {mediaMode === 'single' && (imagePreviewUrl || secondaryImagePreviewUrl || item.video || item.videoUrl) && (
+            {isImageSceneTab && (imagePreviewUrl || secondaryImagePreviewUrl || item.video || item.videoUrl) && (
               item.video || item.videoUrl ? (
                 <div className="space-y-3">
                   <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 bg-gray-100 shadow-lg group/preview">
@@ -3586,17 +4103,31 @@ function SentenceEditorCardComponent({
           isShortVideo={isShortVideo}
           activeTab={imageEffectsTab}
           previewImageUrl={detailPreviewUrl}
+          previewTextInheritedImageUrl={imagePreviewUrl}
+          previewTextInheritedVideoUrl={videoPreviewUrl}
+          sentenceText={item.text}
           visualEffect={item.visualEffect}
           imageMotionEffect={item.imageMotionEffect}
           imageMotionSpeed={item.imageMotionSpeed}
+          textAnimationEffect={item.textAnimationEffect}
+          textAnimationText={item.textAnimationText}
+          textBackgroundImage={item.textBackgroundImage ?? null}
+          textBackgroundImageUrl={item.textBackgroundImageUrl ?? null}
+          textBackgroundSavedImageId={item.textBackgroundSavedImageId ?? null}
+          textBackgroundVideo={item.textBackgroundVideo ?? null}
+          textBackgroundVideoUrl={item.textBackgroundVideoUrl ?? null}
+          textBackgroundSavedVideoId={item.textBackgroundSavedVideoId ?? null}
           customImageFilterId={item.customImageFilterId ?? null}
           customMotionEffectId={item.customMotionEffectId ?? null}
+          customTextAnimationId={item.customTextAnimationId ?? null}
           imageFilterSettings={item.imageFilterSettings ?? null}
           imageMotionSettings={item.imageMotionSettings ?? null}
+          textAnimationSettings={item.textAnimationSettings ?? null}
           retainedTemporaryLook={retainedTemporaryLook}
           retainedTemporaryMotion={retainedTemporaryMotion}
           imageFilterPresets={imageFilterPresets}
           motionEffectPresets={motionEffectPresets}
+          textAnimationPresets={textAnimationPresets}
           onClose={() => setIsImageEffectsDetailModalOpen(false)}
           onApply={({
             visualEffect,
@@ -3606,8 +4137,24 @@ function SentenceEditorCardComponent({
             customMotionEffectId,
             imageMotionSettings,
             imageMotionSpeed,
+            textAnimationEffect,
+            customTextAnimationId,
+            textAnimationSettings,
+            textAnimationText,
+            textBackgroundImage,
+            textBackgroundImageUrl,
+            textBackgroundSavedImageId,
+            textBackgroundVideo,
+            textBackgroundVideoUrl,
+            textBackgroundSavedVideoId,
           }) => {
             onSentencePatch({
+              ...(imageEffectsTab === 'text'
+                ? {
+                  sceneTab: 'text' as const,
+                  mediaMode: 'single' as const,
+                }
+                : {}),
               visualEffect,
               customImageFilterId,
               imageFilterSettings,
@@ -3615,6 +4162,16 @@ function SentenceEditorCardComponent({
               customMotionEffectId,
               imageMotionSettings,
               imageMotionSpeed,
+              textAnimationEffect,
+              customTextAnimationId,
+              textAnimationSettings,
+              textAnimationText,
+              textBackgroundImage,
+              textBackgroundImageUrl,
+              textBackgroundSavedImageId,
+              textBackgroundVideo,
+              textBackgroundVideoUrl,
+              textBackgroundSavedVideoId,
             });
           }}
           onSaveImageFilterPreset={onSaveImageFilterPreset}
@@ -3623,9 +4180,26 @@ function SentenceEditorCardComponent({
           onSaveMotionEffectPreset={onSaveMotionEffectPreset}
           onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
           onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+          onSaveTextAnimationPreset={onSaveTextAnimationPreset}
+          onUpdateTextAnimationPreset={onUpdateTextAnimationPreset}
+          onDeleteTextAnimationPreset={onDeleteTextAnimationPreset}
           onGenerateLookWithAi={(params) => onGenerateSingleImageLookWithAi(item.id, params)}
           onGenerateMotionWithAi={(params) => onGenerateSingleImageMotionWithAi(item.id, params)}
         />
+
+        {isTextPreviewOverlayOpen ? (
+          <TextPreviewOverlay
+            isShortVideo={isShortVideo}
+            sentenceText={item.text}
+            text={item.textAnimationText}
+            effect={resolvedTextAnimationEffect}
+            settings={resolvedTextAnimationSettings}
+            backgroundImageUrl={textPreviewBackgroundUrl}
+            backgroundVideoUrl={textPreviewBackgroundVideoUrl}
+            isPreviewClosing={isTextPreviewOverlayClosing}
+            onRequestClose={closeTextPreviewOverlay}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -3647,8 +4221,10 @@ function areSentenceEditorCardPropsEqual(
     prev.scriptLocations === next.scriptLocations &&
     prev.imageFilterPresets === next.imageFilterPresets &&
     prev.motionEffectPresets === next.motionEffectPresets &&
+    prev.textAnimationPresets === next.textAnimationPresets &&
     prev.isLoadingImageFilterPresets === next.isLoadingImageFilterPresets &&
     prev.isLoadingMotionEffectPresets === next.isLoadingMotionEffectPresets &&
+    prev.isLoadingTextAnimationPresets === next.isLoadingTextAnimationPresets &&
     prev.enhanceError === next.enhanceError &&
     prev.isEnhancing === next.isEnhancing &&
     prev.isApplyingPrompt === next.isApplyingPrompt &&

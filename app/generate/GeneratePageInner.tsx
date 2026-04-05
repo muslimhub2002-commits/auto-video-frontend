@@ -70,6 +70,16 @@ import type {
   ImageMotionSettings,
   MotionEffectPresetDto,
 } from './_components/sentences/ImageEffectPreview';
+import {
+  getDefaultTextAnimationSettings,
+  normalizeTextAnimationSettings,
+  resolveTextAnimationEffectFromSettings,
+  resolveTextAnimationText,
+} from './_components/sentences/TextAnimationPreview';
+import type {
+  TextAnimationPresetDto,
+  TextAnimationSettings,
+} from './_components/sentences/TextAnimationPreview';
 import { hasCustomLookSelection, hasCustomMotionSelection } from './_utils/imageEffectSelection';
 
 type ScriptCharacter = {
@@ -91,18 +101,37 @@ type BackendSentenceDto = {
   id: string;
   text: string;
   index: number;
+  scene_tab?: SentenceItem['sceneTab'] | null;
+  sceneTab?: SentenceItem['sceneTab'] | null;
   align_sound_effects_to_scene_end?: boolean | null;
+  alignSoundEffectsToSceneEnd?: boolean | null;
   image_effects_mode?: 'quick' | 'detailed' | null;
+  imageEffectsMode?: 'quick' | 'detailed' | null;
   image_filter_id?: string | null;
+  imageFilterId?: string | null;
   image_filter_settings?: Record<string, unknown> | null;
+  imageFilterSettings?: Record<string, unknown> | null;
   motion_effect_id?: string | null;
+  motionEffectId?: string | null;
   image_motion_settings?: Record<string, unknown> | null;
+  imageMotionSettings?: Record<string, unknown> | null;
+  text_animation_text?: string | null;
+  textAnimationText?: string | null;
+  text_animation_effect?: SentenceItem['textAnimationEffect'] | null;
+  textAnimationEffect?: SentenceItem['textAnimationEffect'] | null;
+  text_animation_id?: string | null;
+  textAnimationId?: string | null;
+  text_animation_settings?: Record<string, unknown> | null;
+  textAnimationSettings?: Record<string, unknown> | null;
   image?: { id: string; image: string; prompt?: string | null } | null;
   secondaryImage?: { id: string; image: string; prompt?: string | null } | null;
   startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
   endFrameImage?: { id: string; image: string; prompt?: string | null } | null;
+  textBackgroundImage?: { id: string; image: string; prompt?: string | null } | null;
+  textBackgroundVideo?: { id: string; video: string } | null;
   video?: { id: string; video: string } | null;
   video_prompt?: string | null;
+  videoPrompt?: string | null;
   isSuspense?: boolean;
   sound_effects?: Array<{
     id: string;
@@ -129,13 +158,21 @@ type BackendSentenceDto = {
     volume_percent?: number;
   }>;
   forced_character_keys?: string[] | null;
+  forcedCharacterKeys?: string[] | null;
   character_keys?: string[] | null;
+  characterKeys?: string[] | null;
   location_key?: string | null;
+  locationKey?: string | null;
   forced_location_key?: string | null;
+  forcedLocationKey?: string | null;
   transition_to_next?: SentenceItem['transitionToNext'] | null;
+  transitionToNext?: SentenceItem['transitionToNext'] | null;
   visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
+  visualEffect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
   image_motion_effect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
+  imageMotionEffect?: NonNullable<SentenceItem['imageMotionEffect']> | null;
   image_motion_speed?: number | null;
+  imageMotionSpeed?: number | null;
 };
 
 type PresetLibraryResponse<TPreset> = {
@@ -505,6 +542,101 @@ function normalizeSettingsObject(
 ) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value;
+}
+
+function resolveSentenceSceneTab(
+  sentence: Pick<SentenceItem, 'sceneTab' | 'mediaMode'>,
+): NonNullable<SentenceItem['sceneTab']> {
+  if (
+    sentence.sceneTab === 'image' ||
+    sentence.sceneTab === 'video' ||
+    sentence.sceneTab === 'text'
+  ) {
+    return sentence.sceneTab;
+  }
+
+  return sentence.mediaMode === 'frames' ? 'video' : 'image';
+}
+
+function resolveTextSceneBackgroundMode(
+  sentence: Pick<SentenceItem, 'textAnimationSettings' | 'textAnimationEffect'>,
+  isShortVideo: boolean,
+): NonNullable<TextAnimationSettings['backgroundMode']> {
+  return (
+    normalizeTextAnimationSettings(
+      sentence.textAnimationSettings,
+      sentence.textAnimationEffect,
+      isShortVideo,
+    ).backgroundMode ?? 'inheritImage'
+  );
+}
+
+type TextSceneRenderBackgroundAsset = {
+  backgroundMode: NonNullable<TextAnimationSettings['backgroundMode']>;
+  transport: 'image' | 'video' | 'none';
+  file: File | null;
+  url: string | null;
+};
+
+function resolveTextSceneRenderBackgroundAsset(
+  sentence: Pick<
+    SentenceItem,
+    | 'image'
+    | 'imageUrl'
+    | 'videoUrl'
+    | 'textBackgroundImage'
+    | 'textBackgroundImageUrl'
+    | 'textBackgroundVideo'
+    | 'textBackgroundVideoUrl'
+    | 'textAnimationSettings'
+    | 'textAnimationEffect'
+  >,
+  isShortVideo: boolean,
+): TextSceneRenderBackgroundAsset {
+  const backgroundMode = resolveTextSceneBackgroundMode(sentence, isShortVideo);
+
+  if (backgroundMode === 'image') {
+    return {
+      backgroundMode,
+      transport: 'image',
+      file: sentence.textBackgroundImage ?? null,
+      url: String(sentence.textBackgroundImageUrl ?? '').trim() || null,
+    };
+  }
+
+  if (backgroundMode === 'inheritImage') {
+    return {
+      backgroundMode,
+      transport: 'image',
+      file: sentence.image ?? null,
+      url: String(sentence.imageUrl ?? '').trim() || null,
+    };
+  }
+
+  if (backgroundMode === 'video') {
+    return {
+      backgroundMode,
+      transport: 'video',
+      file: sentence.textBackgroundVideo ?? null,
+      url: String(sentence.textBackgroundVideoUrl ?? '').trim() || null,
+    };
+  }
+
+  if (backgroundMode === 'inheritVideo') {
+    return {
+      backgroundMode,
+      transport: 'video',
+      file: null,
+      url: String(sentence.videoUrl ?? '').trim() || null,
+    };
+  }
+
+  return {
+    backgroundMode,
+    transport: 'none',
+    file: null,
+    url: null,
+  };
 }
 
 type ScriptDraftDto = {
@@ -1128,8 +1260,10 @@ export function GeneratePageInner() {
   const [backgroundSoundtrackVolumePercent, setBackgroundSoundtrackVolumePercent] = useState<number>(100);
   const [imageFilterPresets, setImageFilterPresets] = useState<ImageFilterPresetDto[]>([]);
   const [motionEffectPresets, setMotionEffectPresets] = useState<MotionEffectPresetDto[]>([]);
+  const [textAnimationPresets, setTextAnimationPresets] = useState<TextAnimationPresetDto[]>([]);
   const [isLoadingImageFilterPresets, setIsLoadingImageFilterPresets] = useState(false);
   const [isLoadingMotionEffectPresets, setIsLoadingMotionEffectPresets] = useState(false);
+  const [isLoadingTextAnimationPresets, setIsLoadingTextAnimationPresets] = useState(false);
   const [oneOffBackgroundSoundtrackUrl, setOneOffBackgroundSoundtrackUrl] = useState<string | null>(null);
   const [isUploadingBackgroundSoundtrack, setIsUploadingBackgroundSoundtrack] = useState(false);
   const [isSettingFavoriteBackgroundSoundtrack, setIsSettingFavoriteBackgroundSoundtrack] = useState(false);
@@ -2078,13 +2212,50 @@ export function GeneratePageInner() {
         };
       }
 
-      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      const tab = resolveSentenceSceneTab(s);
       if (tab === 'video') {
         return {
           text,
           isSuspense: Boolean(s.isSuspense),
           mediaType: 'video' as const,
           videoUrl: String(s.videoUrl ?? '').trim(),
+          ...(transitionToNext ? { transitionToNext } : {}),
+          ...soundEffectsPatch,
+          ...soundEffectsAlignPatch,
+          ...transitionSoundEffectsPatch,
+        };
+      }
+
+      if (tab === 'text') {
+        const textAnimationEffect = resolveTextAnimationEffectFromSettings(
+          s.textAnimationSettings,
+          s.textAnimationEffect,
+        );
+        const backgroundAsset = resolveTextSceneRenderBackgroundAsset(
+          s,
+          effectiveIsShort,
+        );
+        const textBackgroundVideoUrl =
+          backgroundAsset.transport === 'video' &&
+          backgroundAsset.url &&
+          !backgroundAsset.url.startsWith('data:')
+            ? backgroundAsset.url
+            : null;
+
+        return {
+          text,
+          isSuspense: Boolean(s.isSuspense),
+          mediaType: 'text' as const,
+          textAnimationEffect,
+          textAnimationText: resolveTextAnimationText(s.textAnimationText, text),
+          textAnimationSettings: normalizeTextAnimationSettings(
+            s.textAnimationSettings,
+            textAnimationEffect,
+            effectiveIsShort,
+          ),
+          ...(textBackgroundVideoUrl
+            ? { textBackgroundVideoUrl }
+            : {}),
           ...(transitionToNext ? { transitionToNext } : {}),
           ...soundEffectsPatch,
           ...soundEffectsAlignPatch,
@@ -2131,8 +2302,59 @@ export function GeneratePageInner() {
       const text = String(s?.text ?? '').trim();
       if (isSubscribeLikeSentence(text)) continue;
 
-      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
-      if (tab !== 'image') continue;
+      const tab = resolveSentenceSceneTab(s);
+      if (tab === 'video') continue;
+
+      if (tab === 'text') {
+        const backgroundAsset = resolveTextSceneRenderBackgroundAsset(s, effectiveIsShort);
+
+        if (!backgroundAsset.file && !backgroundAsset.url) {
+          if (
+            backgroundAsset.backgroundMode === 'solid' ||
+            backgroundAsset.backgroundMode === 'gradient'
+          ) {
+            continue;
+          }
+
+          throw new Error(
+            `Failed to prepare a background image for text scene ${index + 1}. Please provide an image background or switch that scene to a solid or gradient background.`,
+          );
+        }
+
+        if (backgroundAsset.file) {
+          imageUploads.push(backgroundAsset.file);
+          continue;
+        }
+
+        if (backgroundAsset.url?.startsWith('data:')) {
+          imageUploads.push(
+            dataUrlToFile(backgroundAsset.url, `sentence-${index + 1}-text-background.png`),
+          );
+          continue;
+        }
+
+        if (backgroundAsset.url) {
+          try {
+            const res = await fetch(backgroundAsset.url);
+            if (!res.ok) {
+              throw new Error('Failed to fetch image URL');
+            }
+            const blob = await res.blob();
+            imageUploads.push(
+              new File([blob], `sentence-${index + 1}-text-background.png`, {
+                type: blob.type || 'image/png',
+              }),
+            );
+            continue;
+          } catch {
+            throw new Error(
+              `Failed to prepare the background image for text scene ${index + 1}. Please re-select the image and try again.`,
+            );
+          }
+        }
+
+        continue;
+      }
 
       if (s.image) {
         imageUploads.push(s.image);
@@ -2166,6 +2388,64 @@ export function GeneratePageInner() {
     }
 
     return imageUploads;
+  };
+
+  const prepareTextBackgroundVideoUploadsForRender = async (
+    sourceSentences: SentenceItem[],
+  ) => {
+    const videoUploads: File[] = [];
+
+    for (let index = 0; index < sourceSentences.length; index += 1) {
+      const sentence = sourceSentences[index];
+      const text = String(sentence?.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) continue;
+      if (resolveSentenceSceneTab(sentence) !== 'text') continue;
+
+      const backgroundAsset = resolveTextSceneRenderBackgroundAsset(
+        sentence,
+        effectiveIsShort,
+      );
+
+      if (backgroundAsset.backgroundMode !== 'video') {
+        continue;
+      }
+
+      if (backgroundAsset.file) {
+        videoUploads.push(backgroundAsset.file);
+        continue;
+      }
+
+      if (backgroundAsset.url?.startsWith('data:')) {
+        videoUploads.push(
+          dataUrlToFile(
+            backgroundAsset.url,
+            `sentence-${index + 1}-text-background.mp4`,
+          ),
+        );
+      }
+    }
+
+    return videoUploads;
+  };
+
+  const hasTextBackgroundVideoUploadsForRender = (
+    sourceSentences: SentenceItem[],
+  ) => {
+    return sourceSentences.some((sentence) => {
+      const text = String(sentence?.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(sentence) !== 'text') return false;
+
+      const backgroundAsset = resolveTextSceneRenderBackgroundAsset(
+        sentence,
+        effectiveIsShort,
+      );
+
+      return (
+        backgroundAsset.backgroundMode === 'video' &&
+        (Boolean(backgroundAsset.file) || backgroundAsset.url?.startsWith('data:') === true)
+      );
+    });
   };
 
   const shouldUseLocalRenderTransport = () => {
@@ -2265,9 +2545,66 @@ export function GeneratePageInner() {
         return null;
       }
 
-      const tab = sentence.sceneTab ?? (sentence.mediaMode === 'frames' ? 'video' : 'image');
-      if (tab !== 'image') {
+      const tab = resolveSentenceSceneTab(sentence);
+      if (tab === 'video') {
         return null;
+      }
+
+      if (tab === 'text') {
+        const backgroundAsset = resolveTextSceneRenderBackgroundAsset(
+          sentence,
+          effectiveIsShort,
+        );
+
+        if (!backgroundAsset.url && !backgroundAsset.file) {
+          if (
+            backgroundAsset.backgroundMode === 'solid' ||
+            backgroundAsset.backgroundMode === 'gradient'
+          ) {
+            return null;
+          }
+
+          throw new Error(
+            `Missing a background image for text scene ${index + 1}. Please provide one or switch the background mode to solid or gradient.`,
+          );
+        }
+
+        const currentUrl = String(backgroundAsset.url ?? '').trim();
+        if (currentUrl && !currentUrl.startsWith('data:') && !preferLocalTransport) {
+          return currentUrl;
+        }
+
+        if (preferLocalTransport && currentUrl && isBackendStaticUrl(currentUrl)) {
+          return currentUrl;
+        }
+
+        let fileToUpload = backgroundAsset.file ?? null;
+        if (!fileToUpload && currentUrl.startsWith('data:')) {
+          fileToUpload = dataUrlToFile(
+            currentUrl,
+            `sentence-${index + 1}-text-background.png`,
+          );
+        } else if (!fileToUpload && currentUrl) {
+          fileToUpload = await downloadUrlAsFile(
+            currentUrl,
+            `sentence-${index + 1}-text-background.png`,
+          );
+        }
+
+        if (!fileToUpload) {
+          throw new Error(
+            `Missing a background image for text scene ${index + 1}. Please provide one or switch the background mode to solid or gradient.`,
+          );
+        }
+
+        if (preferLocalTransport) {
+          return stageRenderAssetLocally(fileToUpload, 'image');
+        }
+
+        return uploadToCloudinaryUnsigned(fileToUpload, {
+          resourceType: 'image',
+          folder: 'auto-video-generator/render-images',
+        });
       }
 
       const currentUrl = String(sentence.imageUrl ?? '').trim();
@@ -2318,7 +2655,7 @@ export function GeneratePageInner() {
         return null;
       }
 
-      const tab = sentence.sceneTab ?? (sentence.mediaMode === 'frames' ? 'video' : 'image');
+      const tab = resolveSentenceSceneTab(sentence);
       if (tab !== 'image') {
         return null;
       }
@@ -2405,7 +2742,7 @@ export function GeneratePageInner() {
     const missingMediaForImageTab = selectedSentences.some((s) => {
       const text = String(s.text ?? '').trim();
       if (isSubscribeLikeSentence(text)) return false;
-      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      const tab = resolveSentenceSceneTab(s);
       if (tab !== 'image') return false;
       return !s.image && !s.imageUrl;
     });
@@ -2420,7 +2757,7 @@ export function GeneratePageInner() {
       .map((s, index) => {
         const text = String(s.text ?? '').trim();
         if (isSubscribeLikeSentence(text)) return null;
-        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+        const tab = resolveSentenceSceneTab(s);
         if (tab !== 'video') return null;
 
         const url = String(s.videoUrl ?? '').trim();
@@ -2431,6 +2768,30 @@ export function GeneratePageInner() {
     if (missingVideoTab.length > 0) {
       showAlert(
         `One or more selected video scenes do not have a generated video yet. Generate the scene video first or switch those scenes back to the Image tab.`,
+        { type: 'warning' },
+      );
+      return;
+    }
+
+    const missingTextBackground = selectedSentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(s) !== 'text') return false;
+
+      const backgroundAsset = resolveTextSceneRenderBackgroundAsset(s, effectiveIsShort);
+      if (
+        backgroundAsset.backgroundMode === 'solid' ||
+        backgroundAsset.backgroundMode === 'gradient'
+      ) {
+        return false;
+      }
+
+      return !backgroundAsset.file && !backgroundAsset.url;
+    });
+
+    if (missingTextBackground) {
+      showAlert(
+        'Please provide a background image or video for each selected text scene, or switch those scenes to a solid or gradient background.',
         { type: 'warning' },
       );
       return;
@@ -2506,6 +2867,11 @@ export function GeneratePageInner() {
 
       const imageUploads = await prepareImageUploadsForRender(selectedSentences);
       imageUploads.forEach((file) => form.append('images', file));
+      const textBackgroundVideoUploads =
+        await prepareTextBackgroundVideoUploadsForRender(selectedSentences);
+      textBackgroundVideoUploads.forEach((file) => {
+        form.append('textBackgroundVideos', file);
+      });
 
       const res = await fetch(`${API_URL}/videos/test`, {
         method: 'POST',
@@ -2541,12 +2907,7 @@ export function GeneratePageInner() {
         id: string;
         title: string | null;
         script: string;
-        sentences?: {
-          id: string;
-          text: string;
-          index: number;
-          image?: { id: string; image: string } | null;
-        }[];
+        sentences?: BackendSentenceDto[];
       }[];
     },
   ) => {
@@ -2567,22 +2928,12 @@ export function GeneratePageInner() {
       scriptSubject === 'religious (Islam)' ? scriptSubjectContent : '',
     );
 
-    type RestorableSentence = {
-      id: string;
-      text: string;
-      index: number;
-      image?: { id: string; image: string } | null;
-      secondaryImage?: { id: string; image: string } | null;
-      video?: { id: string; video: string } | null;
-      isSuspense?: boolean;
-    };
-
-    const sortedSentences: RestorableSentence[] = (primaryScript.sentences ?? [])
+    const sortedSentences: BackendSentenceDto[] = (primaryScript.sentences ?? [])
       .slice()
       .sort((a, b) => a.index - b.index);
 
     const now = Date.now();
-    const sentencesForRestore: RestorableSentence[] =
+    const sentencesForRestore: BackendSentenceDto[] =
       sortedSentences.length
         ? sortedSentences
         : [
@@ -2594,33 +2945,7 @@ export function GeneratePageInner() {
           },
         ];
 
-    const restored: SentenceItem[] = sentencesForRestore
-      .map((s, idx) => {
-        const isSubscribe = isSubscribeCtaSentence(s.text || '');
-        const hasVideo = !isSubscribe && Boolean(s.video?.video);
-        return {
-          id: s.id || `${now}-${idx}`,
-          text: s.text,
-          mediaMode: isSubscribe ? 'frames' : hasVideo ? 'frames' : 'single',
-          sceneTab: isSubscribe ? 'video' : hasVideo ? 'video' : 'image',
-          image: null,
-          imageUrl: isSubscribe ? null : s.image?.image ?? null,
-          secondaryImage: null,
-          secondaryImageUrl: isSubscribe ? null : s.secondaryImage?.image ?? null,
-          secondaryImagePrompt: null,
-          secondarySavedImageId: isSubscribe ? null : s.secondaryImage?.id ?? null,
-          isGeneratingSecondaryImage: false,
-          hasSecondaryImageSlot: !isSubscribe && Boolean(s.secondaryImage?.image),
-          video: null,
-          videoUrl: isSubscribe ? '/subscribe.mp4' : s.video?.video ?? null,
-          imagePrompt: null,
-          isGeneratingImage: false,
-          isSavingImage: false,
-          savedImageId: isSubscribe ? null : s.image?.id ?? null,
-          isFromLibrary: !!s.image,
-          isSuspense: !isSubscribe && Boolean(s.isSuspense),
-        };
-      });
+    const restored = mapBackendSentencesToUi(sentencesForRestore);
 
     setSentences(restored);
 
@@ -2806,6 +3131,36 @@ export function GeneratePageInner() {
       showToast('Failed to load motion presets.', 'error');
     } finally {
       setIsLoadingMotionEffectPresets(false);
+    }
+  };
+
+  const fetchTextAnimationPresets = async () => {
+    if (!user) {
+      setTextAnimationPresets([]);
+      return;
+    }
+
+    setIsLoadingTextAnimationPresets(true);
+    try {
+      const res = await api.get<PresetLibraryResponse<TextAnimationPresetDto>>(
+        '/text-animations',
+        { params: { page: 1, limit: 100 } },
+      );
+
+      const items = Array.isArray(res.data?.items)
+        ? res.data.items.map((item) => ({
+          id: String(item.id ?? '').trim(),
+          title: String(item.title ?? '').trim() || 'Untitled text animation',
+          settings: normalizeSettingsObject(item.settings),
+        }))
+        : [];
+
+      setTextAnimationPresets(items.filter((item) => item.id));
+    } catch (error) {
+      console.error('Failed to load text animation presets', error);
+      showToast('Failed to load text animation presets.', 'error');
+    } finally {
+      setIsLoadingTextAnimationPresets(false);
     }
   };
 
@@ -3034,6 +3389,120 @@ export function GeneratePageInner() {
     } catch (error) {
       console.error('Failed to delete motion effect preset', error);
       showToast(getRequestErrorMessage(error, 'Failed to delete motion preset.'), 'error');
+      return false;
+    }
+  };
+
+  const handleSaveTextAnimationPreset = async (
+    title: string,
+    settings: TextAnimationSettings,
+  ): Promise<TextAnimationPresetDto | null> => {
+    if (!user) {
+      showAlert('You must be logged in to save a text animation preset.', { type: 'warning' });
+      return null;
+    }
+
+    const trimmedTitle = String(title ?? '').trim();
+    if (!trimmedTitle) return null;
+
+    try {
+      const res = await api.post<TextAnimationPresetDto>('/text-animations', {
+        title: trimmedTitle,
+        settings,
+      });
+
+      const saved: TextAnimationPresetDto = {
+        id: String(res.data?.id ?? '').trim(),
+        title: String(res.data?.title ?? trimmedTitle).trim() || trimmedTitle,
+        settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+      };
+
+      if (!saved.id) {
+        showToast('Text animation preset could not be saved.', 'error');
+        return null;
+      }
+
+      setTextAnimationPresets((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      showToast('Text animation preset saved.', 'success');
+      return saved;
+    } catch (error) {
+      console.error('Failed to save text animation preset', error);
+      showToast('Failed to save text animation preset.', 'error');
+      return null;
+    }
+  };
+
+  const handleUpdateTextAnimationPreset = async (
+    textAnimationId: string,
+    settings: TextAnimationSettings,
+  ): Promise<TextAnimationPresetDto | null> => {
+    if (!user) {
+      showAlert('You must be logged in to update a text animation preset.', { type: 'warning' });
+      return null;
+    }
+
+    const trimmedId = String(textAnimationId ?? '').trim();
+    if (!trimmedId) return null;
+
+    try {
+      const res = await api.patch<TextAnimationPresetDto>(`/text-animations/${trimmedId}`, {
+        settings,
+      });
+
+      const currentPreset = textAnimationPresets.find((item) => item.id === trimmedId);
+      const saved: TextAnimationPresetDto = {
+        id: String(res.data?.id ?? trimmedId).trim(),
+        title:
+          String(res.data?.title ?? currentPreset?.title ?? 'Untitled text animation').trim() ||
+          'Untitled text animation',
+        settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+      };
+
+      setTextAnimationPresets((prev) => {
+        const next = prev.map((item) => (item.id === saved.id ? saved : item));
+        return next.some((item) => item.id === saved.id) ? next : [saved, ...next];
+      });
+      showToast('Text animation preset updated.', 'success');
+      return saved;
+    } catch (error) {
+      console.error('Failed to update text animation preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to update text animation preset.'), 'error');
+      return null;
+    }
+  };
+
+  const handleDeleteTextAnimationPreset = async (textAnimationId: string): Promise<boolean> => {
+    if (!user) {
+      showAlert('You must be logged in to delete a text animation preset.', { type: 'warning' });
+      return false;
+    }
+
+    const trimmedId = String(textAnimationId ?? '').trim();
+    if (!trimmedId) return false;
+
+    try {
+      await api.delete(`/text-animations/${trimmedId}`);
+      setTextAnimationPresets((prev) => prev.filter((item) => item.id !== trimmedId));
+      setSentences((prev) =>
+        prev.map((sentence) =>
+          sentence.customTextAnimationId === trimmedId
+            ? {
+                ...sentence,
+                textAnimationEffect: 'popInBounceHook',
+                customTextAnimationId: null,
+                textAnimationSettings: getDefaultTextAnimationSettings(
+                  'popInBounceHook',
+                  effectiveIsShort,
+                ),
+              }
+            : sentence,
+        ),
+      );
+      showToast('Text animation preset deleted.', 'success');
+      return true;
+    } catch (error) {
+      console.error('Failed to delete text animation preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to delete text animation preset.'), 'error');
       return false;
     }
   };
@@ -3453,12 +3922,14 @@ export function GeneratePageInner() {
     if (!user) {
       setImageFilterPresets([]);
       setMotionEffectPresets([]);
+      setTextAnimationPresets([]);
       return;
     }
 
     void Promise.all([
       fetchImageFilterPresets(),
       fetchMotionEffectPresets(),
+      fetchTextAnimationPresets(),
     ]);
   }, [user]);
 
@@ -3913,7 +4384,7 @@ export function GeneratePageInner() {
     const missingMediaForImageTab = sentences.some((s) => {
       const text = String(s.text ?? '').trim();
       if (isSubscribeLikeSentence(text)) return false;
-      const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+      const tab = resolveSentenceSceneTab(s);
       if (tab !== 'image') return false;
       return !s.image && !s.imageUrl;
     });
@@ -3929,7 +4400,7 @@ export function GeneratePageInner() {
       .map((s, index) => {
         const text = String(s.text ?? '').trim();
         if (isSubscribeLikeSentence(text)) return null;
-        const tab = s.sceneTab ?? (s.mediaMode === 'frames' ? 'video' : 'image');
+        const tab = resolveSentenceSceneTab(s);
         if (tab !== 'video') return null;
 
         const url = String(s.videoUrl ?? '').trim();
@@ -3941,6 +4412,30 @@ export function GeneratePageInner() {
     if (missingVideoTab.length > 0) {
       showAlert(
         `You are on the Video tab for ${missingVideoTab.length} sentence(s), but no video is generated yet. Generate the sentence video or switch back to the Image tab.`,
+        { type: 'warning' },
+      );
+      return;
+    }
+
+    const missingTextBackground = sentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(s) !== 'text') return false;
+
+      const backgroundAsset = resolveTextSceneRenderBackgroundAsset(s, effectiveIsShort);
+      if (
+        backgroundAsset.backgroundMode === 'solid' ||
+        backgroundAsset.backgroundMode === 'gradient'
+      ) {
+        return false;
+      }
+
+      return !backgroundAsset.file && !backgroundAsset.url;
+    });
+
+    if (missingTextBackground) {
+      showAlert(
+        'Please provide a background image or video for each text scene, or switch those scenes to a solid or gradient background.',
         { type: 'warning' },
       );
       return;
@@ -3987,39 +4482,49 @@ export function GeneratePageInner() {
         sentences,
         useLocalRenderTransport,
       );
+      const requiresMultipartTextBackgroundVideos =
+        hasTextBackgroundVideoUploadsForRender(sentences);
 
-      let res = await fetch(`${API_URL}/videos/url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          audioUrl,
-          sentences: sentencePayload,
-          imageUrls,
-          secondaryImageUrls,
-          scriptLength,
-          language: scriptLanguage,
-          ...(voiceDuration && voiceDuration > 0
-            ? { audioDurationSeconds: voiceDuration }
-            : {}),
-          isShort: effectiveIsShort,
-          useLowerFps,
-          useLowerResolution,
-          addSubtitles,
-          enableGlitchTransitions,
-          enableZoomRotateTransitions,
-          enableLongFormSubscribeOverlay: effectiveEnableLongFormSubscribeOverlay,
-          ...(backgroundMusicSrc ? { backgroundMusicSrc } : {}),
-          ...(normalizedBackgroundMusicVolume !== 1
-            ? { backgroundMusicVolume: normalizedBackgroundMusicVolume }
-            : {}),
-        }),
-      });
+      let res: Response | null = null;
 
-      if (!res.ok && voiceOver) {
+      if (!requiresMultipartTextBackgroundVideos) {
+        res = await fetch(`${API_URL}/videos/url`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            audioUrl,
+            sentences: sentencePayload,
+            imageUrls,
+            secondaryImageUrls,
+            scriptLength,
+            language: scriptLanguage,
+            ...(voiceDuration && voiceDuration > 0
+              ? { audioDurationSeconds: voiceDuration }
+              : {}),
+            isShort: effectiveIsShort,
+            useLowerFps,
+            useLowerResolution,
+            addSubtitles,
+            enableGlitchTransitions,
+            enableZoomRotateTransitions,
+            enableLongFormSubscribeOverlay: effectiveEnableLongFormSubscribeOverlay,
+            ...(backgroundMusicSrc ? { backgroundMusicSrc } : {}),
+            ...(normalizedBackgroundMusicVolume !== 1
+              ? { backgroundMusicVolume: normalizedBackgroundMusicVolume }
+              : {}),
+          }),
+        });
+      }
+
+      if (!res || !res.ok) {
         const fallbackForm = new FormData();
-        fallbackForm.append('voiceOver', voiceOver);
+        if (voiceOver) {
+          fallbackForm.append('voiceOver', voiceOver);
+        } else {
+          fallbackForm.append('audioUrl', audioUrl);
+        }
         fallbackForm.append('sentences', JSON.stringify(sentencePayload));
         fallbackForm.append('scriptLength', scriptLength);
         fallbackForm.append('language', scriptLanguage);
@@ -4057,6 +4562,11 @@ export function GeneratePageInner() {
 
         const imageUploads = await prepareImageUploadsForRender(sentences);
         imageUploads.forEach((file) => fallbackForm.append('images', file));
+        const textBackgroundVideoUploads =
+          await prepareTextBackgroundVideoUploadsForRender(sentences);
+        textBackgroundVideoUploads.forEach((file) => {
+          fallbackForm.append('textBackgroundVideos', file);
+        });
 
         res = await fetch(`${API_URL}/videos`, {
           method: 'POST',
@@ -4533,29 +5043,80 @@ export function GeneratePageInner() {
         }))
         .filter((row) => Boolean(row.id) && Boolean(row.url));
 
+      const sceneTabValue = s.scene_tab ?? s.sceneTab ?? null;
+      const alignSoundEffectsToSceneEnd =
+        s.align_sound_effects_to_scene_end ?? s.alignSoundEffectsToSceneEnd ?? null;
+      const imageEffectsMode = s.image_effects_mode ?? s.imageEffectsMode ?? null;
+      const imageFilterId = s.image_filter_id ?? s.imageFilterId ?? null;
+      const imageFilterSettings = s.image_filter_settings ?? s.imageFilterSettings ?? null;
+      const motionEffectId = s.motion_effect_id ?? s.motionEffectId ?? null;
+      const imageMotionSettings = s.image_motion_settings ?? s.imageMotionSettings ?? null;
+      const textAnimationTextValue = s.text_animation_text ?? s.textAnimationText ?? null;
+      const textAnimationEffectValue = s.text_animation_effect ?? s.textAnimationEffect ?? null;
+      const textAnimationId = s.text_animation_id ?? s.textAnimationId ?? null;
+      const textAnimationSettingsValue =
+        s.text_animation_settings ?? s.textAnimationSettings ?? null;
+      const videoPromptValue = s.video_prompt ?? s.videoPrompt ?? null;
+      const transitionToNext = s.transition_to_next ?? s.transitionToNext ?? null;
+      const visualEffect = s.visual_effect ?? s.visualEffect ?? null;
+      const imageMotionEffect = s.image_motion_effect ?? s.imageMotionEffect ?? 'default';
+      const imageMotionSpeed = s.image_motion_speed ?? s.imageMotionSpeed ?? null;
+
+      const hasTextSceneData = Boolean(
+        textAnimationEffectValue ||
+        textAnimationId ||
+        textAnimationSettingsValue ||
+        textAnimationTextValue ||
+        s.textBackgroundImage ||
+        s.textBackgroundVideo,
+      );
+      const resolvedSceneTab = subscribeLike
+        ? 'video'
+        : sceneTabValue === 'image' || sceneTabValue === 'video' || sceneTabValue === 'text'
+          ? sceneTabValue
+          : hasTextSceneData
+            ? 'text'
+            : s.video
+              ? 'video'
+              : 'image';
+      const textAnimationEffect = resolveTextAnimationEffectFromSettings(
+        textAnimationSettingsValue,
+        textAnimationEffectValue,
+      );
+
       return {
         id: s.id,
         text: s.text,
-        alignSoundEffectsToSceneEnd: s.align_sound_effects_to_scene_end === true,
+        alignSoundEffectsToSceneEnd: alignSoundEffectsToSceneEnd === true,
         soundEffects,
         transitionSoundEffects,
         characterKeys: inferredCharacterKeys,
         locationKey: inferredLocationKey,
         forcedLocationKey: resolvedForcedLocationKey,
         mediaMode: subscribeLike || s.startFrameImage || s.endFrameImage ? 'frames' : 'single',
-        sceneTab: subscribeLike ? 'video' : s.video ? 'video' : 'image',
+        sceneTab: resolvedSceneTab,
         forcedCharacterKeys: resolvedForcedCharacterKeys,
-        transitionToNext: s.transition_to_next ?? null,
-        imageEffectsMode: s.image_effects_mode === 'detailed' ? 'detailed' : 'quick',
-        visualEffect: s.visual_effect ?? null,
-        customImageFilterId: s.image_filter_id ?? null,
-        imageFilterSettings: normalizeSettingsObject(s.image_filter_settings),
-        imageMotionEffect: s.image_motion_effect ?? 'default',
-        customMotionEffectId: s.motion_effect_id ?? null,
-        imageMotionSettings: normalizeSettingsObject(s.image_motion_settings),
-        imageMotionSpeed: normalizeImageMotionSpeedValue(s.image_motion_speed),
+        transitionToNext,
+        imageEffectsMode: imageEffectsMode === 'detailed' ? 'detailed' : 'quick',
+        visualEffect,
+        customImageFilterId: imageFilterId,
+        imageFilterSettings: normalizeSettingsObject(imageFilterSettings),
+        textAnimationEffect,
+        textAnimationText: resolveTextAnimationText(textAnimationTextValue, s.text),
+        customTextAnimationId: textAnimationId,
+        textAnimationSettings: normalizeSettingsObject(textAnimationSettingsValue),
+        imageMotionEffect,
+        customMotionEffectId: motionEffectId,
+        imageMotionSettings: normalizeSettingsObject(imageMotionSettings),
+        imageMotionSpeed: normalizeImageMotionSpeedValue(imageMotionSpeed),
         image: null,
         imageUrl: subscribeLike ? null : s.image?.image ?? null,
+        textBackgroundImage: null,
+        textBackgroundImageUrl: subscribeLike ? null : s.textBackgroundImage?.image ?? null,
+        textBackgroundSavedImageId: s.textBackgroundImage?.id ?? null,
+        textBackgroundVideo: null,
+        textBackgroundVideoUrl: subscribeLike ? null : s.textBackgroundVideo?.video ?? null,
+        textBackgroundSavedVideoId: s.textBackgroundVideo?.id ?? null,
         secondaryImage: null,
         secondaryImageUrl: subscribeLike ? null : s.secondaryImage?.image ?? null,
         secondaryImagePrompt: s.secondaryImage?.prompt ?? null,
@@ -4573,7 +5134,7 @@ export function GeneratePageInner() {
         video: null,
         videoUrl: subscribeLike ? '/subscribe.mp4' : s.video?.video ?? null,
         savedVideoId: s.video?.id ?? null,
-        videoPrompt: String(s.video_prompt ?? '').trim() || null,
+        videoPrompt: String(videoPromptValue ?? '').trim() || null,
         imagePrompt: s.image?.prompt ?? null,
         isGeneratingImage: false,
         isGeneratingStartImage: false,
@@ -5949,7 +6510,7 @@ export function GeneratePageInner() {
   const getBulkEffectEligibleIndices = useCallback(() => {
     return sentences.reduce<number[]>((acc, sentence, index) => {
       const imagePrompt = String(sentence.imagePrompt ?? '').trim();
-      if (sentence.sceneTab === 'video') return acc;
+      if (resolveSentenceSceneTab(sentence) !== 'image') return acc;
       if (!imagePrompt) return acc;
       acc.push(index);
       return acc;
@@ -7095,6 +7656,7 @@ export function GeneratePageInner() {
       const buildSentencePayload = async (items: SentenceItem[], prefix: string) => {
         const payload: {
           text: string;
+          scene_tab?: SentenceItem['sceneTab'] | null;
           character_keys?: string[] | null;
           location_key?: string | null;
           forced_location_key?: string | null;
@@ -7102,12 +7664,18 @@ export function GeneratePageInner() {
           secondary_image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
+          text_background_image_id?: string;
+          text_background_video_id?: string;
           video_id?: string;
           video_prompt?: string;
           isSuspense?: boolean;
           forced_character_keys?: string[];
           align_sound_effects_to_scene_end?: boolean;
           transition_to_next?: SentenceItem['transitionToNext'] | null;
+          text_animation_text?: string | null;
+          text_animation_effect?: SentenceItem['textAnimationEffect'] | null;
+          text_animation_id?: string | null;
+          text_animation_settings?: Record<string, unknown> | null;
           image_effects_mode?: 'quick' | 'detailed' | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
           image_filter_id?: string | null;
@@ -7165,8 +7733,21 @@ export function GeneratePageInner() {
             prompt: s.endImagePrompt ?? null,
           });
 
+          const textBackgroundImageId = await uploadImageIfNeeded({
+            existingId: s.textBackgroundSavedImageId ?? null,
+            file: s.textBackgroundImage,
+            url: s.textBackgroundImageUrl,
+            filename: `${prefix}-sentence-${index + 1}-text-background.png`,
+            prompt: null,
+          });
+
+          const sceneTab = isSubscribeLikeSentence(String(s.text ?? '').trim())
+            ? 'video'
+            : resolveSentenceSceneTab(s);
+
           payload.push({
             text: s.text,
+            scene_tab: sceneTab,
             character_keys:
               Array.isArray(s.characterKeys) && s.characterKeys.length
                 ? s.characterKeys
@@ -7180,6 +7761,8 @@ export function GeneratePageInner() {
             secondary_image_id: secondaryImageId ?? undefined,
             start_frame_image_id: startFrameImageId ?? undefined,
             end_frame_image_id: endFrameImageId ?? undefined,
+            text_background_image_id: textBackgroundImageId ?? undefined,
+            text_background_video_id: s.textBackgroundSavedVideoId ?? undefined,
             video_id: s.savedVideoId ?? undefined,
             video_prompt: String(s.videoPrompt ?? '').trim() || undefined,
             isSuspense: Boolean(s.isSuspense) && !isSubscribeLikeSentence(s.text),
@@ -7188,6 +7771,10 @@ export function GeneratePageInner() {
               : undefined,
             align_sound_effects_to_scene_end: s.alignSoundEffectsToSceneEnd === true,
             transition_to_next: s.transitionToNext ?? null,
+            text_animation_text: String(s.textAnimationText ?? '').trim() || null,
+            text_animation_effect: s.textAnimationEffect ?? null,
+            text_animation_id: s.customTextAnimationId ?? null,
+            text_animation_settings: normalizeSettingsObject(s.textAnimationSettings),
             image_effects_mode: s.imageEffectsMode ?? 'quick',
             visual_effect:
               s.visualEffect === 'colorGrading' ||
@@ -7249,8 +7836,62 @@ export function GeneratePageInner() {
         scriptId: string;
         backendSentences: BackendSentenceDto[];
         localSentences: SentenceItem[];
-      }): Promise<Map<number, { id: string; video: string }>> => {
-        const updates = new Map<number, { id: string; video: string }>();
+      }): Promise<
+        Map<
+          number,
+          {
+            primary?: { id: string; video: string };
+            textBackground?: { id: string; video: string };
+          }
+        >
+      > => {
+        const updates = new Map<
+          number,
+          {
+            primary?: { id: string; video: string };
+            textBackground?: { id: string; video: string };
+          }
+        >();
+
+        const persistTargetVideo = async (params: {
+          scriptId: string;
+          sentenceId: string;
+          file: File | null;
+          url: string | null;
+          target: 'primary' | 'textBackground';
+        }) => {
+          const endpoint = `/scripts/${encodeURIComponent(params.scriptId)}/sentences/${encodeURIComponent(params.sentenceId)}/video`;
+
+          const response = params.file
+            ? await api.post<{ id: string; video: string }>(
+                endpoint,
+                (() => {
+                  const formData = new FormData();
+                  formData.append('video', params.file);
+                  formData.append('video_type', videoModel);
+                  formData.append('video_size', 'portrait');
+                  formData.append('target', params.target);
+                  return formData;
+                })(),
+                {
+                  headers: {
+                    'Content-Type': 'multipart/form-data',
+                  },
+                },
+              )
+            : await api.post<{ id: string; video: string }>(
+                endpoint,
+                {
+                  videoUrl: params.url,
+                  video_type: videoModel,
+                  video_size: 'portrait',
+                  target: params.target,
+                },
+              );
+
+          const saved = response.data;
+          return saved?.id ? saved : null;
+        };
 
         const sorted = [...(params.backendSentences ?? [])].sort(
           (a, b) => a.index - b.index,
@@ -7260,43 +7901,69 @@ export function GeneratePageInner() {
           const local = params.localSentences?.[bs.index];
           if (!local) continue;
 
-          const localFile = local.video ?? null;
-          const url = String(local.videoUrl ?? '').trim();
-          if ((!localFile && !url) || url === '/subscribe.mp4') continue;
-
-          // If we already have a persisted video ID, skip.
-          if (local.savedVideoId || bs.video?.id) continue;
-
           try {
-            const endpoint = `/scripts/${encodeURIComponent(params.scriptId)}/sentences/${encodeURIComponent(bs.id)}/video`;
-            const response = localFile
-              ? await api.post<{ id: string; video: string }>(
-                endpoint,
-                (() => {
-                  const formData = new FormData();
-                  formData.append('video', localFile);
-                  formData.append('video_type', videoModel);
-                  formData.append('video_size', 'portrait');
-                  return formData;
-                })(),
-                {
-                  headers: {
-                    'Content-Type': 'multipart/form-data',
-                  },
-                },
-              )
-              : await api.post<{ id: string; video: string }>(
-                endpoint,
-                {
-                  videoUrl: url,
-                  video_type: videoModel,
-                  video_size: 'portrait',
-                },
-              );
+            const nextUpdate: {
+              primary?: { id: string; video: string };
+              textBackground?: { id: string; video: string };
+            } = {};
 
-            const saved = response.data;
-            if (saved?.id) {
-              updates.set(bs.index, { id: saved.id, video: saved.video });
+            const localFile = local.video ?? null;
+            const url = String(local.videoUrl ?? '').trim() || null;
+            if (
+              (localFile || url) &&
+              url !== '/subscribe.mp4' &&
+              !local.savedVideoId &&
+              !bs.video?.id
+            ) {
+              const saved = await persistTargetVideo({
+                scriptId: params.scriptId,
+                sentenceId: bs.id,
+                file: localFile,
+                url,
+                target: 'primary',
+              });
+              if (saved) {
+                nextUpdate.primary = saved;
+              }
+            }
+
+            const backgroundAsset = resolveTextSceneRenderBackgroundAsset(
+              local,
+              effectiveIsShort,
+            );
+            const backgroundFile =
+              backgroundAsset.file ??
+              (backgroundAsset.url?.startsWith('data:')
+                ? dataUrlToFile(
+                    backgroundAsset.url,
+                    `sentence-${bs.index + 1}-text-background.mp4`,
+                  )
+                : null);
+            const backgroundUrl =
+              backgroundAsset.url && !backgroundAsset.url.startsWith('data:')
+                ? backgroundAsset.url
+                : null;
+
+            if (
+              backgroundAsset.backgroundMode === 'video' &&
+              (backgroundFile || backgroundUrl) &&
+              !local.textBackgroundSavedVideoId &&
+              !bs.textBackgroundVideo?.id
+            ) {
+              const saved = await persistTargetVideo({
+                scriptId: params.scriptId,
+                sentenceId: bs.id,
+                file: backgroundFile,
+                url: backgroundUrl,
+                target: 'textBackground',
+              });
+              if (saved) {
+                nextUpdate.textBackground = saved;
+              }
+            }
+
+            if (nextUpdate.primary || nextUpdate.textBackground) {
+              updates.set(bs.index, nextUpdate);
             }
           } catch (error) {
             // Best-effort: draft save should still succeed even if some video persistence fails.
@@ -7469,18 +8136,74 @@ export function GeneratePageInner() {
             const shortBackendSentences = Array.isArray(upsertedShort.data?.sentences)
               ? upsertedShort.data.sentences
               : [];
-            if (shortBackendSentences.length > 0) {
-              await persistMissingSentenceVideos({
+            const shortVideoUpdates =
+              shortBackendSentences.length > 0
+                ? await persistMissingSentenceVideos({
                 scriptId: id,
                 backendSentences: shortBackendSentences,
                 localSentences: finalItems,
-              });
-            }
+                })
+                : new Map();
+            const mergedShortSentences =
+              shortBackendSentences.length > 0
+                ? mapBackendSentencesToUi(shortBackendSentences).map((sentence, idx) => {
+                    const localSentence = finalItems[idx];
+                    const update = shortVideoUpdates.get(idx);
+
+                    const mergedVideoUrl =
+                      sentence.videoUrl ??
+                      (localSentence?.videoUrl && localSentence.videoUrl !== '/subscribe.mp4'
+                        ? localSentence.videoUrl
+                        : null);
+                    const mergedVideoFile =
+                      !sentence.videoUrl && !update?.primary
+                        ? (localSentence?.video ?? null)
+                        : null;
+                    const mergedTextBackgroundVideoUrl =
+                      sentence.textBackgroundVideoUrl ??
+                      localSentence?.textBackgroundVideoUrl ??
+                      null;
+                    const mergedTextBackgroundVideoFile =
+                      !sentence.textBackgroundVideoUrl && !update?.textBackground
+                        ? (localSentence?.textBackgroundVideo ?? null)
+                        : null;
+
+                    return {
+                      ...sentence,
+                      ...(update?.primary
+                        ? {
+                            videoUrl: update.primary.video,
+                            savedVideoId: update.primary.id,
+                          }
+                        : {
+                            video: mergedVideoFile,
+                            videoUrl: mergedVideoUrl,
+                            savedVideoId:
+                              sentence.savedVideoId ??
+                              localSentence?.savedVideoId ??
+                              null,
+                          }),
+                      ...(update?.textBackground
+                        ? {
+                            textBackgroundVideoUrl: update.textBackground.video,
+                            textBackgroundSavedVideoId: update.textBackground.id,
+                          }
+                        : {
+                            textBackgroundVideo: mergedTextBackgroundVideoFile,
+                            textBackgroundVideoUrl: mergedTextBackgroundVideoUrl,
+                            textBackgroundSavedVideoId:
+                              sentence.textBackgroundSavedVideoId ??
+                              localSentence?.textBackgroundSavedVideoId ??
+                              null,
+                          }),
+                    };
+                  })
+                : finalItems;
 
             // Keep local snapshot IDs in sync.
             tabSnapshotsRef.current[snapKey] = {
               ...(tabSnapshotsRef.current[snapKey] ?? {
-                sentences: finalItems,
+                sentences: mergedShortSentences,
                 voiceOver: null,
                 voiceOverChunks: [],
                 voiceDuration: null,
@@ -7492,12 +8215,14 @@ export function GeneratePageInner() {
                 videoUrl: snap?.videoUrl ?? null,
               }),
               scriptId: id,
+              sentences: mergedShortSentences,
               voiceOverChunks: cloneVoiceOverChunks(persistedShortVoiceChunks),
               savedVoiceId: shortVoiceId,
               voiceLibraryUrl: shortVoiceLibraryUrl,
             };
 
             if (activeShortTabIndex === i) {
+              setSentences(mergedShortSentences);
               setVoiceOverChunks(cloneVoiceOverChunks(persistedShortVoiceChunks));
             }
           }
@@ -7522,17 +8247,25 @@ export function GeneratePageInner() {
         locations?: ScriptLocation[];
         sentences?: {
           text: string;
+          scene_tab?: SentenceItem['sceneTab'] | null;
           character_keys?: string[] | null;
           location_key?: string | null;
           forced_location_key?: string | null;
           image_id?: string;
+          secondary_image_id?: string;
           start_frame_image_id?: string;
           end_frame_image_id?: string;
+          text_background_image_id?: string;
+          text_background_video_id?: string;
           video_id?: string;
           video_prompt?: string;
           isSuspense?: boolean;
           forced_character_keys?: string[];
           transition_to_next?: SentenceItem['transitionToNext'] | null;
+          text_animation_text?: string | null;
+          text_animation_effect?: SentenceItem['textAnimationEffect'] | null;
+          text_animation_id?: string | null;
+          text_animation_settings?: Record<string, unknown> | null;
           image_effects_mode?: 'quick' | 'detailed' | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
           image_filter_id?: string | null;
@@ -7611,19 +8344,40 @@ export function GeneratePageInner() {
           // Preserve local generated videoUrl immediately after save, even before it's persisted.
           const mergedVideoUrl =
             s.videoUrl ?? (local?.videoUrl && local.videoUrl !== '/subscribe.mp4' ? local.videoUrl : null);
-          const mergedVideoFile = !s.videoUrl && !update ? (local?.video ?? null) : null;
+          const mergedVideoFile = !s.videoUrl && !update?.primary ? (local?.video ?? null) : null;
+          const mergedTextBackgroundVideoUrl =
+            s.textBackgroundVideoUrl ?? local?.textBackgroundVideoUrl ?? null;
+          const mergedTextBackgroundVideoFile =
+            !s.textBackgroundVideoUrl && !update?.textBackground
+              ? (local?.textBackgroundVideo ?? null)
+              : null;
 
-          return update
-            ? {
-              ...s,
-              videoUrl: update.video ?? mergedVideoUrl,
-              savedVideoId: update.id,
-            }
-            : {
-              ...s,
-              video: mergedVideoFile,
-              videoUrl: mergedVideoUrl,
-            };
+          return {
+            ...s,
+            ...(update?.primary
+              ? {
+                  videoUrl: update.primary.video ?? mergedVideoUrl,
+                  savedVideoId: update.primary.id,
+                }
+              : {
+                  video: mergedVideoFile,
+                  videoUrl: mergedVideoUrl,
+                  savedVideoId: s.savedVideoId ?? local?.savedVideoId ?? null,
+                }),
+            ...(update?.textBackground
+              ? {
+                  textBackgroundVideoUrl: update.textBackground.video,
+                  textBackgroundSavedVideoId: update.textBackground.id,
+                }
+              : {
+                  textBackgroundVideo: mergedTextBackgroundVideoFile,
+                  textBackgroundVideoUrl: mergedTextBackgroundVideoUrl,
+                  textBackgroundSavedVideoId:
+                    s.textBackgroundSavedVideoId ??
+                    local?.textBackgroundSavedVideoId ??
+                    null,
+                }),
+          };
         });
 
         tabSnapshotsRef.current.full = {
@@ -8295,8 +9049,10 @@ export function GeneratePageInner() {
                   onSentenceForcedLocationKeyChange={handleSentenceForcedLocationKeyChange}
                   imageFilterPresets={imageFilterPresets}
                   motionEffectPresets={motionEffectPresets}
+                  textAnimationPresets={textAnimationPresets}
                   isLoadingImageFilterPresets={isLoadingImageFilterPresets}
                   isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+                  isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
                   onSentencePatch={handleSentencePatch}
                   onSaveImageFilterPreset={handleSaveImageFilterPreset}
                   onUpdateImageFilterPreset={handleUpdateImageFilterPreset}
@@ -8304,6 +9060,9 @@ export function GeneratePageInner() {
                   onSaveMotionEffectPreset={handleSaveMotionEffectPreset}
                   onUpdateMotionEffectPreset={handleUpdateMotionEffectPreset}
                   onDeleteMotionEffectPreset={handleDeleteMotionEffectPreset}
+                  onSaveTextAnimationPreset={handleSaveTextAnimationPreset}
+                  onUpdateTextAnimationPreset={handleUpdateTextAnimationPreset}
+                  onDeleteTextAnimationPreset={handleDeleteTextAnimationPreset}
                   onGenerateSingleImageLookWithAi={handleGenerateSingleImageLookWithAi}
                   onGenerateSingleImageMotionWithAi={handleGenerateSingleImageMotionWithAi}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}

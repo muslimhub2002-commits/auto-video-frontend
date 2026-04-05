@@ -47,6 +47,10 @@ import type {
   ImageMotionSettings,
   MotionEffectPresetDto,
 } from './sentences/ImageEffectPreview';
+import type {
+  TextAnimationPresetDto,
+  TextAnimationSettings,
+} from './sentences/TextAnimationPreview';
 
 type ScriptCharacter = {
   key: string;
@@ -103,8 +107,10 @@ type SentencesImagesSectionProps = {
   onSentenceForcedLocationKeyChange: (index: number, next: string | null) => void;
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
+  textAnimationPresets: TextAnimationPresetDto[];
   isLoadingImageFilterPresets?: boolean;
   isLoadingMotionEffectPresets?: boolean;
+  isLoadingTextAnimationPresets?: boolean;
   onSentencePatch: (index: number, patch: Partial<SentenceItem>) => void;
   onSaveImageFilterPreset: (
     title: string,
@@ -124,6 +130,15 @@ type SentencesImagesSectionProps = {
     settings: ImageMotionSettings,
   ) => Promise<MotionEffectPresetDto | null> | MotionEffectPresetDto | null;
   onDeleteMotionEffectPreset: (presetId: string) => Promise<boolean> | boolean;
+  onSaveTextAnimationPreset: (
+    title: string,
+    settings: TextAnimationSettings,
+  ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
+  onUpdateTextAnimationPreset: (
+    presetId: string,
+    settings: TextAnimationSettings,
+  ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
+  onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
   onGenerateSingleImageLookWithAi: (
     sentenceId: string,
     params: {
@@ -307,8 +322,10 @@ export function SentencesImagesSection({
   onSentenceForcedLocationKeyChange,
   imageFilterPresets,
   motionEffectPresets,
+  textAnimationPresets,
   isLoadingImageFilterPresets = false,
   isLoadingMotionEffectPresets = false,
+  isLoadingTextAnimationPresets = false,
   onSentencePatch,
   onSaveImageFilterPreset,
   onUpdateImageFilterPreset,
@@ -316,6 +333,9 @@ export function SentencesImagesSection({
   onSaveMotionEffectPreset,
   onUpdateMotionEffectPreset,
   onDeleteMotionEffectPreset,
+  onSaveTextAnimationPreset,
+  onUpdateTextAnimationPreset,
+  onDeleteTextAnimationPreset,
   onGenerateSingleImageLookWithAi,
   onGenerateSingleImageMotionWithAi,
   onSentenceVisualEffectChange,
@@ -703,8 +723,10 @@ export function SentencesImagesSection({
               onSentenceForcedLocationKeyChange={onSentenceForcedLocationKeyChange}
               imageFilterPresets={imageFilterPresets}
               motionEffectPresets={motionEffectPresets}
+              textAnimationPresets={textAnimationPresets}
               isLoadingImageFilterPresets={isLoadingImageFilterPresets}
               isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+              isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
               onSentencePatch={onSentencePatch}
               onSaveImageFilterPreset={onSaveImageFilterPreset}
               onUpdateImageFilterPreset={onUpdateImageFilterPreset}
@@ -712,6 +734,9 @@ export function SentencesImagesSection({
               onSaveMotionEffectPreset={onSaveMotionEffectPreset}
               onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
               onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+              onSaveTextAnimationPreset={onSaveTextAnimationPreset}
+              onUpdateTextAnimationPreset={onUpdateTextAnimationPreset}
+              onDeleteTextAnimationPreset={onDeleteTextAnimationPreset}
               onGenerateSingleImageLookWithAi={onGenerateSingleImageLookWithAi}
               onGenerateSingleImageMotionWithAi={onGenerateSingleImageMotionWithAi}
               onSentenceVisualEffectChange={onSentenceVisualEffectChange}

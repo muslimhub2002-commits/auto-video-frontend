@@ -4,9 +4,26 @@ export type SentenceItem = {
   id: string;
   text: string;
   mediaMode?: 'single' | 'frames';
-  sceneTab?: 'image' | 'video';
+  sceneTab?: 'image' | 'video' | 'text';
   imageEffectsMode?: 'quick' | 'detailed';
   alignSoundEffectsToSceneEnd?: boolean;
+  textAnimationEffect?:
+    | 'popInBounceHook'
+    | 'slideCutFast'
+    | 'scalePunchZoom'
+    | 'maskReveal'
+    | 'glitchFlashHook'
+    | 'kineticTypography'
+    | null;
+  textAnimationText?: string | null;
+  customTextAnimationId?: string | null;
+  textAnimationSettings?: Record<string, unknown> | null;
+  textBackgroundImage?: File | null;
+  textBackgroundImageUrl?: string | null;
+  textBackgroundSavedImageId?: string | null;
+  textBackgroundVideo?: File | null;
+  textBackgroundVideoUrl?: string | null;
+  textBackgroundSavedVideoId?: string | null;
   imageMotionEffect?:
     | 'default'
     | 'slowZoomIn'
