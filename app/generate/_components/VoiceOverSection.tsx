@@ -35,7 +35,9 @@ interface VoiceOverSectionProps {
   isSavingVoice: boolean;
   savedVoiceId: string | null;
   voiceProvider: 'google' | 'elevenlabs';
+  voiceGenerationMode: 'auto' | 'perSentence';
   onVoiceProviderChange: (provider: 'google' | 'elevenlabs') => void;
+  onVoiceGenerationModeChange: (mode: 'auto' | 'perSentence') => void;
   styleInstructions?: string;
   onStyleInstructionsChange?: (value: string) => void;
   voices: {
@@ -60,6 +62,10 @@ interface VoiceOverSectionProps {
   onOpenLibrary: () => void;
   onSaveVoice: () => void;
   onOpenVoiceEditor?: () => void;
+  elevenLabsSettingsSummary?: string | null;
+  onOpenElevenLabsSettings?: () => void;
+  canManageSentenceVoices?: boolean;
+  onOpenSentenceVoiceManager?: () => void;
 }
 
 export function VoiceOverSection({
@@ -74,7 +80,9 @@ export function VoiceOverSection({
   isSavingVoice,
   savedVoiceId,
   voiceProvider,
+  voiceGenerationMode,
   onVoiceProviderChange,
+  onVoiceGenerationModeChange,
   styleInstructions,
   onStyleInstructionsChange,
   voices,
@@ -92,11 +100,16 @@ export function VoiceOverSection({
   onOpenLibrary,
   onSaveVoice,
   onOpenVoiceEditor,
+  elevenLabsSettingsSummary,
+  onOpenElevenLabsSettings,
+  canManageSentenceVoices,
+  onOpenSentenceVoiceManager,
 }: VoiceOverSectionProps) {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const styleAbortRef = useRef<AbortController | null>(null);
   const selectedVoice = voices.find((v) => v.voice_id === selectedVoiceId) || null;
   const providerLabel = voiceProvider === 'google' ? 'AI Studio' : 'ElevenLabs';
+  const isPerSentenceMode = voiceGenerationMode === 'perSentence';
   const haveStyleInstructions = Boolean(String(styleInstructions ?? '').trim());
   const hasVoiceSelection = Boolean(voiceOver || String(voicePreviewUrl ?? '').trim());
   const resolvedVoiceName = voiceOver?.name || (savedVoiceId ? 'Library voice-over' : 'Saved voice-over');
@@ -191,6 +204,7 @@ export function VoiceOverSection({
         signal: controller.signal,
         body: JSON.stringify({
           script,
+          instructionMode: isPerSentenceMode ? 'tone-only' : undefined,
         }),
       });
 
@@ -212,8 +226,9 @@ export function VoiceOverSection({
           onStyleInstructionsChange(acc);
         }
       }
-    } catch (error) {
-      const aborted = (error as any)?.name === 'AbortError';
+    } catch (error: unknown) {
+      const aborted =
+        error instanceof Error && error.name === 'AbortError';
       if (!aborted) {
         console.error('Generate style instructions failed', error);
         setStyleGenError('Failed to generate style. Please try again.');
@@ -262,14 +277,18 @@ export function VoiceOverSection({
       : voiceGenerationProgress && voiceGenerationProgress.total > 1
         ? `Generating part ${voiceGenerationProgress.current}/${voiceGenerationProgress.total}...`
         : `Generating voice with ${providerLabel}...`
-    : `Generate with ${providerLabel}`;
+    : isPerSentenceMode
+      ? `Generate sentence voices with ${providerLabel}`
+      : `Generate with ${providerLabel}`;
   const regenerateVoiceLabel = isGeneratingVoice
     ? voiceGenerationProgress?.stage === 'merging'
       ? `Merging ${voiceGenerationProgress.total} parts...`
       : voiceGenerationProgress && voiceGenerationProgress.total > 1
         ? `Generating part ${voiceGenerationProgress.current}/${voiceGenerationProgress.total}...`
         : 'Generating...'
-    : 'Regenerate';
+    : isPerSentenceMode
+      ? 'Regenerate all sentences'
+      : 'Regenerate';
 
   return (
     <AccordionItem value="voice" className="px-6">
@@ -318,6 +337,27 @@ export function VoiceOverSection({
                       <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
                     </SelectContent>
                   </Select>
+
+                  <Select
+                    value={voiceGenerationMode}
+                    onValueChange={(v) =>
+                      onVoiceGenerationModeChange(v as 'auto' | 'perSentence')
+                    }
+                  >
+                    <SelectTrigger label="Generation mode">
+                      <SelectValue placeholder="Choose generation mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="perSentence">Per sentence</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <p className="text-[11px] text-gray-500">
+                    {isPerSentenceMode
+                      ? 'Each sentence gets its own voice clip, then everything is merged into one final voice-over.'
+                      : 'Long scripts are split automatically when needed using the current chunked voice flow.'}
+                  </p>
                 </div>
 
                 {/* Voice selection from synced ElevenLabs voices (Select input) */}
@@ -528,12 +568,18 @@ export function VoiceOverSection({
                       {voiceProvider === 'google' && onStyleInstructionsChange ? (
                         <div className="space-y-1">
                           <p className="text-xs font-semibold text-gray-900">
-                            Style Instructions (optional)
+                            {isPerSentenceMode
+                              ? 'Global Style Instructions (optional)'
+                              : 'Style Instructions (optional)'}
                           </p>
                           <Textarea
                             value={styleInstructions ?? ''}
                             onChange={(e) => onStyleInstructionsChange(e.target.value)}
-                            placeholder="E.g. Calm, warm, and confident. Slightly slower pace. Friendly tone."
+                            placeholder={
+                              isPerSentenceMode
+                                ? 'E.g. Calm, grounded, documentary tone.'
+                                : 'E.g. Calm, warm, and confident. Slightly slower pace. Friendly tone.'
+                            }
                             className="min-h-21"
                           />
                           <div className="flex justify-end gap-2 pt-1 mt-2">
@@ -548,24 +594,28 @@ export function VoiceOverSection({
                               {isGeneratingStyle ? (
                                 <>
                                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                  Generating...
+                                  {isPerSentenceMode ? 'Generating tone...' : 'Generating...'}
                                 </>
                               ) : (
                                 <>
                                   <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                                  Generate with AI
+                                  {isPerSentenceMode ? 'Generate tone with AI' : 'Generate with AI'}
                                 </>
                               )}
                             </Button>
                           </div>
                           <p className="text-[11px] text-gray-500">
-                            These instructions affect how AI Studio speaks the script.
+                            {isPerSentenceMode
+                              ? 'This applies to all AI Studio sentence generations unless a sentence override is set in the sentence voice manager.'
+                              : 'These instructions affect how AI Studio speaks the script.'}
                           </p>
                           {styleGenError ? (
                             <p className="text-[11px] text-red-600">{styleGenError}</p>
                           ) : null}
                         </div>
                       ) : null}
+
+
 
                       {/* Selected voice preview - Enhanced styling */}
                       {selectedVoice && canPreview && (
@@ -612,9 +662,10 @@ export function VoiceOverSection({
                               <Button
                                 type="button"
                                 size="sm"
+                                variant="outline"
                                 onClick={handlePlayPreview}
                                 disabled={isPreviewDisabled}
-                                className="gap-1.5 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm hover:shadow-md transition-all"
+                                className="h-8 gap-1.5 border-purple-200 bg-white text-purple-700 hover:bg-purple-50 hover:border-purple-300 px-3"
                               >
                                 {isPreviewingVoice ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -634,6 +685,35 @@ export function VoiceOverSection({
                           </div>
                         </div>
                       )}
+                      
+                      {voiceProvider === 'elevenlabs' ? (
+                        <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-sky-800">
+                                ElevenLabs defaults
+                              </p>
+                              {/* <p className="mt-1 text-xs leading-5 text-sky-900">
+                                {elevenLabsSettingsSummary || 'Using ElevenLabs provider defaults.'}
+                              </p> */}
+                              <p className="mt-1 text-[11px] text-sky-700">
+                                These settings affect future ElevenLabs generations only.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={onOpenElevenLabsSettings}
+                              disabled={!onOpenElevenLabsSettings || !selectedVoiceId}
+                              className="gap-1.5 border-sky-200 bg-white text-sky-700 hover:bg-sky-100"
+                            >
+                              <SlidersHorizontal className="h-3.5 w-3.5" />
+                              Settings
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -689,6 +769,19 @@ export function VoiceOverSection({
                 </div>
 
                 {/* ElevenLabs Button */}
+                {isPerSentenceMode && canManageSentenceVoices ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={onOpenSentenceVoiceManager}
+                    className="w-full gap-2 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    Manage Sentence Voices
+                  </Button>
+                ) : null}
+
                 <Button
                   type="button"
                   size="default"
@@ -775,6 +868,31 @@ export function VoiceOverSection({
 
                 {/* Save / Replace / Regenerate Options */}
                 <div className="mt-4 pt-4 border-t border-purple-100 flex flex-col gap-2 sm:flex-row">
+                  {voiceProvider === 'elevenlabs' ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={onOpenElevenLabsSettings}
+                      disabled={!onOpenElevenLabsSettings || !selectedVoiceId}
+                      className="flex-1 gap-1.5 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
+                    >
+                      <SlidersHorizontal className="h-3 w-3" />
+                      Settings
+                    </Button>
+                  ) : null}
+                  {isPerSentenceMode && canManageSentenceVoices ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={onOpenSentenceVoiceManager}
+                      className="flex-1 gap-1.5 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
+                    >
+                      <SlidersHorizontal className="h-3 w-3" />
+                      Sentences
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     size="sm"
@@ -784,7 +902,7 @@ export function VoiceOverSection({
                     className="flex-1 gap-1.5 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
                   >
                     <SlidersHorizontal className="h-3 w-3" />
-                    Edit
+                    {isPerSentenceMode ? 'Edit all' : 'Edit'}
                   </Button>
                   <Button
                     type="button"

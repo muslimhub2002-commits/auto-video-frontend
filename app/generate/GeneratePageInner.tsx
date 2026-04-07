@@ -24,6 +24,13 @@ import { HeaderBar } from './_components/HeaderBar';
 import { ScriptSection } from './_components/ScriptSection';
 import { SentencesImagesSection } from './_components/SentencesImagesSection';
 import { VoiceOverSection } from './_components/VoiceOverSection';
+import { SentenceVoiceOverManagerModal } from './_components/SentenceVoiceOverManagerModal';
+import { ElevenLabsVoiceSettingsModal } from './_components/ElevenLabsVoiceSettingsModal';
+import {
+  DEFAULT_ELEVENLABS_VOICE_SETTINGS,
+  describeElevenLabsVoiceSettings,
+  normalizeElevenLabsVoiceSettings,
+} from './_components/ElevenLabsVoiceSettingsFields';
 import { GenerateVideoButton } from './_components/GenerateVideoButton';
 import { VideoJobSection } from './_components/VideoJobSection';
 import type { ScriptReferenceDto } from './_components/ScriptReferencesModal';
@@ -54,7 +61,7 @@ import { mapWithConcurrency, uploadToCloudinaryUnsigned } from '@/lib/cloudinary
 import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
-import type { SentenceItem } from './_types/sentences';
+import type { ElevenLabsVoiceSettings, SentenceItem } from './_types/sentences';
 import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
 import {
   getDefaultImageFilterSettings,
@@ -101,6 +108,22 @@ type BackendSentenceDto = {
   id: string;
   text: string;
   index: number;
+  voice_over_url?: string | null;
+  voiceOverUrl?: string | null;
+  voice_over_mime_type?: string | null;
+  voiceOverMimeType?: string | null;
+  voice_over_duration_seconds?: number | null;
+  voiceOverDurationSeconds?: number | null;
+  voice_over_provider?: 'google' | 'elevenlabs' | null;
+  voiceOverProvider?: 'google' | 'elevenlabs' | null;
+  voice_over_voice_id?: string | null;
+  voiceOverVoiceId?: string | null;
+  voice_over_voice_name?: string | null;
+  voiceOverVoiceName?: string | null;
+  voice_over_style_instructions?: string | null;
+  voiceOverStyleInstructions?: string | null;
+  eleven_labs_settings?: Partial<ElevenLabsVoiceSettings> | null;
+  elevenLabsSettings?: Partial<ElevenLabsVoiceSettings> | null;
   scene_tab?: SentenceItem['sceneTab'] | null;
   sceneTab?: SentenceItem['sceneTab'] | null;
   align_sound_effects_to_scene_end?: boolean | null;
@@ -658,11 +681,13 @@ type ScriptDraftDto = {
   language?: string | null;
   video_url?: string | null;
   voice_over_chunks?: ScriptVoiceOverChunkDto[] | null;
+  voice_generation_config?: ScriptVoiceGenerationConfigDto | null;
   shorts_scripts?: string[] | null;
   short_scripts?: Array<{
     id: string;
     video_url?: string | null;
     voice_over_chunks?: ScriptVoiceOverChunkDto[] | null;
+    voice_generation_config?: ScriptVoiceGenerationConfigDto | null;
     sentences?: BackendSentenceDto[];
     voice?: { id: string; voice: string } | null;
   }>;
@@ -918,6 +943,15 @@ type PlannedVoiceChunk = {
 };
 
 type VoiceProvider = 'google' | 'elevenlabs';
+type VoiceGenerationMode = 'auto' | 'perSentence';
+
+type ScriptVoiceGenerationConfigDto = {
+  mode: VoiceGenerationMode;
+  provider: VoiceProvider | null;
+  providerVoiceId: string | null;
+  styleInstructions?: string | null;
+  elevenLabsSettings?: ElevenLabsVoiceSettings | null;
+};
 
 type ScriptVoiceOverChunkDto = {
   index: number;
@@ -957,6 +991,16 @@ type VoiceGenerationProgress = {
   stage: 'generating' | 'merging';
   current: number;
   total: number;
+};
+
+type SentenceVoiceCandidate = {
+  file: File;
+  previewUrl: string;
+  durationSeconds: number | null;
+  mimeType: string;
+  provider: VoiceProvider;
+  voiceId: string;
+  voiceName: string | null;
 };
 
 const mergeVoiceSentenceTexts = (items: string[]) => {
@@ -1129,6 +1173,81 @@ const toVoiceOverChunkState = (
 const normalizeVoiceProvider = (value: string | null | undefined): VoiceProvider =>
   value === 'elevenlabs' ? 'elevenlabs' : 'google';
 
+const normalizeVoiceGenerationMode = (
+  value: string | null | undefined,
+): VoiceGenerationMode => (value === 'perSentence' ? 'perSentence' : 'auto');
+
+const isBlobUrl = (value: string | null | undefined) =>
+  String(value ?? '').trim().startsWith('blob:');
+
+const hasSentenceVoiceOver = (
+  sentence: Pick<SentenceItem, 'voiceOverUrl' | 'voiceOverFile'>,
+) => Boolean(sentence.voiceOverFile) || Boolean(String(sentence.voiceOverUrl ?? '').trim());
+
+const clearSentenceVoiceOverState = (sentence: SentenceItem): SentenceItem => ({
+  ...sentence,
+  voiceOverFile: null,
+  voiceOverUrl: null,
+  voiceOverMimeType: null,
+  voiceOverDurationSeconds: null,
+  voiceOverProvider: null,
+  voiceOverVoiceId: null,
+  voiceOverVoiceName: null,
+  voiceOverStyleInstructions: null,
+});
+
+const buildLocalSentenceVoiceState = (params: {
+  sentence: SentenceItem;
+  file: File;
+  mimeType: string;
+  durationSeconds: number | null;
+  provider: VoiceProvider;
+  providerVoiceId?: string | null;
+  providerVoiceName?: string | null;
+  styleInstructions?: string | null;
+}): SentenceItem => ({
+  ...params.sentence,
+  voiceOverFile: params.file,
+  voiceOverUrl: URL.createObjectURL(params.file),
+  voiceOverMimeType: params.mimeType,
+  voiceOverDurationSeconds: params.durationSeconds,
+  voiceOverProvider: params.provider,
+  voiceOverVoiceId: String(params.providerVoiceId ?? '').trim() || null,
+  voiceOverVoiceName: String(params.providerVoiceName ?? '').trim() || null,
+  voiceOverStyleInstructions:
+    String(params.styleInstructions ?? '').trim() || null,
+});
+
+const buildVoiceGenerationConfig = (params: {
+  mode: VoiceGenerationMode;
+  provider: VoiceProvider;
+  providerVoiceId: string | null;
+  styleInstructions?: string | null;
+  elevenLabsSettings?: ElevenLabsVoiceSettings | null;
+}): ScriptVoiceGenerationConfigDto => ({
+  mode: params.mode,
+  provider: params.provider,
+  providerVoiceId: params.providerVoiceId,
+  styleInstructions:
+    params.mode === 'perSentence'
+      ? null
+      : String(params.styleInstructions ?? '').trim() || null,
+  elevenLabsSettings:
+    params.provider === 'elevenlabs'
+      ? params.elevenLabsSettings ?? null
+      : null,
+});
+
+const normalizeOptionalElevenLabsVoiceSettings = (
+  value: Partial<ElevenLabsVoiceSettings> | null | undefined,
+): ElevenLabsVoiceSettings | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return normalizeElevenLabsVoiceSettings(value);
+};
+
 async function sha256HexForFile(file: File): Promise<string | null> {
   try {
     const subtle = globalThis.crypto?.subtle;
@@ -1251,17 +1370,37 @@ export function GeneratePageInner() {
   const [isSavingVoice, setIsSavingVoice] = useState(false);
   const [savedVoiceId, setSavedVoiceId] = useState<string | null>(null);
   const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>('google');
+  const [voiceGenerationMode, setVoiceGenerationMode] =
+    useState<VoiceGenerationMode>('auto');
   const [aiStudioStyleInstructions, setAiStudioStyleInstructions] = useState('');
+  const [elevenLabsGlobalSettings, setElevenLabsGlobalSettings] =
+    useState<ElevenLabsVoiceSettings | null>(null);
   const [isVoiceLibraryOpen, setIsVoiceLibraryOpen] = useState(false);
   const [voiceLibraryUrl, setVoiceLibraryUrl] = useState<string | null>(null);
   const [voiceOverPreviewUrl, setVoiceOverPreviewUrl] = useState<string | null>(null);
   const [isVoiceOverEditorOpen, setIsVoiceOverEditorOpen] = useState(false);
+  const [isElevenLabsSettingsModalOpen, setIsElevenLabsSettingsModalOpen] =
+    useState(false);
   const [isApplyingVoiceOverEdit, setIsApplyingVoiceOverEdit] = useState(false);
   const [isSavingVoiceOverEdit, setIsSavingVoiceOverEdit] = useState(false);
+  const [isSentenceVoiceManagerOpen, setIsSentenceVoiceManagerOpen] =
+    useState(false);
+  const [isGeneratingSentenceVoiceStyleById, setIsGeneratingSentenceVoiceStyleById] =
+    useState<Record<string, boolean>>({});
+  const [isRegeneratingSentenceVoiceById, setIsRegeneratingSentenceVoiceById] =
+    useState<Record<string, boolean>>({});
+  const [isApplyingSentenceVoiceCandidateById, setIsApplyingSentenceVoiceCandidateById] =
+    useState<Record<string, boolean>>({});
+  const [sentenceVoiceCandidateById, setSentenceVoiceCandidateById] =
+    useState<Record<string, SentenceVoiceCandidate | null>>({});
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioUrlRef = useRef<string | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
+  const previousSentenceVoiceSignatureRef = useRef<string | null>(null);
+  const sentenceVoiceCandidateByIdRef =
+    useRef<Record<string, SentenceVoiceCandidate | null>>({});
+  const previousSentenceVoiceUrlsRef = useRef<Record<string, string | null>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [backgroundSoundtracks, setBackgroundSoundtracks] = useState<BackgroundSoundtrackItem[]>([]);
@@ -1481,6 +1620,80 @@ export function GeneratePageInner() {
     const nextUrl = String(voiceLibraryUrl ?? '').trim();
     setVoiceOverPreviewUrl(nextUrl || null);
   }, [voiceLibraryUrl, voiceOver]);
+
+  useEffect(() => {
+    sentenceVoiceCandidateByIdRef.current = sentenceVoiceCandidateById;
+  }, [sentenceVoiceCandidateById]);
+
+  useEffect(() => {
+    const nextUrls = Object.fromEntries(
+      sentences.map((sentence) => [
+        sentence.id,
+        String(sentence.voiceOverUrl ?? '').trim() || null,
+      ]),
+    ) as Record<string, string | null>;
+
+    for (const [sentenceId, previousUrl] of Object.entries(
+      previousSentenceVoiceUrlsRef.current,
+    )) {
+      const nextUrl = nextUrls[sentenceId] ?? null;
+      if (previousUrl && previousUrl !== nextUrl && isBlobUrl(previousUrl)) {
+        URL.revokeObjectURL(previousUrl);
+      }
+    }
+
+    previousSentenceVoiceUrlsRef.current = nextUrls;
+  }, [sentences]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(sentenceVoiceCandidateByIdRef.current).forEach((candidate) => {
+        disposeSentenceVoiceCandidate(candidate);
+      });
+      Object.values(previousSentenceVoiceUrlsRef.current).forEach((url) => {
+        if (url && isBlobUrl(url)) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    const signature = JSON.stringify(
+      sentences.map((sentence) => ({
+        id: sentence.id,
+        text: String(sentence.text ?? '').trim(),
+      })),
+    );
+
+    if (previousSentenceVoiceSignatureRef.current === null) {
+      previousSentenceVoiceSignatureRef.current = signature;
+      return;
+    }
+
+    if (previousSentenceVoiceSignatureRef.current === signature) {
+      return;
+    }
+
+    previousSentenceVoiceSignatureRef.current = signature;
+
+    if (
+      voiceGenerationMode === 'perSentence' &&
+      (voiceOver || voiceLibraryUrl || savedVoiceId)
+    ) {
+      setVoiceOver(null);
+      setVoiceOverChunks([]);
+      setVoiceDuration(null);
+      setSavedVoiceId(null);
+      setVoiceLibraryUrl(null);
+    }
+  }, [
+    savedVoiceId,
+    sentences,
+    voiceGenerationMode,
+    voiceLibraryUrl,
+    voiceOver,
+  ]);
 
   useEffect(() => {
     if (!isLongForm) return;
@@ -1805,6 +2018,26 @@ export function GeneratePageInner() {
   const voicesError = voicesErrorByProvider[voiceProvider];
   const selectedVoiceId = selectedVoiceIdByProvider[voiceProvider];
 
+  const findVoiceOption = useCallback(
+    (provider: VoiceProvider, voiceId: string | null | undefined) => {
+      const trimmedVoiceId = String(voiceId ?? '').trim();
+      if (!trimmedVoiceId) return null;
+      return (
+        voicesByProvider[provider].find((voice) => voice.voice_id === trimmedVoiceId) ??
+        null
+      );
+    },
+    [voicesByProvider],
+  );
+
+  const selectedVoiceOption = findVoiceOption(voiceProvider, selectedVoiceId);
+  const elevenLabsSettingsSummary =
+    voiceProvider === 'elevenlabs'
+      ? elevenLabsGlobalSettings
+        ? describeElevenLabsVoiceSettings(elevenLabsGlobalSettings)
+        : 'Using ElevenLabs provider defaults.'
+      : null;
+
   const getAudioDurationSeconds = async (file: File): Promise<number | null> => {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(file);
@@ -1878,6 +2111,7 @@ export function GeneratePageInner() {
     voiceId: string;
     provider: VoiceProvider;
     styleInstructions?: string;
+    elevenLabsSettings?: ElevenLabsVoiceSettings | null;
     fallbackBaseName: string;
     errorMessage: string;
   }) => {
@@ -1894,6 +2128,10 @@ export function GeneratePageInner() {
             : undefined,
         voiceId: params.voiceId,
         styleInstructions: params.styleInstructions,
+        elevenLabsSettings:
+          params.provider === 'elevenlabs' && params.elevenLabsSettings
+            ? normalizeElevenLabsVoiceSettings(params.elevenLabsSettings)
+            : undefined,
       }),
     });
 
@@ -2039,12 +2277,77 @@ export function GeneratePageInner() {
     };
   };
 
+  const persistSentenceVoiceFileToCloudinary = async (params: {
+    file: File;
+    sentenceId: string;
+  }) => {
+    return await uploadToCloudinaryUnsigned(params.file, {
+      resourceType: 'video',
+      folder: `auto-video-generator/sentence-voice-overs/${params.sentenceId}`,
+    });
+  };
+
+  const rebuildVoiceOverFromSentenceVoices = async (params: {
+    sourceSentences: SentenceItem[];
+    fallbackBaseName: string;
+    overrideFilesBySentenceId?: Record<string, File | null | undefined>;
+  }): Promise<GeneratedVoiceFileResult | null> => {
+    const orderedSentences = params.sourceSentences
+      .filter((sentence) => String(sentence.text ?? '').trim())
+      .filter(
+        (sentence) =>
+          Boolean(params.overrideFilesBySentenceId?.[sentence.id]) ||
+          hasSentenceVoiceOver(sentence),
+      );
+
+    if (orderedSentences.length === 0) {
+      return null;
+    }
+
+    const files = await Promise.all(
+      orderedSentences.map(async (sentence, index) => {
+        const overrideFile =
+          params.overrideFilesBySentenceId?.[sentence.id] ?? sentence.voiceOverFile ?? null;
+        if (overrideFile) return overrideFile;
+
+        return await downloadUrlAsFile(
+          String(sentence.voiceOverUrl ?? '').trim(),
+          `${params.fallbackBaseName}-sentence-${index + 1}.mp3`,
+        );
+      }),
+    );
+
+    if (files.length === 1) {
+      const [file] = files;
+      return {
+        file,
+        durationSeconds: await getAudioDurationSeconds(file),
+        mimeType: file.type || 'audio/mpeg',
+        chunks: [],
+      };
+    }
+
+    const merged = await mergeGeneratedVoiceChunks({
+      files,
+      provider:
+        orderedSentences.find((sentence) => sentence.voiceOverProvider)?.voiceOverProvider ??
+        voiceProvider,
+      fallbackBaseName: params.fallbackBaseName,
+    });
+
+    return {
+      ...merged,
+      chunks: [],
+    };
+  };
+
   const generateVoiceFileWithChunkSupport = async (params: {
     sentenceTexts?: string[];
     scriptText: string;
     voiceId: string;
     provider: VoiceProvider;
     styleInstructions?: string;
+    elevenLabsSettings?: ElevenLabsVoiceSettings | null;
     fallbackBaseName: string;
     onProgress?: (progress: VoiceGenerationProgress | null) => void;
     errorLabel?: string;
@@ -2066,6 +2369,7 @@ export function GeneratePageInner() {
         voiceId: params.voiceId,
         provider: params.provider,
         styleInstructions: params.styleInstructions,
+        elevenLabsSettings: params.elevenLabsSettings,
         fallbackBaseName: params.fallbackBaseName,
         errorMessage: params.errorLabel || 'Failed to generate voice.',
       });
@@ -2106,6 +2410,7 @@ export function GeneratePageInner() {
         voiceId: params.voiceId,
         provider: params.provider,
         styleInstructions: params.styleInstructions,
+        elevenLabsSettings: params.elevenLabsSettings,
         fallbackBaseName: `${params.fallbackBaseName}-part-${index + 1}`,
         errorMessage:
           params.errorLabel ||
@@ -2727,6 +3032,8 @@ export function GeneratePageInner() {
         voiceProvider === 'google'
           ? String(aiStudioStyleInstructions ?? '').trim() || undefined
           : undefined,
+      elevenLabsSettings:
+        voiceProvider === 'elevenlabs' ? elevenLabsGlobalSettings : undefined,
       fallbackBaseName: `test-${voiceProvider}-voice-over`,
       errorLabel: 'Failed to generate test voice-over.',
     });
@@ -4153,6 +4460,339 @@ export function GeneratePageInner() {
     }
   };
 
+  const applyGeneratedVoiceResultToState = (result: GeneratedVoiceFileResult) => {
+    setVoiceOver(result.file);
+    setVoiceOverChunks(
+      result.chunks.length > 1 ? cloneVoiceOverChunks(result.chunks) : [],
+    );
+    setVoiceDuration(
+      typeof result.durationSeconds === 'number' && result.durationSeconds > 0
+        ? result.durationSeconds
+        : null,
+    );
+    setSavedVoiceId(null);
+    setVoiceLibraryUrl(null);
+  };
+
+  const disposeSentenceVoiceCandidate = (candidate: SentenceVoiceCandidate | null | undefined) => {
+    if (!candidate?.previewUrl) return;
+    URL.revokeObjectURL(candidate.previewUrl);
+  };
+
+  const generateVoicePerSentence = async (voiceId: string) => {
+    const sentenceEntries = sentences
+      .map((sentence, index) => ({ sentence, index }))
+      .filter(({ sentence }) => String(sentence.text ?? '').trim());
+
+    if (sentenceEntries.length === 0) {
+      throw new Error('No sentence text is available for sentence-level voice generation.');
+    }
+
+    const nextSentences = [...sentences];
+    const generatedFiles: File[] = [];
+    const generatedDurations: number[] = [];
+    const failedSentenceLabels: string[] = [];
+    const selectedVoice = findVoiceOption(voiceProvider, voiceId);
+
+    for (let index = 0; index < sentenceEntries.length; index += 1) {
+      const entry = sentenceEntries[index];
+      const sentenceText = String(entry.sentence.text ?? '').trim();
+      setVoiceGenerationProgress({
+        stage: 'generating',
+        current: index + 1,
+        total: sentenceEntries.length,
+      });
+
+      try {
+        const googleStyleInstructions =
+          voiceProvider === 'google'
+            ? String(entry.sentence.voiceOverStyleInstructions ?? '').trim() ||
+              String(aiStudioStyleInstructions ?? '').trim() ||
+              undefined
+            : undefined;
+
+        const generated = await requestGeneratedVoiceFile({
+          scriptForVoice: sentenceText,
+          sentencesForVoice: [sentenceText],
+          voiceId,
+          provider: voiceProvider,
+          styleInstructions: googleStyleInstructions,
+          elevenLabsSettings:
+            voiceProvider === 'elevenlabs'
+              ? entry.sentence.elevenLabsSettings ?? elevenLabsGlobalSettings
+              : undefined,
+          fallbackBaseName: `${voiceProvider}-sentence-${index + 1}`,
+          errorMessage: `Failed to generate voice for sentence ${index + 1}.`,
+        });
+
+        generatedFiles.push(generated.file);
+        if (
+          typeof generated.durationSeconds === 'number' &&
+          generated.durationSeconds > 0
+        ) {
+          generatedDurations.push(generated.durationSeconds);
+        }
+
+        nextSentences[entry.index] = buildLocalSentenceVoiceState({
+          sentence: entry.sentence,
+          file: generated.file,
+          mimeType: generated.mimeType,
+          durationSeconds: generated.durationSeconds,
+          provider: voiceProvider,
+          providerVoiceId: voiceId,
+          providerVoiceName: selectedVoice?.name ?? null,
+          styleInstructions: googleStyleInstructions ?? null,
+        });
+      } catch (error) {
+        console.error(`Sentence ${index + 1} voice generation failed`, error);
+        failedSentenceLabels.push(`Sentence ${index + 1}`);
+      }
+    }
+
+    if (failedSentenceLabels.length > 0) {
+      showAlert(
+        `${failedSentenceLabels.join(', ')} failed to generate. The merged voice-over was built from the successful sentence clips only.`,
+        { type: 'warning' },
+      );
+    }
+
+    const availableSentenceVoices = nextSentences.filter((sentence) =>
+      hasSentenceVoiceOver(sentence),
+    );
+    if (availableSentenceVoices.length === 0) {
+      throw new Error('All sentence voice generations failed.');
+    }
+
+    setVoiceGenerationProgress({
+      stage: 'merging',
+      current: availableSentenceVoices.length,
+      total: availableSentenceVoices.length,
+    });
+
+    if (generatedFiles.length === 0) {
+      const rebuilt = await rebuildVoiceOverFromSentenceVoices({
+        sourceSentences: nextSentences,
+        fallbackBaseName: `${voiceProvider}-voice-over`,
+      });
+      if (!rebuilt) {
+        throw new Error('All sentence voice generations failed.');
+      }
+      setSentences(nextSentences);
+      applyGeneratedVoiceResultToState(rebuilt);
+      return;
+    }
+
+    const merged: GeneratedVoiceFileResult =
+      generatedFiles.length === 1
+        ? {
+            file: generatedFiles[0],
+            durationSeconds:
+              generatedDurations.length === 1 ? generatedDurations[0] : null,
+            mimeType: generatedFiles[0]?.type || 'audio/mpeg',
+            chunks: [],
+          }
+        : {
+            ...(await mergeGeneratedVoiceChunks({
+              files: generatedFiles,
+              provider: voiceProvider,
+              fallbackBaseName: `${voiceProvider}-voice-over`,
+            })),
+            chunks: [],
+          };
+
+    setSentences(nextSentences);
+    applyGeneratedVoiceResultToState(merged);
+  };
+
+  const handleGenerateSentenceVoiceStyle = async (sentenceId: string) => {
+    const sentence = sentences.find((item) => item.id === sentenceId);
+    if (!sentence || !String(sentence.text ?? '').trim()) {
+      showAlert('This sentence is empty.', { type: 'warning' });
+      return;
+    }
+
+    setIsGeneratingSentenceVoiceStyleById((prev) => ({
+      ...prev,
+      [sentenceId]: true,
+    }));
+    patchSentenceById(sentenceId, { voiceOverStyleInstructions: '' });
+
+    try {
+      const response = await fetch(`${API_URL}/ai/generate-voice-style`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          script: String(sentence.text ?? '').trim(),
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Failed to generate sentence style instructions');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+        acc += chunk;
+        patchSentenceById(sentenceId, {
+          voiceOverStyleInstructions: acc,
+        });
+      }
+    } catch (error) {
+      console.error('Sentence voice style generation failed', error);
+      showToast('Failed to generate sentence style.', 'error');
+    } finally {
+      setIsGeneratingSentenceVoiceStyleById((prev) => ({
+        ...prev,
+        [sentenceId]: false,
+      }));
+    }
+  };
+
+  const handleRegenerateSentenceVoice = async (sentenceId: string) => {
+    const sentence = sentences.find((item) => item.id === sentenceId);
+    if (!sentence || !String(sentence.text ?? '').trim()) {
+      showAlert('This sentence is empty.', { type: 'warning' });
+      return;
+    }
+
+    const sentenceProvider = sentence.voiceOverProvider ?? voiceProvider;
+    const voiceId =
+      String(sentence.voiceOverVoiceId ?? '').trim() ||
+      selectedVoiceIdByProvider[sentenceProvider];
+    if (!voiceId) {
+      showAlert('Please select a voice before regenerating a sentence.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    const selectedVoice = findVoiceOption(sentenceProvider, voiceId);
+
+    setIsRegeneratingSentenceVoiceById((prev) => ({
+      ...prev,
+      [sentenceId]: true,
+    }));
+
+    try {
+      const googleStyleInstructions =
+        sentenceProvider === 'google'
+          ? String(sentence.voiceOverStyleInstructions ?? '').trim() ||
+            String(aiStudioStyleInstructions ?? '').trim() ||
+            undefined
+          : undefined;
+
+      const generated = await requestGeneratedVoiceFile({
+        scriptForVoice: String(sentence.text ?? '').trim(),
+        sentencesForVoice: [String(sentence.text ?? '').trim()],
+        voiceId,
+        provider: sentenceProvider,
+        styleInstructions: googleStyleInstructions,
+        elevenLabsSettings:
+          sentenceProvider === 'elevenlabs'
+            ? sentence.elevenLabsSettings ?? elevenLabsGlobalSettings
+            : undefined,
+        fallbackBaseName: `${sentenceProvider}-${sentenceId}`,
+        errorMessage: 'Failed to regenerate sentence voice.',
+      });
+
+      setSentenceVoiceCandidateById((prev) => {
+        disposeSentenceVoiceCandidate(prev[sentenceId]);
+        return {
+          ...prev,
+          [sentenceId]: {
+            file: generated.file,
+            previewUrl: URL.createObjectURL(generated.file),
+            durationSeconds: generated.durationSeconds,
+            mimeType: generated.mimeType,
+            provider: sentenceProvider,
+            voiceId,
+            voiceName:
+              String(sentence.voiceOverVoiceName ?? '').trim() || selectedVoice?.name || null,
+          },
+        };
+      });
+    } catch (error) {
+      console.error('Sentence voice regeneration failed', error);
+      showToast('Failed to regenerate sentence voice.', 'error');
+    } finally {
+      setIsRegeneratingSentenceVoiceById((prev) => ({
+        ...prev,
+        [sentenceId]: false,
+      }));
+    }
+  };
+
+  const handleCancelSentenceVoiceCandidate = (sentenceId: string) => {
+    setSentenceVoiceCandidateById((prev) => {
+      disposeSentenceVoiceCandidate(prev[sentenceId]);
+      return {
+        ...prev,
+        [sentenceId]: null,
+      };
+    });
+  };
+
+  const handleApplySentenceVoiceCandidate = async (sentenceId: string) => {
+    const candidate = sentenceVoiceCandidateById[sentenceId];
+    const sentence = sentences.find((item) => item.id === sentenceId);
+    if (!candidate || !sentence) return;
+
+    setIsApplyingSentenceVoiceCandidateById((prev) => ({
+      ...prev,
+      [sentenceId]: true,
+    }));
+
+    try {
+      const nextSentences = sentences.map((item) =>
+        item.id === sentenceId
+          ? buildLocalSentenceVoiceState({
+              sentence: item,
+              file: candidate.file,
+              mimeType: candidate.mimeType,
+              durationSeconds: candidate.durationSeconds,
+              provider: candidate.provider,
+              providerVoiceId: candidate.voiceId,
+              providerVoiceName: candidate.voiceName,
+              styleInstructions: item.voiceOverStyleInstructions,
+            })
+          : item,
+      );
+
+      const merged = await rebuildVoiceOverFromSentenceVoices({
+        sourceSentences: nextSentences,
+        fallbackBaseName: `${voiceProvider}-voice-over`,
+        overrideFilesBySentenceId: {
+          [sentenceId]: candidate.file,
+        },
+      });
+
+      if (!merged) {
+        throw new Error('Failed to rebuild the merged voice-over.');
+      }
+
+      setSentences(nextSentences);
+      applyGeneratedVoiceResultToState(merged);
+      handleCancelSentenceVoiceCandidate(sentenceId);
+    } catch (error) {
+      console.error('Applying sentence voice candidate failed', error);
+      showToast('Failed to replace the sentence voice.', 'error');
+    } finally {
+      setIsApplyingSentenceVoiceCandidateById((prev) => ({
+        ...prev,
+        [sentenceId]: false,
+      }));
+    }
+  };
+
   const handleGenerateVoice = async (
     voiceId?: string | null,
   ) => {
@@ -4171,6 +4811,11 @@ export function GeneratePageInner() {
     setVoiceGenerationProgress(null);
 
     try {
+      if (voiceGenerationMode === 'perSentence') {
+        await generateVoicePerSentence(voiceId);
+        return;
+      }
+
       const sentenceTexts = (sentences || [])
         .map((s) => s.text)
         .filter(Boolean);
@@ -4187,28 +4832,14 @@ export function GeneratePageInner() {
           voiceProvider === 'google'
             ? String(aiStudioStyleInstructions ?? '').trim() || undefined
             : undefined,
+        elevenLabsSettings:
+          voiceProvider === 'elevenlabs' ? elevenLabsGlobalSettings : undefined,
         fallbackBaseName: `${voiceProvider}-voice-over`,
         errorLabel: 'Failed to generate voice.',
         onProgress: setVoiceGenerationProgress,
       });
 
-      setVoiceOver(generatedVoice.file);
-      setVoiceOverChunks(
-        generatedVoice.chunks.length > 1
-          ? cloneVoiceOverChunks(generatedVoice.chunks)
-          : [],
-      );
-      setVoiceDuration(null);
-      setSavedVoiceId(null);
-      setVoiceLibraryUrl(null);
-
-      const url = URL.createObjectURL(generatedVoice.file);
-      const audio = new Audio(url);
-      audio.addEventListener('loadedmetadata', () => {
-        if (!Number.isNaN(audio.duration) && audio.duration > 0) {
-          setVoiceDuration(audio.duration);
-        }
-      });
+      applyGeneratedVoiceResultToState(generatedVoice);
     } catch (error) {
       console.error('Voice generation failed', error);
       setVoiceError(
@@ -4227,6 +4858,13 @@ export function GeneratePageInner() {
   };
 
   const removeVoice = () => {
+    if (voiceGenerationMode === 'perSentence') {
+      setSentences((prev) => prev.map((sentence) => clearSentenceVoiceOverState(sentence)));
+    }
+
+    Object.keys(sentenceVoiceCandidateById).forEach((sentenceId) => {
+      handleCancelSentenceVoiceCandidate(sentenceId);
+    });
     setVoiceOver(null);
     setVoiceOverChunks([]);
     setVoiceDuration(null);
@@ -4234,6 +4872,7 @@ export function GeneratePageInner() {
     setVoiceLibraryUrl(null);
     setVoiceGenerationProgress(null);
     setIsVoiceOverEditorOpen(false);
+    setIsSentenceVoiceManagerOpen(false);
   };
 
   const resolveBackgroundSoundtrackPreviewUrl = () => {
@@ -4268,6 +4907,63 @@ export function GeneratePageInner() {
     });
   };
 
+  const materializeEditedSentenceVoiceOvers = async (
+    values: SoundEffectEditValues,
+  ) => {
+    const voiceSentences = sentences
+      .map((sentence, index) => ({ sentence, index }))
+      .filter(({ sentence }) => hasSentenceVoiceOver(sentence));
+
+    if (voiceSentences.length === 0) {
+      throw new Error('No sentence voice-overs are available to edit.');
+    }
+
+    const nextSentences = [...sentences];
+    for (const entry of voiceSentences) {
+      const rendered = await renderEditedAudioFile({
+        sourceFile: entry.sentence.voiceOverFile ?? null,
+        sourceUrl: entry.sentence.voiceOverUrl ?? null,
+        values,
+        fallbackName: `sentence-${entry.index + 1}-voice-over`,
+      });
+
+      nextSentences[entry.index] = buildLocalSentenceVoiceState({
+        sentence: entry.sentence,
+        file: rendered.file,
+        mimeType:
+          rendered.file.type || entry.sentence.voiceOverMimeType || 'audio/mpeg',
+        durationSeconds: rendered.durationSeconds,
+        provider: entry.sentence.voiceOverProvider ?? voiceProvider,
+        providerVoiceId:
+          entry.sentence.voiceOverVoiceId ??
+          selectedVoiceIdByProvider[entry.sentence.voiceOverProvider ?? voiceProvider] ??
+          null,
+        providerVoiceName:
+          entry.sentence.voiceOverVoiceName ??
+          findVoiceOption(
+            entry.sentence.voiceOverProvider ?? voiceProvider,
+            entry.sentence.voiceOverVoiceId ??
+              selectedVoiceIdByProvider[entry.sentence.voiceOverProvider ?? voiceProvider],
+          )?.name ??
+          null,
+        styleInstructions: entry.sentence.voiceOverStyleInstructions,
+      });
+    }
+
+    const merged = await rebuildVoiceOverFromSentenceVoices({
+      sourceSentences: nextSentences,
+      fallbackBaseName: `${voiceProvider}-voice-over-edited`,
+    });
+    if (!merged) {
+      throw new Error('Failed to rebuild the edited voice-over.');
+    }
+
+    return {
+      sentences: nextSentences,
+      merged,
+    };
+  };
+
   const applyVoiceOverEditsLocally = async (values: SoundEffectEditValues) => {
     if (!voiceOver && !voiceOverPreviewUrl) {
       showAlert('No voice-over available to edit.', { type: 'warning' });
@@ -4276,6 +4972,15 @@ export function GeneratePageInner() {
 
     setIsApplyingVoiceOverEdit(true);
     try {
+      if (voiceGenerationMode === 'perSentence') {
+        const rendered = await materializeEditedSentenceVoiceOvers(values);
+        setSentences(rendered.sentences);
+        applyGeneratedVoiceResultToState(rendered.merged);
+        setIsVoiceOverEditorOpen(false);
+        showToast('Voice-over edits applied to all sentence clips.', 'success');
+        return;
+      }
+
       const rendered = await materializeEditedVoiceOver(values);
       setVoiceOver(rendered.file);
       setVoiceOverChunks([]);
@@ -4293,7 +4998,7 @@ export function GeneratePageInner() {
   };
 
   const saveVoiceOverEditsToDraft = async (values: SoundEffectEditValues) => {
-    if (!user) {
+    if (voiceGenerationMode !== 'perSentence' && !user) {
       showAlert('You must be logged in to save voice-over edits.', { type: 'warning' });
       return;
     }
@@ -4305,6 +5010,15 @@ export function GeneratePageInner() {
 
     setIsSavingVoiceOverEdit(true);
     try {
+      if (voiceGenerationMode === 'perSentence') {
+        const rendered = await materializeEditedSentenceVoiceOvers(values);
+        setSentences(rendered.sentences);
+        applyGeneratedVoiceResultToState(rendered.merged);
+        setIsVoiceOverEditorOpen(false);
+        showToast('Voice-over edits applied to all sentence clips. Save the draft to persist them.', 'success');
+        return;
+      }
+
       const rendered = await materializeEditedVoiceOver(values);
       const saved = await persistVoiceToLibrary(rendered.file);
 
@@ -5074,6 +5788,21 @@ export function GeneratePageInner() {
       const visualEffect = s.visual_effect ?? s.visualEffect ?? null;
       const imageMotionEffect = s.image_motion_effect ?? s.imageMotionEffect ?? 'default';
       const imageMotionSpeed = s.image_motion_speed ?? s.imageMotionSpeed ?? null;
+      const voiceOverUrl = s.voice_over_url ?? s.voiceOverUrl ?? null;
+      const voiceOverMimeType =
+        s.voice_over_mime_type ?? s.voiceOverMimeType ?? null;
+      const voiceOverDurationSeconds =
+        s.voice_over_duration_seconds ?? s.voiceOverDurationSeconds ?? null;
+      const voiceOverProvider =
+        s.voice_over_provider ?? s.voiceOverProvider ?? null;
+      const voiceOverVoiceId =
+        s.voice_over_voice_id ?? s.voiceOverVoiceId ?? null;
+      const voiceOverVoiceName =
+        s.voice_over_voice_name ?? s.voiceOverVoiceName ?? null;
+      const voiceOverStyleInstructions =
+        s.voice_over_style_instructions ?? s.voiceOverStyleInstructions ?? null;
+      const elevenLabsSettings =
+        s.eleven_labs_settings ?? s.elevenLabsSettings ?? null;
 
       const hasTextSceneData = Boolean(
         textAnimationEffectValue ||
@@ -5100,6 +5829,24 @@ export function GeneratePageInner() {
       return {
         id: s.id,
         text: s.text,
+        voiceOverFile: null,
+        voiceOverUrl: String(voiceOverUrl ?? '').trim() || null,
+        voiceOverMimeType: String(voiceOverMimeType ?? '').trim() || null,
+        voiceOverDurationSeconds:
+          typeof voiceOverDurationSeconds === 'number' &&
+          Number.isFinite(voiceOverDurationSeconds)
+            ? Math.max(0, voiceOverDurationSeconds)
+            : null,
+        voiceOverProvider:
+          voiceOverProvider === 'google' || voiceOverProvider === 'elevenlabs'
+            ? voiceOverProvider
+            : null,
+        voiceOverVoiceId: String(voiceOverVoiceId ?? '').trim() || null,
+        voiceOverVoiceName: String(voiceOverVoiceName ?? '').trim() || null,
+        voiceOverStyleInstructions:
+          String(voiceOverStyleInstructions ?? '').trim() || null,
+        elevenLabsSettings:
+          normalizeOptionalElevenLabsVoiceSettings(elevenLabsSettings),
         alignSoundEffectsToSceneEnd: alignSoundEffectsToSceneEnd === true,
         soundEffects,
         transitionSoundEffects,
@@ -5261,6 +6008,31 @@ export function GeneratePageInner() {
       loadedSubject === 'religious (Islam)' ? loadedSubjectContent : '',
     );
 
+    const loadedVoiceGenerationConfig = draft.voice_generation_config ?? null;
+    setVoiceGenerationMode(
+      normalizeVoiceGenerationMode(loadedVoiceGenerationConfig?.mode),
+    );
+    setVoiceProvider(
+      loadedVoiceGenerationConfig?.provider === 'elevenlabs'
+        ? 'elevenlabs'
+        : 'google',
+    );
+    setAiStudioStyleInstructions(
+      String(loadedVoiceGenerationConfig?.styleInstructions ?? '').trim(),
+    );
+    setElevenLabsGlobalSettings(
+      normalizeOptionalElevenLabsVoiceSettings(
+        loadedVoiceGenerationConfig?.elevenLabsSettings,
+      ),
+    );
+    if (loadedVoiceGenerationConfig?.provider) {
+      setSelectedVoiceIdByProvider((prev) => ({
+        ...prev,
+        [loadedVoiceGenerationConfig.provider as VoiceProvider]:
+          String(loadedVoiceGenerationConfig.providerVoiceId ?? '').trim() || null,
+      }));
+    }
+
     setScriptCharacters(Array.isArray(draft.characters) ? draft.characters : []);
     setScriptLocations(Array.isArray(draft.locations) ? draft.locations : []);
 
@@ -5270,8 +6042,10 @@ export function GeneratePageInner() {
     setSavedVoiceId(null);
     setVoiceLibraryUrl(null);
 
+    let mappedDraftSentences: SentenceItem[] = [];
     if (draft.sentences && draft.sentences.length > 0) {
       const mapped = mapBackendSentencesToUi(draft.sentences);
+      mappedDraftSentences = mapped;
       setSentences(mapped);
 
       tabSnapshotsRef.current.full = {
@@ -5296,20 +6070,55 @@ export function GeneratePageInner() {
       voiceOverChunks: draft.voice_over_chunks,
       fallbackBaseName: 'draft-voice-over',
     });
+    const rebuiltSentenceVoiceState =
+      !loadedVoiceState.voiceFile &&
+      !loadedVoiceState.voiceLibraryUrl &&
+      mappedDraftSentences.some((sentence) => hasSentenceVoiceOver(sentence))
+        ? await rebuildVoiceOverFromSentenceVoices({
+            sourceSentences: mappedDraftSentences,
+            fallbackBaseName: 'draft-voice-over',
+          }).catch((error) => {
+            console.error('Failed to rebuild draft sentence voices', error);
+            return null;
+          })
+        : null;
+
     setVoiceOver(loadedVoiceState.voiceFile);
     setVoiceOverChunks(loadedVoiceState.voiceOverChunks);
     setVoiceDuration(loadedVoiceState.voiceDuration);
     setSavedVoiceId(loadedVoiceState.savedVoiceId);
     setVoiceLibraryUrl(loadedVoiceState.voiceLibraryUrl);
 
+    if (rebuiltSentenceVoiceState) {
+      setVoiceOver(rebuiltSentenceVoiceState.file);
+      setVoiceOverChunks([]);
+      setVoiceDuration(rebuiltSentenceVoiceState.durationSeconds);
+      setSavedVoiceId(null);
+      setVoiceLibraryUrl(null);
+    }
+
+    const resolvedDraftVoiceFile =
+      rebuiltSentenceVoiceState?.file ?? loadedVoiceState.voiceFile;
+    const resolvedDraftVoiceDuration =
+      rebuiltSentenceVoiceState?.durationSeconds ?? loadedVoiceState.voiceDuration;
+    const resolvedDraftVoiceChunks = rebuiltSentenceVoiceState
+      ? []
+      : cloneVoiceOverChunks(loadedVoiceState.voiceOverChunks);
+    const resolvedDraftSavedVoiceId = rebuiltSentenceVoiceState
+      ? null
+      : loadedVoiceState.savedVoiceId;
+    const resolvedDraftVoiceLibraryUrl = rebuiltSentenceVoiceState
+      ? null
+      : loadedVoiceState.voiceLibraryUrl;
+
     if (tabSnapshotsRef.current.full) {
       tabSnapshotsRef.current.full = {
         ...tabSnapshotsRef.current.full,
-        voiceOver: loadedVoiceState.voiceFile,
-        voiceOverChunks: cloneVoiceOverChunks(loadedVoiceState.voiceOverChunks),
-        voiceDuration: loadedVoiceState.voiceDuration,
-        savedVoiceId: loadedVoiceState.savedVoiceId,
-        voiceLibraryUrl: loadedVoiceState.voiceLibraryUrl,
+        voiceOver: resolvedDraftVoiceFile,
+        voiceOverChunks: resolvedDraftVoiceChunks,
+        voiceDuration: resolvedDraftVoiceDuration,
+        savedVoiceId: resolvedDraftSavedVoiceId,
+        voiceLibraryUrl: resolvedDraftVoiceLibraryUrl,
       };
     }
 
@@ -5360,21 +6169,46 @@ export function GeneratePageInner() {
               ? mapBackendSentencesToUi(shortScript.sentences)
               : [];
             const mappedShort = normalizeShortTabSentences(mappedShortRaw);
+            const shortVoiceGenerationConfig =
+              shortScript.voice_generation_config ?? loadedVoiceGenerationConfig;
 
             const shortVoiceState = await hydrateVoiceStateFromDraft({
               voice: shortScript.voice ?? null,
               voiceOverChunks: shortScript.voice_over_chunks,
               fallbackBaseName: `draft-short-${idx + 1}-voice-over`,
             });
+            const rebuiltShortSentenceVoiceState =
+              !shortVoiceState.voiceFile &&
+              !shortVoiceState.voiceLibraryUrl &&
+              mappedShort.some((sentence) => hasSentenceVoiceOver(sentence))
+                ? await rebuildVoiceOverFromSentenceVoices({
+                    sourceSentences: mappedShort,
+                    fallbackBaseName: `draft-short-${idx + 1}-voice-over`,
+                  }).catch((error) => {
+                    console.error('Failed to rebuild short draft sentence voices', error);
+                    return null;
+                  })
+                : null;
+
+            if (idx === 0 && shortVoiceGenerationConfig) {
+              setVoiceGenerationMode(
+                normalizeVoiceGenerationMode(shortVoiceGenerationConfig.mode),
+              );
+            }
 
             tabSnapshotsRef.current[tabKeyForIndex(idx)] = {
               scriptId: shortScript.id,
               sentences: mappedShort,
-              voiceOver: shortVoiceState.voiceFile,
+              voiceOver:
+                rebuiltShortSentenceVoiceState?.file ?? shortVoiceState.voiceFile,
               voiceOverChunks: shortVoiceState.voiceOverChunks,
-              voiceDuration: shortVoiceState.voiceDuration,
-              savedVoiceId: shortVoiceState.savedVoiceId,
-              voiceLibraryUrl: shortVoiceState.voiceLibraryUrl,
+              voiceDuration:
+                rebuiltShortSentenceVoiceState?.durationSeconds ??
+                shortVoiceState.voiceDuration,
+              savedVoiceId:
+                rebuiltShortSentenceVoiceState ? null : shortVoiceState.savedVoiceId,
+              voiceLibraryUrl:
+                rebuiltShortSentenceVoiceState ? null : shortVoiceState.voiceLibraryUrl,
               videoJobId: null,
               videoJobStatus: null,
               videoJobError: null,
@@ -7669,6 +8503,14 @@ export function GeneratePageInner() {
       const buildSentencePayload = async (items: SentenceItem[], prefix: string) => {
         const payload: {
           text: string;
+          voice_over_url?: string | null;
+          voice_over_mime_type?: string | null;
+          voice_over_duration_seconds?: number | null;
+          voice_over_provider?: VoiceProvider | null;
+          voice_over_voice_id?: string | null;
+          voice_over_voice_name?: string | null;
+          voice_over_style_instructions?: string | null;
+          eleven_labs_settings?: ElevenLabsVoiceSettings | null;
           scene_tab?: SentenceItem['sceneTab'] | null;
           character_keys?: string[] | null;
           location_key?: string | null;
@@ -7760,6 +8602,28 @@ export function GeneratePageInner() {
 
           payload.push({
             text: s.text,
+            voice_over_url: s.voiceOverFile
+              ? await persistSentenceVoiceFileToCloudinary({
+                  file: s.voiceOverFile,
+                  sentenceId: s.id,
+                })
+              : isBlobUrl(s.voiceOverUrl)
+                ? null
+                : String(s.voiceOverUrl ?? '').trim() || null,
+            voice_over_mime_type:
+              String(s.voiceOverMimeType ?? '').trim() || null,
+            voice_over_duration_seconds:
+              typeof s.voiceOverDurationSeconds === 'number' &&
+              Number.isFinite(s.voiceOverDurationSeconds)
+                ? Math.max(0, s.voiceOverDurationSeconds)
+                : null,
+            voice_over_provider: s.voiceOverProvider ?? null,
+            voice_over_voice_id: String(s.voiceOverVoiceId ?? '').trim() || null,
+            voice_over_voice_name:
+              String(s.voiceOverVoiceName ?? '').trim() || null,
+            voice_over_style_instructions:
+              String(s.voiceOverStyleInstructions ?? '').trim() || null,
+            eleven_labs_settings: s.elevenLabsSettings ?? null,
             scene_tab: sceneTab,
             character_keys:
               Array.isArray(s.characterKeys) && s.characterKeys.length
@@ -8105,6 +8969,13 @@ export function GeneratePageInner() {
                 .join(' '),
               voice_id: shortVoiceId ?? undefined,
               voice_over_chunks: shortVoiceOverChunksPayload,
+              voice_generation_config: buildVoiceGenerationConfig({
+                mode: voiceGenerationMode,
+                provider: voiceProvider,
+                providerVoiceId: selectedVoiceIdByProvider[voiceProvider],
+                styleInstructions: aiStudioStyleInstructions,
+                elevenLabsSettings: elevenLabsGlobalSettings,
+              }),
               title: `Short ${i + 1}`,
               video_url: snap?.videoUrl ?? undefined,
               language: scriptLanguage,
@@ -8255,6 +9126,7 @@ export function GeneratePageInner() {
         script: string;
         voice_id?: string;
         voice_over_chunks?: ScriptVoiceOverChunkDto[] | null;
+        voice_generation_config?: ScriptVoiceGenerationConfigDto | null;
         video_url?: string;
         characters?: ScriptCharacter[];
         locations?: ScriptLocation[];
@@ -8300,6 +9172,13 @@ export function GeneratePageInner() {
         script,
         voice_id: voiceId ?? undefined,
         voice_over_chunks: fullVoiceOverChunksPayload,
+        voice_generation_config: buildVoiceGenerationConfig({
+          mode: voiceGenerationMode,
+          provider: voiceProvider,
+          providerVoiceId: selectedVoiceIdByProvider[voiceProvider],
+          styleInstructions: aiStudioStyleInstructions,
+          elevenLabsSettings: elevenLabsGlobalSettings,
+        }),
         video_url: existingFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
         locations: scriptLocations.length ? scriptLocations : undefined,
@@ -8461,6 +9340,18 @@ export function GeneratePageInner() {
     setIsPreviewingVoice(false);
     setIsGeneratingVoice(false);
     setVoiceGenerationProgress(null);
+    Object.values(sentenceVoiceCandidateByIdRef.current).forEach((candidate) => {
+      disposeSentenceVoiceCandidate(candidate);
+    });
+    setVoiceGenerationMode('auto');
+    setAiStudioStyleInstructions('');
+    setElevenLabsGlobalSettings(null);
+    setIsElevenLabsSettingsModalOpen(false);
+    setIsSentenceVoiceManagerOpen(false);
+    setSentenceVoiceCandidateById({});
+    setIsGeneratingSentenceVoiceStyleById({});
+    setIsRegeneratingSentenceVoiceById({});
+    setIsApplyingSentenceVoiceCandidateById({});
 
     setSelectedVoiceIdByProvider({ google: null, elevenlabs: null });
   };
@@ -9165,9 +10056,11 @@ export function GeneratePageInner() {
                   isSavingVoice={isSavingVoice}
                   savedVoiceId={savedVoiceId}
                   voiceProvider={voiceProvider}
+                  voiceGenerationMode={voiceGenerationMode}
                   onVoiceProviderChange={(p) => {
                     setVoiceProvider(p);
                   }}
+                  onVoiceGenerationModeChange={setVoiceGenerationMode}
                   styleInstructions={
                     voiceProvider === 'google' ? aiStudioStyleInstructions : ''
                   }
@@ -9189,6 +10082,10 @@ export function GeneratePageInner() {
                   onSaveVoice={handleSaveVoice}
                   onOpenLibrary={handleOpenVoiceLibrary}
                   onOpenVoiceEditor={voiceOver ? () => setIsVoiceOverEditorOpen(true) : undefined}
+                  elevenLabsSettingsSummary={elevenLabsSettingsSummary}
+                  onOpenElevenLabsSettings={() => setIsElevenLabsSettingsModalOpen(true)}
+                  canManageSentenceVoices={sentences.some((sentence) => String(sentence.text ?? '').trim())}
+                  onOpenSentenceVoiceManager={() => setIsSentenceVoiceManagerOpen(true)}
                 />
               </Accordion>
               <RenderSettingsSection
@@ -9290,6 +10187,55 @@ export function GeneratePageInner() {
                   onSave={saveVoiceOverEditsToDraft}
                 />
               ) : null}
+              {isElevenLabsSettingsModalOpen ? (
+                <ElevenLabsVoiceSettingsModal
+                  voiceName={selectedVoiceOption?.name ?? null}
+                  initialSettings={elevenLabsGlobalSettings}
+                  onClose={() => setIsElevenLabsSettingsModalOpen(false)}
+                  onSave={(settings) => {
+                    setElevenLabsGlobalSettings(settings);
+                    setIsElevenLabsSettingsModalOpen(false);
+                    showToast('ElevenLabs defaults updated.', 'success');
+                  }}
+                />
+              ) : null}
+              <SentenceVoiceOverManagerModal
+                isOpen={isSentenceVoiceManagerOpen}
+                sentences={sentences}
+                voiceProvider={voiceProvider}
+                globalElevenLabsSettings={elevenLabsGlobalSettings}
+                isGeneratingSentenceStyleById={isGeneratingSentenceVoiceStyleById}
+                isRegeneratingSentenceVoiceById={isRegeneratingSentenceVoiceById}
+                isApplyingSentenceVoiceCandidateById={isApplyingSentenceVoiceCandidateById}
+                sentenceVoiceCandidateById={Object.fromEntries(
+                  Object.entries(sentenceVoiceCandidateById).map(([key, value]) => [
+                    key,
+                    value
+                      ? {
+                          previewUrl: value.previewUrl,
+                          durationSeconds: value.durationSeconds,
+                          provider: value.provider,
+                          voiceName: value.voiceName,
+                        }
+                      : null,
+                  ]),
+                )}
+                onClose={() => setIsSentenceVoiceManagerOpen(false)}
+                onSentenceStyleChange={(sentenceId, value) => {
+                  patchSentenceById(sentenceId, {
+                    voiceOverStyleInstructions: value,
+                  });
+                }}
+                onSentenceElevenLabsSettingsChange={(sentenceId, settings) => {
+                  patchSentenceById(sentenceId, {
+                    elevenLabsSettings: settings,
+                  });
+                }}
+                onGenerateSentenceStyle={handleGenerateSentenceVoiceStyle}
+                onRegenerateSentenceVoice={handleRegenerateSentenceVoice}
+                onApplyCandidate={handleApplySentenceVoiceCandidate}
+                onCancelCandidate={handleCancelSentenceVoiceCandidate}
+              />
             </div>
 
             {/* Video job status & preview */}

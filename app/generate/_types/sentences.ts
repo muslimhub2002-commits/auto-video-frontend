@@ -1,8 +1,25 @@
 import type { SoundEffectAudioSettings } from './sound-effect-audio';
 
+export type ElevenLabsVoiceSettings = {
+  stability: number;
+  similarityBoost: number;
+  style: number;
+  speed: number;
+  useSpeakerBoost: boolean;
+};
+
 export type SentenceItem = {
   id: string;
   text: string;
+  voiceOverFile?: File | null;
+  voiceOverUrl?: string | null;
+  voiceOverMimeType?: string | null;
+  voiceOverDurationSeconds?: number | null;
+  voiceOverProvider?: 'google' | 'elevenlabs' | null;
+  voiceOverVoiceId?: string | null;
+  voiceOverVoiceName?: string | null;
+  voiceOverStyleInstructions?: string | null;
+  elevenLabsSettings?: ElevenLabsVoiceSettings | null;
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video' | 'text';
   imageEffectsMode?: 'quick' | 'detailed';

@@ -27,6 +27,20 @@ function mergeSentenceText(targetText: string, sourceText: string) {
   return parts.join(' ');
 }
 
+function clearSentenceVoiceOverState(sentence: SentenceItem): SentenceItem {
+  return {
+    ...sentence,
+    voiceOverFile: null,
+    voiceOverUrl: null,
+    voiceOverMimeType: null,
+    voiceOverDurationSeconds: null,
+    voiceOverProvider: null,
+    voiceOverVoiceId: null,
+    voiceOverVoiceName: null,
+    voiceOverStyleInstructions: null,
+  };
+}
+
 export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
   const [sentences, setSentences] = useState<SentenceItem[]>(initialSentences);
 
@@ -191,7 +205,10 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
     (sentenceId: string, text: string) => {
       updateSentenceById(sentenceId, (sentence) => {
         if (sentence.text === text) return sentence;
-        return { ...sentence, text };
+        return {
+          ...clearSentenceVoiceOverState(sentence),
+          text,
+        };
       });
     },
     [updateSentenceById],
@@ -215,7 +232,10 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
 
       const next = prev.map((item, itemIndex) =>
         itemIndex === targetIndex
-          ? { ...item, text: mergeSentenceText(item.text, source.text) }
+          ? {
+              ...clearSentenceVoiceOverState(item),
+              text: mergeSentenceText(item.text, source.text),
+            }
           : item,
       );
       next.splice(index, 1);
@@ -241,7 +261,10 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
 
       const next = prev.map((item, itemIndex) =>
         itemIndex === targetIndex
-          ? { ...item, text: mergeSentenceText(item.text, source.text) }
+          ? {
+              ...clearSentenceVoiceOverState(item),
+              text: mergeSentenceText(item.text, source.text),
+            }
           : item,
       );
       next.splice(index, 1);
