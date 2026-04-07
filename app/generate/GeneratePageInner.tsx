@@ -639,6 +639,19 @@ function resolveTextSceneRenderBackgroundAsset(
   };
 }
 
+function serializeTextAnimationSettingsForRender(
+  sentence: Pick<SentenceItem, 'textAnimationSettings'>,
+  fallbackEffect: SentenceItem['textAnimationEffect'] | null | undefined,
+  isShortVideo: boolean,
+) {
+  const rawSettings = normalizeSettingsObject(sentence.textAnimationSettings);
+  if (rawSettings) {
+    return { ...rawSettings };
+  }
+
+  return normalizeTextAnimationSettings(undefined, fallbackEffect, isShortVideo);
+}
+
 type ScriptDraftDto = {
   id: string;
   script: string;
@@ -2248,8 +2261,8 @@ export function GeneratePageInner() {
           mediaType: 'text' as const,
           textAnimationEffect,
           textAnimationText: resolveTextAnimationText(s.textAnimationText, text),
-          textAnimationSettings: normalizeTextAnimationSettings(
-            s.textAnimationSettings,
+          textAnimationSettings: serializeTextAnimationSettingsForRender(
+            s,
             textAnimationEffect,
             effectiveIsShort,
           ),
