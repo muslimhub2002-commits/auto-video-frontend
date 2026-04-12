@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AlertDialog } from '@/components/ui/alert-dialog';
@@ -24,7 +25,6 @@ import {
   IMAGE_MOTION_SPEED_MAX,
   IMAGE_MOTION_SPEED_MIN,
   IMAGE_MOTION_SPEED_STEP,
-  DEFAULT_IMAGE_MOTION_SPEED,
   ImageEffectPreview,
   type ImageFilterPresetDto,
   type ImageFilterSettings,
@@ -37,11 +37,15 @@ import {
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
 import {
+  DEFAULT_TEXT_ANIMATION_WORD_DELAY,
   getDefaultTextAnimationSettings,
   getTextAnimationEffectLabel,
   normalizeTextAnimationSettings,
   resolveTextAnimationEffectFromSettings,
   resolveTextAnimationText,
+  TEXT_ANIMATION_WORD_DELAY_MAX,
+  TEXT_ANIMATION_WORD_DELAY_MIN,
+  TEXT_ANIMATION_WORD_DELAY_STEP,
   TextAnimationPreview,
   TEXT_ANIMATION_EFFECT_VALUES,
   type TextAnimationPresetDto,
@@ -61,6 +65,26 @@ const LOOK_EFFECT_VALUES = [
 
 type DetailTab = 'visual' | 'motion' | 'text';
 
+export type ImageEffectsDetailApplyParams = {
+  visualEffect: SentenceItem['visualEffect'] | null;
+  customImageFilterId: string | null;
+  imageFilterSettings: ImageFilterSettings;
+  imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
+  customMotionEffectId: string | null;
+  imageMotionSettings: ImageMotionSettings;
+  imageMotionSpeed: number;
+  textAnimationEffect: SentenceItem['textAnimationEffect'] | null;
+  customTextAnimationId: string | null;
+  textAnimationSettings: TextAnimationSettings;
+  textAnimationText: string | null;
+  textBackgroundImage: File | null;
+  textBackgroundImageUrl: string | null;
+  textBackgroundSavedImageId: string | null;
+  textBackgroundVideo: File | null;
+  textBackgroundVideoUrl: string | null;
+  textBackgroundSavedVideoId: string | null;
+};
+
 type DebouncedPreviewState = {
   visualEffect: SentenceItem['visualEffect'] | null;
   imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
@@ -76,6 +100,8 @@ type ImageEffectsDetailModalProps = {
   isOpen: boolean;
   isShortVideo: boolean;
   activeTab: DetailTab;
+  enabledTabs?: DetailTab[];
+  variant?: 'default' | 'look-only-upload';
   previewImageUrl: string | null;
   previewTextInheritedImageUrl?: string | null;
   previewTextInheritedVideoUrl?: string | null;
@@ -110,25 +136,8 @@ type ImageEffectsDetailModalProps = {
   motionEffectPresets: MotionEffectPresetDto[];
   textAnimationPresets: TextAnimationPresetDto[];
   onClose: () => void;
-  onApply: (params: {
-    visualEffect: SentenceItem['visualEffect'] | null;
-    customImageFilterId: string | null;
-    imageFilterSettings: ImageFilterSettings;
-    imageMotionEffect: NonNullable<SentenceItem['imageMotionEffect']>;
-    customMotionEffectId: string | null;
-    imageMotionSettings: ImageMotionSettings;
-    imageMotionSpeed: number;
-    textAnimationEffect: SentenceItem['textAnimationEffect'] | null;
-    customTextAnimationId: string | null;
-    textAnimationSettings: TextAnimationSettings;
-    textAnimationText: string | null;
-    textBackgroundImage: File | null;
-    textBackgroundImageUrl: string | null;
-    textBackgroundSavedImageId: string | null;
-    textBackgroundVideo: File | null;
-    textBackgroundVideoUrl: string | null;
-    textBackgroundSavedVideoId: string | null;
-  }) => void;
+  onApply: (params: ImageEffectsDetailApplyParams) => void;
+  onDownload?: (params: ImageEffectsDetailApplyParams) => Promise<void> | void;
   onSaveImageFilterPreset: (
     title: string,
     settings: ImageFilterSettings,
@@ -274,6 +283,8 @@ export function ImageEffectsDetailModal({
   isOpen,
   isShortVideo,
   activeTab,
+  enabledTabs,
+  variant = 'default',
   previewImageUrl,
   previewTextInheritedImageUrl = null,
   previewTextInheritedVideoUrl = null,
@@ -302,6 +313,7 @@ export function ImageEffectsDetailModal({
   textAnimationPresets,
   onClose,
   onApply,
+  onDownload,
   onSaveImageFilterPreset,
   onUpdateImageFilterPreset,
   onDeleteImageFilterPreset,
@@ -314,6 +326,19 @@ export function ImageEffectsDetailModal({
   onGenerateLookWithAi,
   onGenerateMotionWithAi,
 }: ImageEffectsDetailModalProps) {
+  const availableTabs = useMemo<DetailTab[]>(() => {
+    const rawTabs = Array.isArray(enabledTabs) && enabledTabs.length > 0
+      ? enabledTabs
+      : ['visual', 'motion', 'text'];
+
+    return rawTabs.filter(
+      (value, index, array): value is DetailTab =>
+        (value === 'visual' || value === 'motion' || value === 'text') &&
+        array.indexOf(value) === index,
+    );
+  }, [enabledTabs]);
+  const isLookOnlyUploadVariant = variant === 'look-only-upload';
+  const showTabSwitcher = availableTabs.length > 1;
   const incomingImageMotionSpeed = resolveImageMotionSpeed(
     imageMotionSpeed,
     imageMotionSettings,
@@ -342,6 +367,8 @@ export function ImageEffectsDetailModal({
   const [deletePresetKind, setDeletePresetKind] = useState<DetailTab | null>(null);
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isClosing, setIsClosing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const [draftVisualEffect, setDraftVisualEffect] = useState<SentenceItem['visualEffect'] | null>(
     visualEffect ?? null,
   );
@@ -580,6 +607,14 @@ export function ImageEffectsDetailModal({
   }));
 
   useEffect(() => {
+    setPortalTarget(document.body);
+
+    return () => {
+      setPortalTarget(null);
+    };
+  }, []);
+
+  useEffect(() => {
     if (isOpen) {
       setIsRendered(true);
       setIsClosing(false);
@@ -593,7 +628,7 @@ export function ImageEffectsDetailModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    setCurrentTab(activeTab);
+    setCurrentTab(availableTabs.includes(activeTab) ? activeTab : availableTabs[0]);
     setDraftVisualEffect(visualEffect ?? null);
     setDraftImageMotionEffect(imageMotionEffect ?? 'default');
     setDraftImageMotionSpeed(incomingImageMotionSpeed);
@@ -674,7 +709,13 @@ export function ImageEffectsDetailModal({
     textAnimationText,
     sentenceText,
     visualEffect,
+    availableTabs,
   ]);
+
+  useEffect(() => {
+    if (availableTabs.includes(currentTab)) return;
+    setCurrentTab(availableTabs[0]);
+  }, [availableTabs, currentTab]);
 
   useEffect(() => {
     if (!draftCustomImageFilterId && draftImageFilterSettings?.presetKey === 'custom') {
@@ -733,7 +774,7 @@ export function ImageEffectsDetailModal({
     resolvedMotion,
   ]);
 
-  if (!isRendered) return null;
+  if (!isRendered || !portalTarget) return null;
 
   const handleRequestClose = () => {
     if (isClosing) return;
@@ -1134,7 +1175,7 @@ export function ImageEffectsDetailModal({
     try {
       const deleted = await onDeleteTextAnimationPreset(selectedTextPreset.id);
       if (deleted) {
-        const fallbackEffect = draftTextAnimationEffect ?? 'popInBounceHook';
+        const fallbackEffect = draftTextAnimationEffect ?? 'slideCutFast';
         setDraftTextAnimationEffect(fallbackEffect);
         setDraftCustomTextAnimationId(null);
         setDraftTextAnimationSettings(
@@ -1197,7 +1238,7 @@ export function ImageEffectsDetailModal({
     setIsGeneratingMotionWithAi(false);
   };
 
-  const handleApply = () => {
+  const buildApplyPayload = (): ImageEffectsDetailApplyParams => {
     const nextCustomImageFilterId =
       draftCustomImageFilterId && !isLookDirtyFromSelectedPreset ? draftCustomImageFilterId : null;
     const nextCustomMotionEffectId =
@@ -1209,7 +1250,7 @@ export function ImageEffectsDetailModal({
         ? draftCustomTextAnimationId
         : null;
 
-    onApply({
+    return {
       visualEffect: draftVisualEffect,
       customImageFilterId: nextCustomImageFilterId,
       imageFilterSettings:
@@ -1235,11 +1276,26 @@ export function ImageEffectsDetailModal({
       textBackgroundVideo: draftTextBackgroundVideo,
       textBackgroundVideoUrl: draftTextBackgroundVideoUrl,
       textBackgroundSavedVideoId: draftTextBackgroundSavedVideoId,
-    });
+    };
+  };
+
+  const handleApply = () => {
+    onApply(buildApplyPayload());
     handleRequestClose();
   };
 
-  return (
+  const handleDownload = async () => {
+    if (!onDownload) return;
+
+    setIsDownloading(true);
+    try {
+      await onDownload(buildApplyPayload());
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return createPortal(
     <div
       className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md ${isClosing
         ? 'animate-out fade-out-0 duration-200'
@@ -1276,44 +1332,52 @@ export function ImageEffectsDetailModal({
             </button>
           </div>
 
-          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-1">
-            <Button
-              type="button"
-              onClick={() => setCurrentTab('visual')}
-              className={
-                currentTab === 'visual'
-                  ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
-                  : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
-              }
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              Look
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setCurrentTab('motion')}
-              className={
-                currentTab === 'motion'
-                  ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
-                  : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
-              }
-            >
-              <Clapperboard className="mr-2 h-4 w-4" />
-              Motion
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setCurrentTab('text')}
-              className={
-                currentTab === 'text'
-                  ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
-                  : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
-              }
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              Text
-            </Button>
-          </div>
+          {showTabSwitcher ? (
+            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-1">
+              {availableTabs.includes('visual') ? (
+                <Button
+                  type="button"
+                  onClick={() => setCurrentTab('visual')}
+                  className={
+                    currentTab === 'visual'
+                      ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
+                      : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
+                  }
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Look
+                </Button>
+              ) : null}
+              {availableTabs.includes('motion') ? (
+                <Button
+                  type="button"
+                  onClick={() => setCurrentTab('motion')}
+                  className={
+                    currentTab === 'motion'
+                      ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
+                      : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
+                  }
+                >
+                  <Clapperboard className="mr-2 h-4 w-4" />
+                  Motion
+                </Button>
+              ) : null}
+              {availableTabs.includes('text') ? (
+                <Button
+                  type="button"
+                  onClick={() => setCurrentTab('text')}
+                  className={
+                    currentTab === 'text'
+                      ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
+                      : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
+                  }
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Text
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-6 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/10 bg-black/30 p-4">
             {currentTab === 'text' ? (
@@ -1375,13 +1439,43 @@ export function ImageEffectsDetailModal({
           </div>
 
           <div className="border-b border-slate-200 bg-white px-6 py-4">
-            <Button
-              type="button"
-              onClick={handleApply}
-              className="h-11 w-full rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 text-white shadow-lg transition-all duration-200 hover:from-purple-700 hover:to-indigo-700 hover:shadow-xl"
-            >
-              Apply
-            </Button>
+            {isLookOnlyUploadVariant ? (
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleRequestClose}
+                  className="h-11 flex-1 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleDownload()}
+                  disabled={!previewImageUrl || !onDownload || isDownloading}
+                  className="h-11 flex-1 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                >
+                  {isDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Download
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleApply}
+                  className="h-11 flex-1 rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 text-white shadow-lg transition-all duration-200 hover:from-purple-700 hover:to-indigo-700 hover:shadow-xl"
+                >
+                  Apply
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                onClick={handleApply}
+                className="h-11 w-full rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 text-white shadow-lg transition-all duration-200 hover:from-purple-700 hover:to-indigo-700 hover:shadow-xl"
+              >
+                Apply
+              </Button>
+            )}
           </div>
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
@@ -1446,13 +1540,13 @@ export function ImageEffectsDetailModal({
                   </label>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-3">
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Horizontal align</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text align</div>
                       <Select
-                        value={resolvedText.horizontalAlign ?? 'center'}
-                        onValueChange={(value) => updateTextSettings({ horizontalAlign: value as TextAnimationSettings['horizontalAlign'] })}
+                        value={resolvedText.contentAlign ?? resolvedText.horizontalAlign ?? 'left'}
+                        onValueChange={(value) => updateTextSettings({ contentAlign: value as TextAnimationSettings['contentAlign'] })}
                       >
                         <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
-                          <SelectValue placeholder="Horizontal align" />
+                          <SelectValue placeholder="Text align" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="left">Left</SelectItem>
@@ -1462,13 +1556,29 @@ export function ImageEffectsDetailModal({
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Vertical align</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Block horizontal position</div>
+                      <Select
+                        value={resolvedText.horizontalAlign ?? 'center'}
+                        onValueChange={(value) => updateTextSettings({ horizontalAlign: value as TextAnimationSettings['horizontalAlign'] })}
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Block horizontal position" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="left">Left</SelectItem>
+                          <SelectItem value="center">Center</SelectItem>
+                          <SelectItem value="right">Right</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Block vertical position</div>
                       <Select
                         value={resolvedText.verticalAlign ?? 'middle'}
                         onValueChange={(value) => updateTextSettings({ verticalAlign: value as TextAnimationSettings['verticalAlign'] })}
                       >
                         <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
-                          <SelectValue placeholder="Vertical align" />
+                          <SelectValue placeholder="Block vertical position" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="top">Top</SelectItem>
@@ -1478,6 +1588,27 @@ export function ImageEffectsDetailModal({
                       </Select>
                     </div>
                   </div>
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={resolvedText.animatePerWord === true}
+                      onChange={(e) =>
+                        updateTextSettings({
+                          animatePerWord: e.target.checked,
+                          wordDelaySeconds: e.target.checked
+                            ? resolvedText.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY
+                            : resolvedText.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY,
+                        })
+                      }
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="space-y-1">
+                      <span className="block text-sm font-semibold text-slate-900">Animate words one by one</span>
+                      <span className="block text-xs text-slate-500">
+                        Staggers the Slide + cut animation so each word enters after the previous one.
+                      </span>
+                    </span>
+                  </label>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
                       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text color</span>
@@ -1653,6 +1784,16 @@ export function ImageEffectsDetailModal({
                   <RangeField label="Speed" value={resolvedText.speed ?? 1} min={0.4} max={2.4} step={0.1} onChange={(value) => updateTextSettings({ speed: value })} />
                   <RangeField label="Font size" value={resolvedText.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateTextSettings({ fontSizePercent: value })} />
                   <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
+                  {resolvedText.animatePerWord === true ? (
+                    <RangeField
+                      label="Word delay"
+                      value={resolvedText.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY}
+                      min={TEXT_ANIMATION_WORD_DELAY_MIN}
+                      max={TEXT_ANIMATION_WORD_DELAY_MAX}
+                      step={TEXT_ANIMATION_WORD_DELAY_STEP}
+                      onChange={(value) => updateTextSettings({ wordDelaySeconds: value })}
+                    />
+                  ) : null}
                   <RangeField label="Offset X" value={resolvedText.offsetX ?? 0} min={-35} max={35} step={1} onChange={(value) => updateTextSettings({ offsetX: value })} />
                   <RangeField label="Offset Y" value={resolvedText.offsetY ?? 0} min={-35} max={35} step={1} onChange={(value) => updateTextSettings({ offsetY: value })} />
                   <RangeField label="Background dim" value={resolvedText.backgroundDim ?? 0.38} min={0} max={0.92} step={0.01} onChange={(value) => updateTextSettings({ backgroundDim: value })} />
@@ -1715,7 +1856,7 @@ export function ImageEffectsDetailModal({
                       <Sparkles className="h-4 w-4 text-indigo-600" />
                       Look preset
                     </div>
-                    {selectedLookPreset ? (
+                    {selectedLookPreset && !isLookOnlyUploadVariant ? (
                       <Button
                         type="button"
                         variant="outline"
@@ -1750,16 +1891,18 @@ export function ImageEffectsDetailModal({
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGenerateLookWithAi}
-                    disabled={isGeneratingLookWithAi}
-                    className="h-11 rounded-xl border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                  >
-                    {isGeneratingLookWithAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                    Generate with AI
-                  </Button>
+                  {!isLookOnlyUploadVariant ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleGenerateLookWithAi}
+                      disabled={isGeneratingLookWithAi}
+                      className="h-11 rounded-xl border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    >
+                      {isGeneratingLookWithAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                      Generate with AI
+                    </Button>
+                  ) : null}
                 </div>
 
                 <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1777,53 +1920,55 @@ export function ImageEffectsDetailModal({
                   <RangeField label="Glass overlay" value={resolvedLook.glassOverlayOpacity ?? 0} min={0} max={0.4} step={0.01} onChange={(value) => updateLookSettings({ glassOverlayOpacity: value })} />
                 </div>
 
-                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <Save className="h-4 w-4 text-indigo-600" />
-                    Output actions
-                  </div>
-                  <div className="space-y-2 text-sm text-slate-600">
-                    <p>Apply updates only this image in the editor.</p>
-                    <p>Save as new preset creates a reusable look preset with a different title.</p>
-                    {selectedLookPreset ? (
-                      <p>Override preset updates {selectedLookPreset.title} in your preset library.</p>
+                {!isLookOnlyUploadVariant ? (
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                      <Save className="h-4 w-4 text-indigo-600" />
+                      Output actions
+                    </div>
+                    <div className="space-y-2 text-sm text-slate-600">
+                      <p>Apply updates only this image in the editor.</p>
+                      <p>Save as new preset creates a reusable look preset with a different title.</p>
+                      {selectedLookPreset ? (
+                        <p>Override preset updates {selectedLookPreset.title} in your preset library.</p>
+                      ) : null}
+                    </div>
+                    {lookActionError ? (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {lookActionError}
+                      </div>
                     ) : null}
+                    {canSaveLookAsNew ? (
+                      <div className="flex gap-2">
+                        <Input
+                          value={lookSaveTitle}
+                          onChange={(e) => setLookSaveTitle(e.target.value)}
+                          placeholder={selectedLookPreset ? 'New preset title' : 'Preset title'}
+                          className="h-11 rounded-xl border-slate-200"
+                        />
+                        <Button
+                          type="button"
+                          onClick={handleSaveLookPreset}
+                          disabled={!isLookSaveTitleValid || isSavingLookPreset}
+                          className="h-11 rounded-xl bg-indigo-600 px-4 text-white hover:bg-indigo-700"
+                        >
+                          {isSavingLookPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                          Save as new preset
+                        </Button>
+                      </div>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleOverrideLookPreset}
+                      disabled={!canOverrideLookPreset || isOverridingLookPreset}
+                      className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                    >
+                      {isOverridingLookPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      Override preset
+                    </Button>
                   </div>
-                  {lookActionError ? (
-                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      {lookActionError}
-                    </div>
-                  ) : null}
-                  {canSaveLookAsNew ? (
-                    <div className="flex gap-2">
-                      <Input
-                        value={lookSaveTitle}
-                        onChange={(e) => setLookSaveTitle(e.target.value)}
-                        placeholder={selectedLookPreset ? 'New preset title' : 'Preset title'}
-                        className="h-11 rounded-xl border-slate-200"
-                      />
-                      <Button
-                        type="button"
-                        onClick={handleSaveLookPreset}
-                        disabled={!isLookSaveTitleValid || isSavingLookPreset}
-                        className="h-11 rounded-xl bg-indigo-600 px-4 text-white hover:bg-indigo-700"
-                      >
-                        {isSavingLookPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                        Save as new preset
-                      </Button>
-                    </div>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleOverrideLookPreset}
-                    disabled={!canOverrideLookPreset || isOverridingLookPreset}
-                    className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-                  >
-                    {isOverridingLookPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                    Override preset
-                  </Button>
-                </div>
+                ) : null}
               </>
             ) : (
               <>
@@ -2004,6 +2149,7 @@ export function ImageEffectsDetailModal({
         cancelText="Cancel"
         isLoading={isDeletingLookPreset || isDeletingMotionPreset || isDeletingTextPreset}
       />
-    </div>
+    </div>,
+    portalTarget,
   );
 }

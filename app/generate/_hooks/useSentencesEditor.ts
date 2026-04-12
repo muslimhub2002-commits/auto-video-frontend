@@ -304,7 +304,7 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         text: '',
         sceneTab: 'image',
         mediaMode: 'single',
-        textAnimationEffect: 'popInBounceHook',
+        textAnimationEffect: 'slideCutFast',
         textAnimationText: null,
         customTextAnimationId: null,
         textAnimationSettings: null,

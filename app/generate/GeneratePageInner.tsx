@@ -24,13 +24,16 @@ import { HeaderBar } from './_components/HeaderBar';
 import { ScriptSection } from './_components/ScriptSection';
 import { SentencesImagesSection } from './_components/SentencesImagesSection';
 import { VoiceOverSection } from './_components/VoiceOverSection';
-import { SentenceVoiceOverManagerModal } from './_components/SentenceVoiceOverManagerModal';
+import {
+  SentenceVoiceOverManagerModal,
+  type VoiceSegmentManagerItem,
+} from './_components/SentenceVoiceOverManagerModal';
 import { ElevenLabsVoiceSettingsModal } from './_components/ElevenLabsVoiceSettingsModal';
 import {
   DEFAULT_ELEVENLABS_VOICE_SETTINGS,
-  describeElevenLabsVoiceSettings,
   normalizeElevenLabsVoiceSettings,
 } from './_components/ElevenLabsVoiceSettingsFields';
+import { BackgroundSoundtrackSection } from './_components/BackgroundSoundtrackSection';
 import { GenerateVideoButton } from './_components/GenerateVideoButton';
 import { VideoJobSection } from './_components/VideoJobSection';
 import type { ScriptReferenceDto } from './_components/ScriptReferencesModal';
@@ -667,12 +670,11 @@ function serializeTextAnimationSettingsForRender(
   fallbackEffect: SentenceItem['textAnimationEffect'] | null | undefined,
   isShortVideo: boolean,
 ) {
-  const rawSettings = normalizeSettingsObject(sentence.textAnimationSettings);
-  if (rawSettings) {
-    return { ...rawSettings };
-  }
-
-  return normalizeTextAnimationSettings(undefined, fallbackEffect, isShortVideo);
+  return normalizeTextAnimationSettings(
+    sentence.textAnimationSettings,
+    fallbackEffect,
+    isShortVideo,
+  );
 }
 
 type ScriptDraftDto = {
@@ -958,12 +960,16 @@ type ScriptVoiceOverChunkDto = {
   text: string;
   sentences: string[];
   provider: VoiceProvider | string | null;
+  providerVoiceId?: string | null;
+  providerVoiceName?: string | null;
   mimeType: string | null;
+  styleInstructions?: string | null;
   durationSeconds: number | null;
   estimatedSeconds: number | null;
   url: string;
   fileName?: string | null;
   createdAt?: string | null;
+  elevenLabsSettings?: ElevenLabsVoiceSettings | null;
 };
 
 type VoiceOverChunkState = {
@@ -971,13 +977,19 @@ type VoiceOverChunkState = {
   text: string;
   sentences: string[];
   provider: VoiceProvider | string | null;
+  providerVoiceId: string | null;
+  providerVoiceName: string | null;
   mimeType: string | null;
+  styleInstructions: string | null;
   durationSeconds: number | null;
   estimatedSeconds: number | null;
   url: string | null;
+  persistedUrl: string | null;
   fileName: string | null;
   createdAt: string | null;
+  elevenLabsSettings: ElevenLabsVoiceSettings | null;
   sourceFile: File | null;
+  needsUpload: boolean;
 };
 
 type GeneratedVoiceFileResult = {
@@ -1150,25 +1162,42 @@ const cloneVoiceOverChunks = (chunks: VoiceOverChunkState[]) =>
     ? chunks.map((chunk) => ({
         ...chunk,
         sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+        persistedUrl: String(chunk.persistedUrl ?? '').trim() || null,
+        elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
+          chunk.elevenLabsSettings,
+        ),
+        needsUpload: chunk.needsUpload === true,
       }))
     : [];
 
 const toVoiceOverChunkState = (
   chunk: ScriptVoiceOverChunkDto,
   sourceFile: File | null = null,
-): VoiceOverChunkState => ({
-  index: Number(chunk.index ?? 0),
-  text: String(chunk.text ?? '').trim(),
-  sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
-  provider: normalizeVoiceProvider(chunk.provider),
-  mimeType: chunk.mimeType,
-  durationSeconds: chunk.durationSeconds,
-  estimatedSeconds: chunk.estimatedSeconds,
-  url: String(chunk.url ?? '').trim() || null,
-  fileName: chunk.fileName ?? null,
-  createdAt: chunk.createdAt ?? null,
-  sourceFile,
-});
+): VoiceOverChunkState => {
+  const resolvedUrl = String(chunk.url ?? '').trim() || null;
+
+  return {
+    index: Number(chunk.index ?? 0),
+    text: String(chunk.text ?? '').trim(),
+    sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+    provider: normalizeVoiceProvider(chunk.provider),
+    providerVoiceId: String(chunk.providerVoiceId ?? '').trim() || null,
+    providerVoiceName: String(chunk.providerVoiceName ?? '').trim() || null,
+    mimeType: chunk.mimeType,
+    styleInstructions: String(chunk.styleInstructions ?? '').trim() || null,
+    durationSeconds: chunk.durationSeconds,
+    estimatedSeconds: chunk.estimatedSeconds,
+    url: resolvedUrl,
+    persistedUrl: resolvedUrl,
+    fileName: chunk.fileName ?? null,
+    createdAt: chunk.createdAt ?? null,
+    elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
+      chunk.elevenLabsSettings,
+    ),
+    sourceFile,
+    needsUpload: false,
+  };
+};
 
 const normalizeVoiceProvider = (value: string | null | undefined): VoiceProvider =>
   value === 'elevenlabs' ? 'elevenlabs' : 'google';
@@ -1180,9 +1209,35 @@ const normalizeVoiceGenerationMode = (
 const isBlobUrl = (value: string | null | undefined) =>
   String(value ?? '').trim().startsWith('blob:');
 
+const isLocalAssetUrl = (value: string | null | undefined) => {
+  const trimmed = String(value ?? '').trim();
+  return trimmed.startsWith('blob:') || trimmed.startsWith('data:');
+};
+
+const resolvePersistedVoiceChunkUrl = (
+  chunk: Pick<VoiceOverChunkState, 'persistedUrl' | 'url'>,
+) => {
+  const persistedUrl = String(chunk.persistedUrl ?? '').trim();
+  if (persistedUrl) return persistedUrl;
+
+  const currentUrl = String(chunk.url ?? '').trim();
+  if (!currentUrl || isLocalAssetUrl(currentUrl)) {
+    return null;
+  }
+
+  return currentUrl;
+};
+
+const hasPersistableVoiceChunks = (chunks: VoiceOverChunkState[] | null | undefined) =>
+  Array.isArray(chunks) && chunks.length > 1;
+
 const hasSentenceVoiceOver = (
   sentence: Pick<SentenceItem, 'voiceOverUrl' | 'voiceOverFile'>,
 ) => Boolean(sentence.voiceOverFile) || Boolean(String(sentence.voiceOverUrl ?? '').trim());
+
+const hasVoiceOverChunkAudio = (
+  chunk: Pick<VoiceOverChunkState, 'url' | 'sourceFile'>,
+) => Boolean(chunk.sourceFile) || Boolean(String(chunk.url ?? '').trim());
 
 const clearSentenceVoiceOverState = (sentence: SentenceItem): SentenceItem => ({
   ...sentence,
@@ -1217,6 +1272,39 @@ const buildLocalSentenceVoiceState = (params: {
   voiceOverStyleInstructions:
     String(params.styleInstructions ?? '').trim() || null,
 });
+
+const buildLocalVoiceOverChunkState = (params: {
+  chunk: VoiceOverChunkState;
+  file: File;
+  mimeType: string;
+  durationSeconds: number | null;
+  provider: VoiceProvider;
+  providerVoiceId?: string | null;
+  providerVoiceName?: string | null;
+  styleInstructions?: string | null;
+  elevenLabsSettings?: ElevenLabsVoiceSettings | null;
+}): VoiceOverChunkState => {
+  const persistedUrl = resolvePersistedVoiceChunkUrl(params.chunk);
+
+  return {
+    ...params.chunk,
+    provider: params.provider,
+    providerVoiceId: String(params.providerVoiceId ?? '').trim() || null,
+    providerVoiceName: String(params.providerVoiceName ?? '').trim() || null,
+    mimeType: params.mimeType,
+    styleInstructions: String(params.styleInstructions ?? '').trim() || null,
+    durationSeconds: params.durationSeconds,
+    url: URL.createObjectURL(params.file),
+    persistedUrl,
+    fileName: params.file.name,
+    createdAt: new Date().toISOString(),
+    elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
+      params.elevenLabsSettings,
+    ),
+    sourceFile: params.file,
+    needsUpload: true,
+  };
+};
 
 const buildVoiceGenerationConfig = (params: {
   mode: VoiceGenerationMode;
@@ -1280,6 +1368,15 @@ type ReferenceScriptPayload = {
   script: string;
 };
 
+type ScriptIdeaOption = {
+  id: string;
+  title: string;
+};
+
+type ScriptIdeaRequestPayload = {
+  title: string;
+};
+
 type TransitionSoundDraftItem = NonNullable<SentenceItem['transitionSoundEffects']>;
 type SentenceImageSlot = 'primary' | 'secondary';
 
@@ -1337,6 +1434,11 @@ export function GeneratePageInner() {
   const [scriptLanguage, setScriptLanguage] = useState('en');
   // Default to Anthropic (Claude) as requested.
   const [scriptModel, setScriptModel] = useState('gpt-5.2');
+  const [scriptIdeas, setScriptIdeas] = useState<ScriptIdeaOption[]>([]);
+  const [selectedScriptIdeaTitle, setSelectedScriptIdeaTitle] =
+    useState<string | null>(null);
+  const [isScriptIdeasLoading, setIsScriptIdeasLoading] = useState(false);
+  const [scriptIdeasError, setScriptIdeasError] = useState<string | null>(null);
 
   const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState('en');
@@ -1379,11 +1481,24 @@ export function GeneratePageInner() {
   const [voiceLibraryUrl, setVoiceLibraryUrl] = useState<string | null>(null);
   const [voiceOverPreviewUrl, setVoiceOverPreviewUrl] = useState<string | null>(null);
   const [isVoiceOverEditorOpen, setIsVoiceOverEditorOpen] = useState(false);
+  const [activeSentenceVoiceEditorSentenceId, setActiveSentenceVoiceEditorSentenceId] =
+    useState<string | null>(null);
+  const [activeChunkVoiceEditorId, setActiveChunkVoiceEditorId] =
+    useState<string | null>(null);
   const [isElevenLabsSettingsModalOpen, setIsElevenLabsSettingsModalOpen] =
     useState(false);
   const [isApplyingVoiceOverEdit, setIsApplyingVoiceOverEdit] = useState(false);
   const [isSavingVoiceOverEdit, setIsSavingVoiceOverEdit] = useState(false);
+  const [isApplyingSentenceVoiceEdit, setIsApplyingSentenceVoiceEdit] =
+    useState(false);
+  const [sentenceVoiceEditActionError, setSentenceVoiceEditActionError] =
+    useState<string | null>(null);
+  const [isApplyingChunkVoiceEdit, setIsApplyingChunkVoiceEdit] = useState(false);
+  const [chunkVoiceEditActionError, setChunkVoiceEditActionError] =
+    useState<string | null>(null);
   const [isSentenceVoiceManagerOpen, setIsSentenceVoiceManagerOpen] =
+    useState(false);
+  const [isChunkVoiceManagerOpen, setIsChunkVoiceManagerOpen] =
     useState(false);
   const [isGeneratingSentenceVoiceStyleById, setIsGeneratingSentenceVoiceStyleById] =
     useState<Record<string, boolean>>({});
@@ -1393,6 +1508,14 @@ export function GeneratePageInner() {
     useState<Record<string, boolean>>({});
   const [sentenceVoiceCandidateById, setSentenceVoiceCandidateById] =
     useState<Record<string, SentenceVoiceCandidate | null>>({});
+  const [isGeneratingChunkVoiceStyleById, setIsGeneratingChunkVoiceStyleById] =
+    useState<Record<string, boolean>>({});
+  const [isRegeneratingChunkVoiceById, setIsRegeneratingChunkVoiceById] =
+    useState<Record<string, boolean>>({});
+  const [isApplyingChunkVoiceCandidateById, setIsApplyingChunkVoiceCandidateById] =
+    useState<Record<string, boolean>>({});
+  const [chunkVoiceCandidateById, setChunkVoiceCandidateById] =
+    useState<Record<string, SentenceVoiceCandidate | null>>({});
 
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioUrlRef = useRef<string | null>(null);
@@ -1400,7 +1523,10 @@ export function GeneratePageInner() {
   const previousSentenceVoiceSignatureRef = useRef<string | null>(null);
   const sentenceVoiceCandidateByIdRef =
     useRef<Record<string, SentenceVoiceCandidate | null>>({});
+  const chunkVoiceCandidateByIdRef =
+    useRef<Record<string, SentenceVoiceCandidate | null>>({});
   const previousSentenceVoiceUrlsRef = useRef<Record<string, string | null>>({});
+  const previousVoiceOverChunkUrlsRef = useRef<Record<string, string | null>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [backgroundSoundtracks, setBackgroundSoundtracks] = useState<BackgroundSoundtrackItem[]>([]);
@@ -1556,6 +1682,7 @@ export function GeneratePageInner() {
   const [referenceScripts, setReferenceScripts] = useState<ReferenceScriptPayload[]>([]);
   // Render performance and transition options
   const [isShort, setIsShort] = useState(true);
+  const [addBackgroundSoundtrack, setAddBackgroundSoundtrack] = useState(true);
   const [useLowerFps, setUseLowerFps] = useState(false);
   const [useLowerResolution, setUseLowerResolution] = useState(false);
   const [addSubtitles, setAddSubtitles] = useState(true);
@@ -1626,6 +1753,10 @@ export function GeneratePageInner() {
   }, [sentenceVoiceCandidateById]);
 
   useEffect(() => {
+    chunkVoiceCandidateByIdRef.current = chunkVoiceCandidateById;
+  }, [chunkVoiceCandidateById]);
+
+  useEffect(() => {
     const nextUrls = Object.fromEntries(
       sentences.map((sentence) => [
         sentence.id,
@@ -1646,11 +1777,39 @@ export function GeneratePageInner() {
   }, [sentences]);
 
   useEffect(() => {
+    const nextUrls = Object.fromEntries(
+      voiceOverChunks.map((chunk) => [
+        String(chunk.index),
+        String(chunk.url ?? '').trim() || null,
+      ]),
+    ) as Record<string, string | null>;
+
+    for (const [chunkId, previousUrl] of Object.entries(
+      previousVoiceOverChunkUrlsRef.current,
+    )) {
+      const nextUrl = nextUrls[chunkId] ?? null;
+      if (previousUrl && previousUrl !== nextUrl && isBlobUrl(previousUrl)) {
+        URL.revokeObjectURL(previousUrl);
+      }
+    }
+
+    previousVoiceOverChunkUrlsRef.current = nextUrls;
+  }, [voiceOverChunks]);
+
+  useEffect(() => {
     return () => {
       Object.values(sentenceVoiceCandidateByIdRef.current).forEach((candidate) => {
         disposeSentenceVoiceCandidate(candidate);
       });
+      Object.values(chunkVoiceCandidateByIdRef.current).forEach((candidate) => {
+        disposeSentenceVoiceCandidate(candidate);
+      });
       Object.values(previousSentenceVoiceUrlsRef.current).forEach((url) => {
+        if (url && isBlobUrl(url)) {
+          URL.revokeObjectURL(url);
+        }
+      });
+      Object.values(previousVoiceOverChunkUrlsRef.current).forEach((url) => {
         if (url && isBlobUrl(url)) {
           URL.revokeObjectURL(url);
         }
@@ -1679,24 +1838,36 @@ export function GeneratePageInner() {
 
     if (
       voiceGenerationMode === 'perSentence' &&
-      (voiceOver || voiceLibraryUrl || savedVoiceId)
+      (voiceOver || voiceLibraryUrl || savedVoiceId || voiceOverChunks.length > 0)
     ) {
       setVoiceOver(null);
       setVoiceOverChunks([]);
       setVoiceDuration(null);
       setSavedVoiceId(null);
       setVoiceLibraryUrl(null);
+      Object.keys(chunkVoiceCandidateById).forEach((chunkId) => {
+        handleCancelChunkVoiceCandidate(chunkId);
+      });
+      setIsChunkVoiceManagerOpen(false);
     }
   }, [
+    chunkVoiceCandidateById,
     savedVoiceId,
     sentences,
     voiceGenerationMode,
     voiceLibraryUrl,
     voiceOver,
+    voiceOverChunks.length,
   ]);
 
   useEffect(() => {
-    if (!isLongForm) return;
+    if (!isLongForm) {
+      setActiveChunkVoiceEditorId(null);
+      setChunkVoiceEditActionError(null);
+      setIsChunkVoiceManagerOpen(false);
+      return;
+    }
+
     if (!isShort) return;
     setIsShort(false);
   }, [isLongForm, isShort]);
@@ -2031,12 +2202,6 @@ export function GeneratePageInner() {
   );
 
   const selectedVoiceOption = findVoiceOption(voiceProvider, selectedVoiceId);
-  const elevenLabsSettingsSummary =
-    voiceProvider === 'elevenlabs'
-      ? elevenLabsGlobalSettings
-        ? describeElevenLabsVoiceSettings(elevenLabsGlobalSettings)
-        : 'Using ElevenLabs provider defaults.'
-      : null;
 
   const getAudioDurationSeconds = async (file: File): Promise<number | null> => {
     return new Promise((resolve) => {
@@ -2183,14 +2348,21 @@ export function GeneratePageInner() {
   const persistVoiceOverChunksToCloudinary = async (
     chunks: VoiceOverChunkState[],
   ): Promise<ScriptVoiceOverChunkDto[] | null> => {
-    if (!Array.isArray(chunks) || chunks.length <= 1) {
+    if (!hasPersistableVoiceChunks(chunks)) {
       return null;
     }
 
     const orderedChunks = [...chunks].sort((left, right) => left.index - right.index);
     const persisted = await mapWithConcurrency(orderedChunks, 2, async (chunk) => {
-      let chunkUrl = String(chunk.url ?? '').trim();
-      if (!chunkUrl) {
+      const currentUrl = String(chunk.url ?? '').trim();
+      const persistedUrl = resolvePersistedVoiceChunkUrl(chunk);
+      const shouldUpload =
+        chunk.needsUpload === true ||
+        !persistedUrl ||
+        Boolean(currentUrl && isLocalAssetUrl(currentUrl));
+
+      let chunkUrl = persistedUrl;
+      if (shouldUpload) {
         if (!chunk.sourceFile) {
           throw new Error('A generated voice chunk is missing its audio file. Please regenerate the voice-over.');
         }
@@ -2201,17 +2373,27 @@ export function GeneratePageInner() {
         });
       }
 
+      if (!chunkUrl) {
+        throw new Error('A voice chunk could not be persisted. Please regenerate the voice-over.');
+      }
+
       return {
         index: chunk.index,
         text: chunk.text,
         sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
         provider: normalizeVoiceProvider(chunk.provider),
+        providerVoiceId: chunk.providerVoiceId,
+        providerVoiceName: chunk.providerVoiceName,
         mimeType: chunk.mimeType,
+        styleInstructions: chunk.styleInstructions,
         durationSeconds: chunk.durationSeconds,
         estimatedSeconds: chunk.estimatedSeconds,
         url: chunkUrl,
         fileName: chunk.fileName,
         createdAt: chunk.createdAt,
+        elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
+          chunk.elevenLabsSettings,
+        ),
       } satisfies ScriptVoiceOverChunkDto;
     });
 
@@ -2241,19 +2423,9 @@ export function GeneratePageInner() {
       ),
     );
 
-    const normalizedChunks: VoiceOverChunkState[] = orderedChunks.map((chunk) => ({
-      index: Number(chunk.index ?? 0),
-      text: String(chunk.text ?? '').trim(),
-      sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
-      provider: normalizeVoiceProvider(chunk.provider),
-      mimeType: chunk.mimeType,
-      durationSeconds: chunk.durationSeconds,
-      estimatedSeconds: chunk.estimatedSeconds,
-      url: String(chunk.url ?? '').trim() || null,
-      fileName: chunk.fileName ?? null,
-      createdAt: chunk.createdAt ?? null,
-      sourceFile: null,
-    }));
+    const normalizedChunks: VoiceOverChunkState[] = orderedChunks.map((chunk) =>
+      toVoiceOverChunkState(chunk),
+    );
 
     if (files.length === 1) {
       const [file] = files;
@@ -2285,6 +2457,62 @@ export function GeneratePageInner() {
       resourceType: 'video',
       folder: `auto-video-generator/sentence-voice-overs/${params.sentenceId}`,
     });
+  };
+
+  const rebuildVoiceOverFromChunks = async (params: {
+    chunks: VoiceOverChunkState[];
+    fallbackBaseName: string;
+    overrideFilesByChunkId?: Record<string, File | null | undefined>;
+  }): Promise<GeneratedVoiceFileResult | null> => {
+    const orderedChunks = [...params.chunks]
+      .filter((chunk) => String(chunk.text ?? '').trim())
+      .filter(
+        (chunk) =>
+          Boolean(params.overrideFilesByChunkId?.[String(chunk.index)]) ||
+          hasVoiceOverChunkAudio(chunk),
+      )
+      .sort((left, right) => left.index - right.index);
+
+    if (orderedChunks.length === 0) {
+      return null;
+    }
+
+    const files = await Promise.all(
+      orderedChunks.map(async (chunk, index) => {
+        const chunkId = String(chunk.index);
+        const overrideFile =
+          params.overrideFilesByChunkId?.[chunkId] ?? chunk.sourceFile ?? null;
+        if (overrideFile) return overrideFile;
+
+        return await downloadUrlAsFile(
+          String(chunk.url ?? '').trim(),
+          chunk.fileName || `${params.fallbackBaseName}-chunk-${index + 1}.mp3`,
+        );
+      }),
+    );
+
+    const nextChunks = cloneVoiceOverChunks(orderedChunks);
+
+    if (files.length === 1) {
+      const [file] = files;
+      return {
+        file,
+        durationSeconds: await getAudioDurationSeconds(file),
+        mimeType: file.type || nextChunks[0]?.mimeType || 'audio/mpeg',
+        chunks: nextChunks,
+      };
+    }
+
+    const merged = await mergeGeneratedVoiceChunks({
+      files,
+      provider: normalizeVoiceProvider(orderedChunks[0]?.provider),
+      fallbackBaseName: params.fallbackBaseName,
+    });
+
+    return {
+      ...merged,
+      chunks: nextChunks,
+    };
   };
 
   const rebuildVoiceOverFromSentenceVoices = async (params: {
@@ -2346,6 +2574,7 @@ export function GeneratePageInner() {
     scriptText: string;
     voiceId: string;
     provider: VoiceProvider;
+    providerVoiceName?: string | null;
     styleInstructions?: string;
     elevenLabsSettings?: ElevenLabsVoiceSettings | null;
     fallbackBaseName: string;
@@ -2377,19 +2606,44 @@ export function GeneratePageInner() {
       return {
         ...result,
         chunks: [
-          {
-            index: chunks[0].index,
-            text: chunks[0].script,
-            sentences: [...chunks[0].sentences],
-            provider: params.provider,
+          buildLocalVoiceOverChunkState({
+            chunk: {
+              index: chunks[0].index,
+              text: chunks[0].script,
+              sentences: [...chunks[0].sentences],
+              provider: params.provider,
+              providerVoiceId: params.voiceId,
+              providerVoiceName:
+                String(params.providerVoiceName ?? '').trim() || null,
+              mimeType: result.mimeType,
+              styleInstructions: params.styleInstructions ?? null,
+              durationSeconds: result.durationSeconds,
+              estimatedSeconds: chunks[0].estimatedSeconds,
+              url: null,
+              persistedUrl: null,
+              fileName: result.file.name,
+              createdAt: new Date().toISOString(),
+              elevenLabsSettings:
+                params.provider === 'elevenlabs'
+                  ? normalizeOptionalElevenLabsVoiceSettings(
+                      params.elevenLabsSettings,
+                    )
+                  : null,
+              sourceFile: null,
+              needsUpload: true,
+            },
+            file: result.file,
             mimeType: result.mimeType,
             durationSeconds: result.durationSeconds,
-            estimatedSeconds: chunks[0].estimatedSeconds,
-            url: null,
-            fileName: result.file.name,
-            createdAt: new Date().toISOString(),
-            sourceFile: result.file,
-          },
+            provider: params.provider,
+            providerVoiceId: params.voiceId,
+            providerVoiceName: params.providerVoiceName,
+            styleInstructions: params.styleInstructions,
+            elevenLabsSettings:
+              params.provider === 'elevenlabs'
+                ? params.elevenLabsSettings
+                : null,
+          }),
         ],
       };
     }
@@ -2417,19 +2671,44 @@ export function GeneratePageInner() {
           `Failed to generate voice chunk ${index + 1} of ${chunks.length}.`,
       });
       generatedFiles.push(generated.file);
-      generatedChunks.push({
-        index: chunk.index,
-        text: chunk.script,
-        sentences: [...chunk.sentences],
-        provider: params.provider,
-        mimeType: generated.mimeType,
-        durationSeconds: generated.durationSeconds,
-        estimatedSeconds: chunk.estimatedSeconds,
-        url: null,
-        fileName: generated.file.name,
-        createdAt: new Date().toISOString(),
-        sourceFile: generated.file,
-      });
+      generatedChunks.push(
+        buildLocalVoiceOverChunkState({
+          chunk: {
+            index: chunk.index,
+            text: chunk.script,
+            sentences: [...chunk.sentences],
+            provider: params.provider,
+            providerVoiceId: params.voiceId,
+            providerVoiceName:
+              String(params.providerVoiceName ?? '').trim() || null,
+            mimeType: generated.mimeType,
+            styleInstructions: params.styleInstructions ?? null,
+            durationSeconds: generated.durationSeconds,
+            estimatedSeconds: chunk.estimatedSeconds,
+            url: null,
+            persistedUrl: null,
+            fileName: generated.file.name,
+            createdAt: new Date().toISOString(),
+            elevenLabsSettings:
+              params.provider === 'elevenlabs'
+                ? normalizeOptionalElevenLabsVoiceSettings(
+                    params.elevenLabsSettings,
+                  )
+                : null,
+            sourceFile: null,
+            needsUpload: true,
+          },
+          file: generated.file,
+          mimeType: generated.mimeType,
+          durationSeconds: generated.durationSeconds,
+          provider: params.provider,
+          providerVoiceId: params.voiceId,
+          providerVoiceName: params.providerVoiceName,
+          styleInstructions: params.styleInstructions,
+          elevenLabsSettings:
+            params.provider === 'elevenlabs' ? params.elevenLabsSettings : null,
+        }),
+      );
     }
 
     params.onProgress?.({
@@ -2452,6 +2731,8 @@ export function GeneratePageInner() {
   };
 
   const resolveBackgroundMusicSrcForRender = (): string | undefined => {
+    if (!addBackgroundSoundtrack) return '__none__';
+
     const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
     if (value === '__none__') return '__none__';
 
@@ -3028,6 +3309,7 @@ export function GeneratePageInner() {
       scriptText: mergeVoiceSentenceTexts(normalizedSentences),
       voiceId,
       provider: voiceProvider,
+      providerVoiceName: selectedVoiceOption?.name ?? null,
       styleInstructions:
         voiceProvider === 'google'
           ? String(aiStudioStyleInstructions ?? '').trim() || undefined
@@ -3160,8 +3442,15 @@ export function GeneratePageInner() {
         0,
         Math.min(1, (backgroundSoundtrackVolumePercent ?? 100) / 100),
       );
+      const shouldIncludeBackgroundMusicVolume =
+        addBackgroundSoundtrack && normalizedBackgroundMusicVolume !== 1;
+      if (backgroundMusicSrc) {
+        form.append('backgroundMusicSrc', backgroundMusicSrc);
+      }
       if (normalizedBackgroundMusicVolume !== 1) {
-        form.append('backgroundMusicVolume', String(normalizedBackgroundMusicVolume));
+        if (shouldIncludeBackgroundMusicVolume) {
+          form.append('backgroundMusicVolume', String(normalizedBackgroundMusicVolume));
+        }
       }
 
       form.append(
@@ -3808,10 +4097,10 @@ export function GeneratePageInner() {
           sentence.customTextAnimationId === trimmedId
             ? {
                 ...sentence,
-                textAnimationEffect: 'popInBounceHook',
+                textAnimationEffect: 'slideCutFast',
                 customTextAnimationId: null,
                 textAnimationSettings: getDefaultTextAnimationSettings(
-                  'popInBounceHook',
+                  'slideCutFast',
                   effectiveIsShort,
                 ),
               }
@@ -4479,6 +4768,10 @@ export function GeneratePageInner() {
     URL.revokeObjectURL(candidate.previewUrl);
   };
 
+  const disposeChunkVoiceCandidate = (candidate: SentenceVoiceCandidate | null | undefined) => {
+    disposeSentenceVoiceCandidate(candidate);
+  };
+
   const generateVoicePerSentence = async (voiceId: string) => {
     const sentenceEntries = sentences
       .map((sentence, index) => ({ sentence, index }))
@@ -4793,6 +5086,211 @@ export function GeneratePageInner() {
     }
   };
 
+  const handleGenerateChunkVoiceStyle = async (chunkId: string) => {
+    const chunk = voiceOverChunks.find((item) => String(item.index) === chunkId);
+    if (!chunk || !String(chunk.text ?? '').trim()) {
+      showAlert('This chunk is empty.', { type: 'warning' });
+      return;
+    }
+
+    setIsGeneratingChunkVoiceStyleById((prev) => ({
+      ...prev,
+      [chunkId]: true,
+    }));
+    setVoiceOverChunks((prev) =>
+      prev.map((item) =>
+        String(item.index) === chunkId ? { ...item, styleInstructions: '' } : item,
+      ),
+    );
+
+    try {
+      const response = await fetch(`${API_URL}/ai/generate-voice-style`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          script: String(chunk.text ?? '').trim(),
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Failed to generate chunk style instructions');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunkText = decoder.decode(value, { stream: true });
+        if (!chunkText) continue;
+        acc += chunkText;
+        setVoiceOverChunks((prev) =>
+          prev.map((item) =>
+            String(item.index) === chunkId
+              ? { ...item, styleInstructions: acc }
+              : item,
+          ),
+        );
+      }
+    } catch (error) {
+      console.error('Chunk voice style generation failed', error);
+      showToast('Failed to generate chunk style.', 'error');
+    } finally {
+      setIsGeneratingChunkVoiceStyleById((prev) => ({
+        ...prev,
+        [chunkId]: false,
+      }));
+    }
+  };
+
+  const handleRegenerateChunkVoice = async (chunkId: string) => {
+    const chunk = voiceOverChunks.find((item) => String(item.index) === chunkId);
+    if (!chunk || !String(chunk.text ?? '').trim()) {
+      showAlert('This chunk is empty.', { type: 'warning' });
+      return;
+    }
+
+    const chunkProvider = normalizeVoiceProvider(chunk.provider);
+    const voiceId =
+      String(chunk.providerVoiceId ?? '').trim() ||
+      selectedVoiceIdByProvider[chunkProvider];
+    if (!voiceId) {
+      showAlert('Please select a voice before regenerating a chunk.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    const selectedVoice = findVoiceOption(chunkProvider, voiceId);
+
+    setIsRegeneratingChunkVoiceById((prev) => ({
+      ...prev,
+      [chunkId]: true,
+    }));
+
+    try {
+      const googleStyleInstructions =
+        chunkProvider === 'google'
+          ? String(chunk.styleInstructions ?? '').trim() ||
+            String(aiStudioStyleInstructions ?? '').trim() ||
+            undefined
+          : undefined;
+
+      const generated = await requestGeneratedVoiceFile({
+        scriptForVoice: String(chunk.text ?? '').trim(),
+        sentencesForVoice:
+          Array.isArray(chunk.sentences) && chunk.sentences.length > 0
+            ? chunk.sentences
+            : [String(chunk.text ?? '').trim()],
+        voiceId,
+        provider: chunkProvider,
+        styleInstructions: googleStyleInstructions,
+        elevenLabsSettings:
+          chunkProvider === 'elevenlabs'
+            ? chunk.elevenLabsSettings ?? elevenLabsGlobalSettings
+            : undefined,
+        fallbackBaseName: `${chunkProvider}-chunk-${chunk.index + 1}`,
+        errorMessage: 'Failed to regenerate chunk voice.',
+      });
+
+      setChunkVoiceCandidateById((prev) => {
+        disposeSentenceVoiceCandidate(prev[chunkId]);
+        return {
+          ...prev,
+          [chunkId]: {
+            file: generated.file,
+            previewUrl: URL.createObjectURL(generated.file),
+            durationSeconds: generated.durationSeconds,
+            mimeType: generated.mimeType,
+            provider: chunkProvider,
+            voiceId,
+            voiceName:
+              String(chunk.providerVoiceName ?? '').trim() ||
+              selectedVoice?.name ||
+              null,
+          },
+        };
+      });
+    } catch (error) {
+      console.error('Chunk voice regeneration failed', error);
+      showToast('Failed to regenerate chunk voice.', 'error');
+    } finally {
+      setIsRegeneratingChunkVoiceById((prev) => ({
+        ...prev,
+        [chunkId]: false,
+      }));
+    }
+  };
+
+  const handleCancelChunkVoiceCandidate = (chunkId: string) => {
+    setChunkVoiceCandidateById((prev) => {
+      disposeSentenceVoiceCandidate(prev[chunkId]);
+      return {
+        ...prev,
+        [chunkId]: null,
+      };
+    });
+  };
+
+  const handleApplyChunkVoiceCandidate = async (chunkId: string) => {
+    const candidate = chunkVoiceCandidateById[chunkId];
+    const chunkIndex = voiceOverChunks.findIndex(
+      (item) => String(item.index) === chunkId,
+    );
+    const chunk = chunkIndex >= 0 ? voiceOverChunks[chunkIndex] : null;
+    if (!candidate || !chunk) return;
+
+    setIsApplyingChunkVoiceCandidateById((prev) => ({
+      ...prev,
+      [chunkId]: true,
+    }));
+
+    try {
+      const nextChunks = cloneVoiceOverChunks(voiceOverChunks);
+      nextChunks[chunkIndex] = buildLocalVoiceOverChunkState({
+        chunk,
+        file: candidate.file,
+        mimeType: candidate.mimeType,
+        durationSeconds: candidate.durationSeconds,
+        provider: candidate.provider,
+        providerVoiceId: candidate.voiceId,
+        providerVoiceName: candidate.voiceName,
+        styleInstructions: chunk.styleInstructions,
+        elevenLabsSettings:
+          candidate.provider === 'elevenlabs'
+            ? chunk.elevenLabsSettings ?? elevenLabsGlobalSettings
+            : null,
+      });
+
+      const merged = await rebuildVoiceOverFromChunks({
+        chunks: nextChunks,
+        fallbackBaseName: `${voiceProvider}-voice-over`,
+        overrideFilesByChunkId: {
+          [chunkId]: candidate.file,
+        },
+      });
+
+      if (!merged) {
+        throw new Error('Failed to rebuild the merged voice-over.');
+      }
+
+      applyGeneratedVoiceResultToState(merged);
+      handleCancelChunkVoiceCandidate(chunkId);
+    } catch (error) {
+      console.error('Applying chunk voice candidate failed', error);
+      showToast('Failed to replace the chunk voice.', 'error');
+    } finally {
+      setIsApplyingChunkVoiceCandidateById((prev) => ({
+        ...prev,
+        [chunkId]: false,
+      }));
+    }
+  };
+
   const handleGenerateVoice = async (
     voiceId?: string | null,
   ) => {
@@ -4828,6 +5326,7 @@ export function GeneratePageInner() {
         scriptText: scriptForVoice,
         voiceId,
         provider: voiceProvider,
+        providerVoiceName: selectedVoiceOption?.name ?? null,
         styleInstructions:
           voiceProvider === 'google'
             ? String(aiStudioStyleInstructions ?? '').trim() || undefined
@@ -4865,6 +5364,9 @@ export function GeneratePageInner() {
     Object.keys(sentenceVoiceCandidateById).forEach((sentenceId) => {
       handleCancelSentenceVoiceCandidate(sentenceId);
     });
+    Object.keys(chunkVoiceCandidateById).forEach((chunkId) => {
+      handleCancelChunkVoiceCandidate(chunkId);
+    });
     setVoiceOver(null);
     setVoiceOverChunks([]);
     setVoiceDuration(null);
@@ -4872,7 +5374,20 @@ export function GeneratePageInner() {
     setVoiceLibraryUrl(null);
     setVoiceGenerationProgress(null);
     setIsVoiceOverEditorOpen(false);
+    setActiveSentenceVoiceEditorSentenceId(null);
+    setActiveChunkVoiceEditorId(null);
+    setSentenceVoiceEditActionError(null);
+    setChunkVoiceEditActionError(null);
     setIsSentenceVoiceManagerOpen(false);
+    setIsChunkVoiceManagerOpen(false);
+    setSentenceVoiceCandidateById({});
+    setChunkVoiceCandidateById({});
+    setIsGeneratingSentenceVoiceStyleById({});
+    setIsGeneratingChunkVoiceStyleById({});
+    setIsRegeneratingSentenceVoiceById({});
+    setIsRegeneratingChunkVoiceById({});
+    setIsApplyingSentenceVoiceCandidateById({});
+    setIsApplyingChunkVoiceCandidateById({});
   };
 
   const resolveBackgroundSoundtrackPreviewUrl = () => {
@@ -4880,6 +5395,69 @@ export function GeneratePageInner() {
     if (!resolved || resolved === '__none__') return null;
     return resolved;
   };
+
+  const activeSentenceVoiceEditorTarget = activeSentenceVoiceEditorSentenceId
+    ? (() => {
+        const sentenceIndex = sentences.findIndex(
+          (sentence) => sentence.id === activeSentenceVoiceEditorSentenceId,
+        );
+        if (sentenceIndex < 0) return null;
+
+        const sentence = sentences[sentenceIndex];
+        if (!hasSentenceVoiceOver(sentence)) return null;
+
+        return {
+          sentence,
+          sentenceIndex,
+        };
+      })()
+    : null;
+
+  const activeChunkVoiceEditorTarget = activeChunkVoiceEditorId
+    ? (() => {
+        const chunkIndex = voiceOverChunks.findIndex(
+          (chunk) => String(chunk.index) === activeChunkVoiceEditorId,
+        );
+        if (chunkIndex < 0) return null;
+
+        const chunk = voiceOverChunks[chunkIndex];
+        if (!hasVoiceOverChunkAudio(chunk)) return null;
+
+        return {
+          chunk,
+          chunkIndex,
+        };
+      })()
+    : null;
+
+  const sentenceVoiceManagerSegments: VoiceSegmentManagerItem[] = sentences
+    .filter((sentence) => String(sentence.text ?? '').trim())
+    .map((sentence, index) => ({
+      id: sentence.id,
+      index,
+      text: sentence.text,
+      audioUrl: sentence.voiceOverUrl ?? null,
+      durationSeconds: sentence.voiceOverDurationSeconds ?? null,
+      provider: sentence.voiceOverProvider ?? null,
+      voiceName: sentence.voiceOverVoiceName ?? null,
+      styleInstructions: sentence.voiceOverStyleInstructions ?? null,
+      elevenLabsSettings: sentence.elevenLabsSettings ?? null,
+    }));
+
+  const chunkVoiceManagerSegments: VoiceSegmentManagerItem[] = voiceOverChunks
+    .filter((chunk) => String(chunk.text ?? '').trim())
+    .sort((left, right) => left.index - right.index)
+    .map((chunk) => ({
+      id: String(chunk.index),
+      index: chunk.index,
+      text: chunk.text,
+      audioUrl: chunk.url ?? null,
+      durationSeconds: chunk.durationSeconds ?? null,
+      provider: normalizeVoiceProvider(chunk.provider),
+      voiceName: chunk.providerVoiceName ?? null,
+      styleInstructions: chunk.styleInstructions ?? null,
+      elevenLabsSettings: chunk.elevenLabsSettings ?? null,
+    }));
 
   const persistVoiceToLibrary = async (file: File) => {
     // Upload directly to Cloudinary from the client to avoid Vercel serverless limits.
@@ -4896,6 +5474,38 @@ export function GeneratePageInner() {
     });
 
     return { id: response.data.id, url: cloudinaryUrl };
+  };
+
+  const syncPersistedVoiceChunksIntoState = (
+    persistedPayload: ScriptVoiceOverChunkDto[] | null,
+    sourceChunks: VoiceOverChunkState[],
+  ) => {
+    if (!persistedPayload) {
+      return [] as VoiceOverChunkState[];
+    }
+
+    return persistedPayload.map((chunk) => {
+      const sourceChunk = sourceChunks.find(
+        (candidate) => candidate.index === chunk.index,
+      );
+
+      return toVoiceOverChunkState(chunk, sourceChunk?.sourceFile ?? null);
+    });
+  };
+
+  const patchCurrentScriptVoiceState = async (params: {
+    scriptId: string;
+    voiceId: string;
+    chunks: VoiceOverChunkState[];
+  }) => {
+    const voiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(params.chunks);
+
+    await api.patch(`/scripts/${encodeURIComponent(params.scriptId)}`, {
+      voice_id: params.voiceId,
+      voice_over_chunks: voiceOverChunksPayload,
+    });
+
+    return syncPersistedVoiceChunksIntoState(voiceOverChunksPayload, params.chunks);
   };
 
   const materializeEditedVoiceOver = async (values: SoundEffectEditValues) => {
@@ -4997,6 +5607,150 @@ export function GeneratePageInner() {
     }
   };
 
+  const applySentenceVoiceEditLocally = async (values: SoundEffectEditValues) => {
+    const sentenceId = String(activeSentenceVoiceEditorSentenceId ?? '').trim();
+    if (!sentenceId) {
+      showAlert('No sentence voice is selected for editing.', { type: 'warning' });
+      return;
+    }
+
+    const sentenceIndex = sentences.findIndex((item) => item.id === sentenceId);
+    const sentence = sentenceIndex >= 0 ? sentences[sentenceIndex] : null;
+    if (!sentence || !hasSentenceVoiceOver(sentence)) {
+      showAlert('No committed sentence voice is available to edit.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    setIsApplyingSentenceVoiceEdit(true);
+    setSentenceVoiceEditActionError(null);
+    try {
+      const rendered = await renderEditedAudioFile({
+        sourceFile: sentence.voiceOverFile ?? null,
+        sourceUrl: sentence.voiceOverUrl ?? null,
+        values,
+        fallbackName: `sentence-${sentenceIndex + 1}-voice-over`,
+      });
+
+      const nextSentences = [...sentences];
+      nextSentences[sentenceIndex] = buildLocalSentenceVoiceState({
+        sentence,
+        file: rendered.file,
+        mimeType: rendered.file.type || sentence.voiceOverMimeType || 'audio/mpeg',
+        durationSeconds: rendered.durationSeconds,
+        provider: sentence.voiceOverProvider ?? voiceProvider,
+        providerVoiceId:
+          sentence.voiceOverVoiceId ??
+          selectedVoiceIdByProvider[sentence.voiceOverProvider ?? voiceProvider] ??
+          null,
+        providerVoiceName:
+          sentence.voiceOverVoiceName ??
+          findVoiceOption(
+            sentence.voiceOverProvider ?? voiceProvider,
+            sentence.voiceOverVoiceId ??
+              selectedVoiceIdByProvider[sentence.voiceOverProvider ?? voiceProvider],
+          )?.name ??
+          null,
+        styleInstructions: sentence.voiceOverStyleInstructions,
+      });
+
+      const merged = await rebuildVoiceOverFromSentenceVoices({
+        sourceSentences: nextSentences,
+        fallbackBaseName: `${voiceProvider}-voice-over-edited`,
+      });
+      if (!merged) {
+        throw new Error('Failed to rebuild the edited voice-over.');
+      }
+
+      setSentences(nextSentences);
+      applyGeneratedVoiceResultToState(merged);
+      setActiveSentenceVoiceEditorSentenceId(null);
+      setSentenceVoiceEditActionError(null);
+      showToast('Sentence voice edits applied to the merged voice-over.', 'success');
+    } catch (error) {
+      console.error('Apply sentence voice edits failed', error);
+      setSentenceVoiceEditActionError(
+        getRequestErrorMessage(error, 'Failed to apply sentence voice edits.'),
+      );
+    } finally {
+      setIsApplyingSentenceVoiceEdit(false);
+    }
+  };
+
+  const applyChunkVoiceEditLocally = async (values: SoundEffectEditValues) => {
+    const chunkId = String(activeChunkVoiceEditorId ?? '').trim();
+    if (!chunkId) {
+      showAlert('No chunk voice is selected for editing.', { type: 'warning' });
+      return;
+    }
+
+    const chunkIndex = voiceOverChunks.findIndex(
+      (item) => String(item.index) === chunkId,
+    );
+    const chunk = chunkIndex >= 0 ? voiceOverChunks[chunkIndex] : null;
+    if (!chunk || !hasVoiceOverChunkAudio(chunk)) {
+      showAlert('No committed chunk voice is available to edit.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    setIsApplyingChunkVoiceEdit(true);
+    setChunkVoiceEditActionError(null);
+    try {
+      const rendered = await renderEditedAudioFile({
+        sourceFile: chunk.sourceFile ?? null,
+        sourceUrl: chunk.url ?? null,
+        values,
+        fallbackName: `chunk-${chunk.index + 1}-voice-over`,
+      });
+
+      const nextChunks = cloneVoiceOverChunks(voiceOverChunks);
+      nextChunks[chunkIndex] = buildLocalVoiceOverChunkState({
+        chunk,
+        file: rendered.file,
+        mimeType: rendered.file.type || chunk.mimeType || 'audio/mpeg',
+        durationSeconds: rendered.durationSeconds,
+        provider: normalizeVoiceProvider(chunk.provider),
+        providerVoiceId:
+          chunk.providerVoiceId ??
+          selectedVoiceIdByProvider[normalizeVoiceProvider(chunk.provider)] ??
+          null,
+        providerVoiceName:
+          chunk.providerVoiceName ??
+          findVoiceOption(
+            normalizeVoiceProvider(chunk.provider),
+            chunk.providerVoiceId ??
+              selectedVoiceIdByProvider[normalizeVoiceProvider(chunk.provider)],
+          )?.name ??
+          null,
+        styleInstructions: chunk.styleInstructions,
+        elevenLabsSettings: chunk.elevenLabsSettings,
+      });
+
+      const merged = await rebuildVoiceOverFromChunks({
+        chunks: nextChunks,
+        fallbackBaseName: `${voiceProvider}-voice-over-edited`,
+      });
+      if (!merged) {
+        throw new Error('Failed to rebuild the edited voice-over.');
+      }
+
+      applyGeneratedVoiceResultToState(merged);
+      setActiveChunkVoiceEditorId(null);
+      setChunkVoiceEditActionError(null);
+      showToast('Chunk voice edits applied to the merged voice-over.', 'success');
+    } catch (error) {
+      console.error('Apply chunk voice edits failed', error);
+      setChunkVoiceEditActionError(
+        getRequestErrorMessage(error, 'Failed to apply chunk voice edits.'),
+      );
+    } finally {
+      setIsApplyingChunkVoiceEdit(false);
+    }
+  };
+
   const saveVoiceOverEditsToDraft = async (values: SoundEffectEditValues) => {
     if (voiceGenerationMode !== 'perSentence' && !user) {
       showAlert('You must be logged in to save voice-over edits.', { type: 'warning' });
@@ -5067,9 +5821,23 @@ export function GeneratePageInner() {
       const saved = await persistVoiceToLibrary(voiceOver);
       setSavedVoiceId(saved.id);
       setVoiceLibraryUrl(null);
+
+      const currentScriptId = String(activeScriptId ?? '').trim() || null;
+      if (currentScriptId && hasPersistableVoiceChunks(voiceOverChunks)) {
+        const persistedChunks = await patchCurrentScriptVoiceState({
+          scriptId: currentScriptId,
+          voiceId: saved.id,
+          chunks: voiceOverChunks,
+        });
+
+        setVoiceOverChunks(cloneVoiceOverChunks(persistedChunks));
+      }
     } catch (error) {
       console.error('Save voice-over failed', error);
-      showAlert('Failed to save voice-over. Please try again.', { type: 'error' });
+      showAlert(
+        getRequestErrorMessage(error, 'Failed to save voice-over. Please try again.'),
+        { type: 'error' },
+      );
     } finally {
       setIsSavingVoice(false);
     }
@@ -5173,6 +5941,8 @@ export function GeneratePageInner() {
     setIsGenerating(true);
     try {
       const resolveBackgroundMusicSrcForRender = (): string | undefined => {
+        if (!addBackgroundSoundtrack) return '__none__';
+
         const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
         if (value === '__none__') return '__none__';
 
@@ -5200,6 +5970,8 @@ export function GeneratePageInner() {
         0,
         Math.min(1, (backgroundSoundtrackVolumePercent ?? 100) / 100),
       );
+      const shouldIncludeBackgroundMusicVolume =
+        addBackgroundSoundtrack && normalizedBackgroundMusicVolume !== 1;
 
       const sentencePayload = buildRenderSentencePayload(sentences);
       const useLocalRenderTransport = shouldUseLocalRenderTransport();
@@ -5238,7 +6010,7 @@ export function GeneratePageInner() {
             enableZoomRotateTransitions,
             enableLongFormSubscribeOverlay: effectiveEnableLongFormSubscribeOverlay,
             ...(backgroundMusicSrc ? { backgroundMusicSrc } : {}),
-            ...(normalizedBackgroundMusicVolume !== 1
+            ...(shouldIncludeBackgroundMusicVolume
               ? { backgroundMusicVolume: normalizedBackgroundMusicVolume }
               : {}),
           }),
@@ -5280,7 +6052,7 @@ export function GeneratePageInner() {
         if (backgroundMusicSrc) {
           fallbackForm.append('backgroundMusicSrc', backgroundMusicSrc);
         }
-        if (normalizedBackgroundMusicVolume !== 1) {
+        if (shouldIncludeBackgroundMusicVolume) {
           fallbackForm.append(
             'backgroundMusicVolume',
             String(normalizedBackgroundMusicVolume),
@@ -5328,11 +6100,8 @@ export function GeneratePageInner() {
     }
   };
 
-  const handleGenerateRandomScript = async () => {
-    setRandomScriptError(null);
-    setIsRandomScriptLoading(true);
+  const resetStateForGeneratedScript = () => {
     setScript('');
-    // Clear existing sentences and voice-over when generating a new script
     setSentences([]);
     setSplitError(null);
     setScriptCharacters([]);
@@ -5342,9 +6111,17 @@ export function GeneratePageInner() {
     setVoiceDuration(null);
     setSavedVoiceId(null);
     setVoiceLibraryUrl(null);
-    // Reset original config until generation finishes
     setOriginalScriptSubject(undefined);
     setOriginalScriptSubjectContent(undefined);
+  };
+
+  const generateScriptFromSelection = async (
+    selectedIdea?: ScriptIdeaRequestPayload,
+  ) => {
+    setRandomScriptError(null);
+    setScriptIdeasError(null);
+    setIsRandomScriptLoading(true);
+    resetStateForGeneratedScript();
 
     try {
       const usingReferences = referenceScripts.length > 0;
@@ -5364,6 +6141,7 @@ export function GeneratePageInner() {
           length: scriptLength,
           technique: scriptTechnique,
           model: scriptModel,
+          selectedIdea,
           ...(usingReferences
             ? {
               referenceScripts: referenceScripts.map((s) => ({
@@ -5410,6 +6188,81 @@ export function GeneratePageInner() {
         scriptSubject === 'religious (Islam)' ? scriptSubjectContent : ''
       );
     }
+  };
+
+  const handleGenerateRandomScript = async () => {
+    setSelectedScriptIdeaTitle(null);
+    await generateScriptFromSelection();
+  };
+
+  const handleFetchScriptIdeas = async () => {
+    if (isScriptIdeasLoading || isRandomScriptLoading) return;
+
+    setScriptIdeasError(null);
+    setSelectedScriptIdeaTitle(null);
+    setIsScriptIdeasLoading(true);
+
+    try {
+      const usingReferences = referenceScripts.length > 0;
+      const response = await api.post<{ ideas: ScriptIdeaOption[] }>(
+        '/ai/generate-script-ideas',
+        {
+          language: scriptLanguage,
+          subject: scriptSubject,
+          subjectContent:
+            scriptSubject === 'religious (Islam)'
+              ? scriptSubjectContent || undefined
+              : undefined,
+          length: scriptLength,
+          technique: scriptTechnique,
+          model: scriptModel,
+          count: 5,
+          ...(usingReferences
+            ? {
+              referenceScripts: referenceScripts.map((s) => ({
+                id: s.id,
+                title: s.title ?? undefined,
+                script: s.script,
+              })),
+            }
+            : {
+              style: scriptStyle,
+              systemPrompt: systemPrompt.trim() ? systemPrompt.trim() : undefined,
+            }),
+        },
+      );
+
+      const nextIdeas = Array.isArray(response.data?.ideas)
+        ? response.data.ideas.filter(
+            (idea) =>
+              typeof idea?.id === 'string' &&
+              typeof idea?.title === 'string',
+          )
+        : [];
+
+      if (nextIdeas.length !== 5) {
+        throw new Error('The server did not return five script ideas.');
+      }
+
+      setScriptIdeas(nextIdeas);
+    } catch (error) {
+      const message = getRequestErrorMessage(
+        error,
+        'Failed to generate script ideas. Please try again.',
+      );
+      setScriptIdeas([]);
+      setScriptIdeasError(message);
+      showToast(message, 'error');
+    } finally {
+      setIsScriptIdeasLoading(false);
+    }
+  };
+
+  const handleGenerateFromIdea = async (idea: ScriptIdeaOption) => {
+    setSelectedScriptIdeaTitle(idea.title);
+    await generateScriptFromSelection({
+      title: idea.title,
+    });
   };
 
   const handleSplitScript = async () => {
@@ -5825,6 +6678,11 @@ export function GeneratePageInner() {
         textAnimationSettingsValue,
         textAnimationEffectValue,
       );
+      const normalizedTextAnimationSettings = normalizeTextAnimationSettings(
+        textAnimationSettingsValue,
+        textAnimationEffect,
+        effectiveIsShort,
+      );
 
       return {
         id: s.id,
@@ -5864,7 +6722,7 @@ export function GeneratePageInner() {
         textAnimationEffect,
         textAnimationText: resolveTextAnimationText(textAnimationTextValue, s.text),
         customTextAnimationId: textAnimationId,
-        textAnimationSettings: normalizeSettingsObject(textAnimationSettingsValue),
+        textAnimationSettings: normalizedTextAnimationSettings,
         imageMotionEffect,
         customMotionEffectId: motionEffectId,
         imageMotionSettings: normalizeSettingsObject(imageMotionSettings),
@@ -8649,9 +9507,17 @@ export function GeneratePageInner() {
             align_sound_effects_to_scene_end: s.alignSoundEffectsToSceneEnd === true,
             transition_to_next: s.transitionToNext ?? null,
             text_animation_text: String(s.textAnimationText ?? '').trim() || null,
-            text_animation_effect: s.textAnimationEffect ?? null,
+            text_animation_effect:
+              resolveTextAnimationEffectFromSettings(
+                s.textAnimationSettings,
+                s.textAnimationEffect,
+              ) ?? null,
             text_animation_id: s.customTextAnimationId ?? null,
-            text_animation_settings: normalizeSettingsObject(s.textAnimationSettings),
+            text_animation_settings: normalizeTextAnimationSettings(
+              s.textAnimationSettings,
+              s.textAnimationEffect,
+              effectiveIsShort,
+            ),
             image_effects_mode: s.imageEffectsMode ?? 'quick',
             visual_effect:
               s.visualEffect === 'colorGrading' ||
@@ -8856,19 +9722,19 @@ export function GeneratePageInner() {
         fullSnapshot.voiceOverChunks,
       );
 
-      const persistedFullVoiceChunks = fullVoiceOverChunksPayload
-        ? fullVoiceOverChunksPayload.map((chunk) => {
-            const sourceChunk = fullSnapshot.voiceOverChunks.find(
-              (candidate) => candidate.index === chunk.index,
-            );
-            return toVoiceOverChunkState(chunk, sourceChunk?.sourceFile ?? null);
-          })
-        : [];
+      const persistedFullVoiceChunks = syncPersistedVoiceChunksIntoState(
+        fullVoiceOverChunksPayload,
+        fullSnapshot.voiceOverChunks,
+      );
 
       // Optionally attach a voice-over to the draft if available
       let voiceId = fullSnapshot.savedVoiceId;
 
-      if (!voiceId && fullSnapshot.voiceOver) {
+      if (
+        !voiceId &&
+        fullSnapshot.voiceOver &&
+        !hasPersistableVoiceChunks(fullSnapshot.voiceOverChunks)
+      ) {
         const saved = await persistVoiceToLibrary(fullSnapshot.voiceOver);
         voiceId = saved.id;
 
@@ -8932,16 +9798,16 @@ export function GeneratePageInner() {
             const shortVoiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(
               snap?.voiceOverChunks ?? [],
             );
-            const persistedShortVoiceChunks = shortVoiceOverChunksPayload
-              ? shortVoiceOverChunksPayload.map((chunk) => {
-                  const sourceChunk = snap?.voiceOverChunks?.find(
-                    (candidate) => candidate.index === chunk.index,
-                  );
-                  return toVoiceOverChunkState(chunk, sourceChunk?.sourceFile ?? null);
-                })
-              : [];
+            const persistedShortVoiceChunks = syncPersistedVoiceChunksIntoState(
+              shortVoiceOverChunksPayload,
+              snap?.voiceOverChunks ?? [],
+            );
 
-            if (!shortVoiceId && snap?.voiceOver) {
+            if (
+              !shortVoiceId &&
+              snap?.voiceOver &&
+              !hasPersistableVoiceChunks(snap?.voiceOverChunks)
+            ) {
               const saved = await persistVoiceToLibrary(snap.voiceOver);
               shortVoiceId = saved.id;
               shortVoiceLibraryUrl = saved.url;
@@ -9332,7 +10198,7 @@ export function GeneratePageInner() {
     }
 
     setVoiceOver(null);
-  setVoiceOverChunks([]);
+    setVoiceOverChunks([]);
     setVoiceDuration(null);
     setVoiceError(null);
     setSavedVoiceId(null);
@@ -9343,15 +10209,27 @@ export function GeneratePageInner() {
     Object.values(sentenceVoiceCandidateByIdRef.current).forEach((candidate) => {
       disposeSentenceVoiceCandidate(candidate);
     });
+    Object.values(chunkVoiceCandidateByIdRef.current).forEach((candidate) => {
+      disposeChunkVoiceCandidate(candidate);
+    });
     setVoiceGenerationMode('auto');
     setAiStudioStyleInstructions('');
     setElevenLabsGlobalSettings(null);
     setIsElevenLabsSettingsModalOpen(false);
     setIsSentenceVoiceManagerOpen(false);
+    setIsChunkVoiceManagerOpen(false);
+    setActiveSentenceVoiceEditorSentenceId(null);
+    setActiveChunkVoiceEditorId(null);
+    setSentenceVoiceEditActionError(null);
+    setChunkVoiceEditActionError(null);
     setSentenceVoiceCandidateById({});
+    setChunkVoiceCandidateById({});
     setIsGeneratingSentenceVoiceStyleById({});
+    setIsGeneratingChunkVoiceStyleById({});
     setIsRegeneratingSentenceVoiceById({});
+    setIsRegeneratingChunkVoiceById({});
     setIsApplyingSentenceVoiceCandidateById({});
+    setIsApplyingChunkVoiceCandidateById({});
 
     setSelectedVoiceIdByProvider({ google: null, elevenlabs: null });
   };
@@ -9507,9 +10385,10 @@ export function GeneratePageInner() {
       );
     } else {
       setScript(params.result.script);
+      Object.values(chunkVoiceCandidateByIdRef.current).forEach((candidate) => {
+        disposeChunkVoiceCandidate(candidate);
+      });
     }
-
-    setScriptLanguage(params.targetLanguage);
   };
 
   const handleTranslateOnly = async () => {
@@ -9842,9 +10721,15 @@ export function GeneratePageInner() {
                   scriptModel={scriptModel}
                   setScriptModel={setScriptModel}
                   isRandomScriptLoading={isRandomScriptLoading}
+                  isScriptIdeasLoading={isScriptIdeasLoading}
                   isSplitting={isSplitting}
                   randomScriptError={randomScriptError}
+                  scriptIdeasError={scriptIdeasError}
                   splitError={splitError}
+                  scriptIdeas={scriptIdeas}
+                  selectedScriptIdeaTitle={selectedScriptIdeaTitle}
+                  onGenerateScriptIdeas={handleFetchScriptIdeas}
+                  onGenerateFromScriptIdea={handleGenerateFromIdea}
                   onGenerateRandomScript={handleGenerateRandomScript}
                   onSplitScript={handleSplitScript}
                   onResetScript={handleResetScriptAndSentences}
@@ -10082,10 +10967,17 @@ export function GeneratePageInner() {
                   onSaveVoice={handleSaveVoice}
                   onOpenLibrary={handleOpenVoiceLibrary}
                   onOpenVoiceEditor={voiceOver ? () => setIsVoiceOverEditorOpen(true) : undefined}
-                  elevenLabsSettingsSummary={elevenLabsSettingsSummary}
                   onOpenElevenLabsSettings={() => setIsElevenLabsSettingsModalOpen(true)}
+                  canManageVoiceChunks={voiceGenerationMode !== 'perSentence' && voiceOverChunks.length > 1}
+                  onOpenVoiceChunkManager={() => {
+                    setIsSentenceVoiceManagerOpen(false);
+                    setIsChunkVoiceManagerOpen(true);
+                  }}
                   canManageSentenceVoices={sentences.some((sentence) => String(sentence.text ?? '').trim())}
-                  onOpenSentenceVoiceManager={() => setIsSentenceVoiceManagerOpen(true)}
+                  onOpenSentenceVoiceManager={() => {
+                    setIsChunkVoiceManagerOpen(false);
+                    setIsSentenceVoiceManagerOpen(true);
+                  }}
                 />
               </Accordion>
               <RenderSettingsSection
@@ -10093,6 +10985,13 @@ export function GeneratePageInner() {
                 isLongForm={isLongForm}
                 onIsShortChange={isShortsTabActive ? (() => { }) : setIsShort}
                 disableIsShort={isLongForm || isShortsTabActive}
+                addBackgroundSoundtrack={addBackgroundSoundtrack}
+                onAddBackgroundSoundtrackChange={(value) => {
+                  setAddBackgroundSoundtrack(value);
+                  if (!value) {
+                    setBackgroundSoundtrackEditTargetId(null);
+                  }
+                }}
                 useLowerFps={useLowerFps}
                 onUseLowerFpsChange={setUseLowerFps}
                 useLowerResolution={useLowerResolution}
@@ -10102,6 +11001,38 @@ export function GeneratePageInner() {
                 enableLongFormSubscribeOverlay={effectiveEnableLongFormSubscribeOverlay}
                 onEnableLongFormSubscribeOverlayChange={setEnableLongFormSubscribeOverlay}
               />
+
+              {addBackgroundSoundtrack ? (
+                <BackgroundSoundtrackSection
+                  isGenerating={isGenerating}
+                  videoJobStatus={videoJobStatus}
+                  voiceOver={voiceOver}
+                  backgroundSoundtracks={backgroundSoundtracks}
+                  selectedBackgroundSoundtrackValue={selectedBackgroundSoundtrackValue}
+                  backgroundSoundtrackVolumePercent={backgroundSoundtrackVolumePercent}
+                  onBackgroundSoundtrackVolumePercentChange={setBackgroundSoundtrackVolumePercent}
+                  onSelectedBackgroundSoundtrackValueChange={(value: string) => {
+                    setSelectedBackgroundSoundtrackValue(value);
+
+                    if (value !== '__oneoff__') return;
+                    if (oneOffBackgroundSoundtrackUrl) return;
+                    setSelectedBackgroundSoundtrackValue('__default__');
+                  }}
+                  hasOneOffBackgroundSoundtrack={Boolean(oneOffBackgroundSoundtrackUrl)}
+                  oneOffBackgroundSoundtrackUrl={oneOffBackgroundSoundtrackUrl}
+                  onToast={showToast}
+                  onSetFavoriteBackgroundSoundtrack={handleSetFavoriteBackgroundSoundtrack}
+                  isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
+                  onSaveBackgroundSoundtrackVolume={handleSaveBackgroundSoundtrackVolume}
+                  isSavingBackgroundSoundtrackVolume={isSavingBackgroundSoundtrackVolume}
+                  onDeleteBackgroundSoundtrack={handleDeleteBackgroundSoundtrack}
+                  isDeletingBackgroundSoundtrack={isDeletingBackgroundSoundtrack}
+                  onOpenBackgroundSoundtrackEditor={handleOpenBackgroundSoundtrackEditor}
+                  onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
+                  onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
+                  isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}
+                />
+              ) : null}
 
               {/* Generate Button */}
               <GenerateVideoButton
@@ -10113,32 +11044,8 @@ export function GeneratePageInner() {
                 onGenerate={handleGenerate}
                 onUploadVideo={handleUploadFinalVideo}
                 isUploadingVideo={isUploadingVideo}
-                backgroundSoundtracks={backgroundSoundtracks}
-                selectedBackgroundSoundtrackValue={selectedBackgroundSoundtrackValue}
-                backgroundSoundtrackVolumePercent={backgroundSoundtrackVolumePercent}
-                onBackgroundSoundtrackVolumePercentChange={setBackgroundSoundtrackVolumePercent}
-                onSelectedBackgroundSoundtrackValueChange={(value) => {
-                  setSelectedBackgroundSoundtrackValue(value);
-
-                  if (value !== '__oneoff__') return;
-                  if (oneOffBackgroundSoundtrackUrl) return;
-                  setSelectedBackgroundSoundtrackValue('__default__');
-                }}
-                hasOneOffBackgroundSoundtrack={Boolean(oneOffBackgroundSoundtrackUrl)}
-                oneOffBackgroundSoundtrackUrl={oneOffBackgroundSoundtrackUrl}
-                onToast={showToast}
-                onSetFavoriteBackgroundSoundtrack={handleSetFavoriteBackgroundSoundtrack}
-                isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
-                onSaveBackgroundSoundtrackVolume={handleSaveBackgroundSoundtrackVolume}
-                isSavingBackgroundSoundtrackVolume={isSavingBackgroundSoundtrackVolume}
-                onDeleteBackgroundSoundtrack={handleDeleteBackgroundSoundtrack}
-                isDeletingBackgroundSoundtrack={isDeletingBackgroundSoundtrack}
-                onOpenBackgroundSoundtrackEditor={handleOpenBackgroundSoundtrackEditor}
-                onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
-                onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
-                isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}
               />
-              {backgroundSoundtrackEditTarget ? (
+              {addBackgroundSoundtrack && backgroundSoundtrackEditTarget ? (
                 <SoundEffectEditModal
                   isOpen
                   title="Edit background soundtrack"
@@ -10187,6 +11094,52 @@ export function GeneratePageInner() {
                   onSave={saveVoiceOverEditsToDraft}
                 />
               ) : null}
+              {activeSentenceVoiceEditorTarget ? (
+                <SoundEffectEditModal
+                  isOpen
+                  title={`Edit sentence ${activeSentenceVoiceEditorTarget.sentenceIndex + 1} voice`}
+                  audioUrl={activeSentenceVoiceEditorTarget.sentence.voiceOverUrl}
+                  initialName={`sentence-${activeSentenceVoiceEditorTarget.sentenceIndex + 1}-voice-over`}
+                  initialVolumePercent={100}
+                  isApplying={isApplyingSentenceVoiceEdit}
+                  showSaveButton={false}
+                  showSaveAsPreset={false}
+                  showEditPresetsSection={false}
+                  actionError={sentenceVoiceEditActionError}
+                  onClose={() => {
+                    if (isApplyingSentenceVoiceEdit) {
+                      return;
+                    }
+                    setSentenceVoiceEditActionError(null);
+                    setActiveSentenceVoiceEditorSentenceId(null);
+                  }}
+                  onApply={applySentenceVoiceEditLocally}
+                  onSave={async () => undefined}
+                />
+              ) : null}
+              {activeChunkVoiceEditorTarget ? (
+                <SoundEffectEditModal
+                  isOpen
+                  title={`Edit chunk ${activeChunkVoiceEditorTarget.chunk.index + 1} voice`}
+                  audioUrl={activeChunkVoiceEditorTarget.chunk.url}
+                  initialName={`chunk-${activeChunkVoiceEditorTarget.chunk.index + 1}-voice-over`}
+                  initialVolumePercent={100}
+                  isApplying={isApplyingChunkVoiceEdit}
+                  showSaveButton={false}
+                  showSaveAsPreset={false}
+                  showEditPresetsSection={false}
+                  actionError={chunkVoiceEditActionError}
+                  onClose={() => {
+                    if (isApplyingChunkVoiceEdit) {
+                      return;
+                    }
+                    setChunkVoiceEditActionError(null);
+                    setActiveChunkVoiceEditorId(null);
+                  }}
+                  onApply={applyChunkVoiceEditLocally}
+                  onSave={async () => undefined}
+                />
+              ) : null}
               {isElevenLabsSettingsModalOpen ? (
                 <ElevenLabsVoiceSettingsModal
                   voiceName={selectedVoiceOption?.name ?? null}
@@ -10201,13 +11154,18 @@ export function GeneratePageInner() {
               ) : null}
               <SentenceVoiceOverManagerModal
                 isOpen={isSentenceVoiceManagerOpen}
-                sentences={sentences}
+                title="Sentence Voice Overs"
+                description="Regenerate a single sentence, preview it, then replace only when it sounds right."
+                segmentNoun="sentence"
+                segments={sentenceVoiceManagerSegments}
                 voiceProvider={voiceProvider}
+                fullVoiceOverPreviewUrl={voiceOverPreviewUrl}
+                soundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
                 globalElevenLabsSettings={elevenLabsGlobalSettings}
-                isGeneratingSentenceStyleById={isGeneratingSentenceVoiceStyleById}
-                isRegeneratingSentenceVoiceById={isRegeneratingSentenceVoiceById}
-                isApplyingSentenceVoiceCandidateById={isApplyingSentenceVoiceCandidateById}
-                sentenceVoiceCandidateById={Object.fromEntries(
+                isGeneratingStyleById={isGeneratingSentenceVoiceStyleById}
+                isRegeneratingVoiceById={isRegeneratingSentenceVoiceById}
+                isApplyingCandidateById={isApplyingSentenceVoiceCandidateById}
+                voiceCandidateById={Object.fromEntries(
                   Object.entries(sentenceVoiceCandidateById).map(([key, value]) => [
                     key,
                     value
@@ -10221,20 +11179,119 @@ export function GeneratePageInner() {
                   ]),
                 )}
                 onClose={() => setIsSentenceVoiceManagerOpen(false)}
-                onSentenceStyleChange={(sentenceId, value) => {
+                onOpenFullVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
+                onOpenSegmentVoiceEditor={(sentenceId) => {
+                  if (sentenceVoiceCandidateById[sentenceId]) {
+                    showAlert(
+                      'Resolve the pending preview for this sentence before editing its committed voice.',
+                      { type: 'warning' },
+                    );
+                    return;
+                  }
+
+                  const sentence = sentences.find((item) => item.id === sentenceId);
+                  if (!sentence || !hasSentenceVoiceOver(sentence)) {
+                    showAlert('No committed sentence voice is available to edit.', {
+                      type: 'warning',
+                    });
+                    return;
+                  }
+
+                  setSentenceVoiceEditActionError(null);
+                  setActiveSentenceVoiceEditorSentenceId(sentenceId);
+                }}
+                onSegmentStyleChange={(sentenceId, value) => {
                   patchSentenceById(sentenceId, {
                     voiceOverStyleInstructions: value,
                   });
                 }}
-                onSentenceElevenLabsSettingsChange={(sentenceId, settings) => {
+                onSegmentElevenLabsSettingsChange={(sentenceId, settings) => {
                   patchSentenceById(sentenceId, {
                     elevenLabsSettings: settings,
                   });
                 }}
-                onGenerateSentenceStyle={handleGenerateSentenceVoiceStyle}
-                onRegenerateSentenceVoice={handleRegenerateSentenceVoice}
+                onGenerateSegmentStyle={handleGenerateSentenceVoiceStyle}
+                onRegenerateSegmentVoice={handleRegenerateSentenceVoice}
                 onApplyCandidate={handleApplySentenceVoiceCandidate}
                 onCancelCandidate={handleCancelSentenceVoiceCandidate}
+              />
+              <SentenceVoiceOverManagerModal
+                isOpen={isChunkVoiceManagerOpen}
+                title="Long-Form Voice Chunks"
+                description="Treat each generated chunk like a sentence voice: regenerate it, preview it, replace it, or edit only that chunk."
+                segmentNoun="chunk"
+                segments={chunkVoiceManagerSegments}
+                voiceProvider={voiceProvider}
+                fullVoiceOverPreviewUrl={voiceOverPreviewUrl}
+                soundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
+                globalElevenLabsSettings={elevenLabsGlobalSettings}
+                isGeneratingStyleById={isGeneratingChunkVoiceStyleById}
+                isRegeneratingVoiceById={isRegeneratingChunkVoiceById}
+                isApplyingCandidateById={isApplyingChunkVoiceCandidateById}
+                voiceCandidateById={Object.fromEntries(
+                  Object.entries(chunkVoiceCandidateById).map(([key, value]) => [
+                    key,
+                    value
+                      ? {
+                          previewUrl: value.previewUrl,
+                          durationSeconds: value.durationSeconds,
+                          provider: value.provider,
+                          voiceName: value.voiceName,
+                        }
+                      : null,
+                  ]),
+                )}
+                onClose={() => setIsChunkVoiceManagerOpen(false)}
+                onOpenFullVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
+                onOpenSegmentVoiceEditor={(chunkId) => {
+                  if (chunkVoiceCandidateById[chunkId]) {
+                    showAlert(
+                      'Resolve the pending preview for this chunk before editing its committed voice.',
+                      { type: 'warning' },
+                    );
+                    return;
+                  }
+
+                  const chunk = voiceOverChunks.find(
+                    (item) => String(item.index) === chunkId,
+                  );
+                  if (!chunk || !hasVoiceOverChunkAudio(chunk)) {
+                    showAlert('No committed chunk voice is available to edit.', {
+                      type: 'warning',
+                    });
+                    return;
+                  }
+
+                  setChunkVoiceEditActionError(null);
+                  setActiveChunkVoiceEditorId(chunkId);
+                }}
+                onSegmentStyleChange={(chunkId, value) => {
+                  setVoiceOverChunks((prev) =>
+                    prev.map((chunk) =>
+                      String(chunk.index) === chunkId
+                        ? { ...chunk, styleInstructions: value }
+                        : chunk,
+                    ),
+                  );
+                }}
+                onSegmentElevenLabsSettingsChange={(chunkId, settings) => {
+                  setVoiceOverChunks((prev) =>
+                    prev.map((chunk) =>
+                      String(chunk.index) === chunkId
+                        ? {
+                            ...chunk,
+                            elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
+                              settings,
+                            ),
+                          }
+                        : chunk,
+                    ),
+                  );
+                }}
+                onGenerateSegmentStyle={handleGenerateChunkVoiceStyle}
+                onRegenerateSegmentVoice={handleRegenerateChunkVoice}
+                onApplyCandidate={handleApplyChunkVoiceCandidate}
+                onCancelCandidate={handleCancelChunkVoiceCandidate}
               />
             </div>
 
@@ -10363,7 +11420,7 @@ export function GeneratePageInner() {
             : Boolean(
               isSavingTransitionSoundBySentenceId[
               transitionSoundEditorTargetId
-              ],
+              ]
             )
         }
         alertState={alertState}
@@ -10403,9 +11460,11 @@ export function GeneratePageInner() {
           ) {
             const { kind, uneditedIndices } = bulkAiEffectsConfirm;
             setBulkAiEffectsConfirm(null);
-            void (kind === 'look'
-              ? runBulkAiLookEffects(uneditedIndices)
-              : runBulkAiMotionEffects(uneditedIndices));
+            if (kind === 'look') {
+              void runBulkAiLookEffects(uneditedIndices);
+            } else {
+              void runBulkAiMotionEffects(uneditedIndices);
+            }
             return;
           }
 
@@ -10415,9 +11474,11 @@ export function GeneratePageInner() {
           if (!bulkAiEffectsConfirm || isApplyingBulkAiEffect) return;
           const { kind, eligibleIndices } = bulkAiEffectsConfirm;
           setBulkAiEffectsConfirm(null);
-          void (kind === 'look'
-            ? runBulkAiLookEffects(eligibleIndices)
-            : runBulkAiMotionEffects(eligibleIndices));
+          if (kind === 'look') {
+            void runBulkAiLookEffects(eligibleIndices);
+          } else {
+            void runBulkAiMotionEffects(eligibleIndices);
+          }
         }}
         title={
           bulkAiEffectsConfirm?.kind === 'look'

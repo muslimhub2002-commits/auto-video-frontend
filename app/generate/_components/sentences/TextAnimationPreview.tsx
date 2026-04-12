@@ -9,8 +9,11 @@ import {
 } from './ImageEffectPreview';
 
 export const TEXT_ANIMATION_EFFECT_VALUES = [
-  'popInBounceHook',
   'slideCutFast',
+] as const;
+
+const LEGACY_TEXT_ANIMATION_EFFECT_VALUES = [
+  'popInBounceHook',
   'scalePunchZoom',
   'maskReveal',
   'glitchFlashHook',
@@ -30,10 +33,12 @@ export type TextAnimationEffect = (typeof TEXT_ANIMATION_EFFECT_VALUES)[number];
 
 export type TextBackgroundMode = (typeof TEXT_BACKGROUND_MODE_VALUES)[number];
 export type TextHorizontalAlign = 'left' | 'center' | 'right';
+export type TextContentAlign = 'left' | 'center' | 'right';
 export type TextVerticalAlign = 'top' | 'middle' | 'bottom';
 export type TextCaseMode = 'original' | 'uppercase';
 
 const TEXT_HORIZONTAL_ALIGN_VALUES = ['left', 'center', 'right'] as const;
+const TEXT_CONTENT_ALIGN_VALUES = ['left', 'center', 'right'] as const;
 const TEXT_VERTICAL_ALIGN_VALUES = ['top', 'middle', 'bottom'] as const;
 const TEXT_CASE_MODE_VALUES = ['original', 'uppercase'] as const;
 
@@ -42,6 +47,10 @@ export const TEXT_ANIMATION_SPEED_MAX = 2.4;
 export const TEXT_ANIMATION_SPEED_STEP = 0.1;
 export const DEFAULT_TEXT_ANIMATION_SPEED = 1.1;
 export const MAX_TEXT_ANIMATION_WORDS = 5;
+export const TEXT_ANIMATION_WORD_DELAY_MIN = 0.03;
+export const TEXT_ANIMATION_WORD_DELAY_MAX = 0.4;
+export const TEXT_ANIMATION_WORD_DELAY_STEP = 0.01;
+export const DEFAULT_TEXT_ANIMATION_WORD_DELAY = 0.08;
 export const TEXT_SCENE_FONT_MIN_PX = 19.2;
 export const TEXT_SCENE_FONT_MAX_PX = 92.8;
 export const TEXT_SCENE_DEFAULT_FONT_FAMILY = 'Oswald, system-ui, sans-serif';
@@ -52,6 +61,7 @@ export type TextAnimationSettings = {
   presetKey?: TextAnimationEffect | 'custom';
   speed?: number;
   horizontalAlign?: TextHorizontalAlign;
+  contentAlign?: TextContentAlign;
   verticalAlign?: TextVerticalAlign;
   offsetX?: number;
   offsetY?: number;
@@ -73,6 +83,8 @@ export type TextAnimationSettings = {
   gradientAngleDeg?: number;
   backgroundDim?: number;
   animationIntensity?: number;
+  animatePerWord?: boolean;
+  wordDelaySeconds?: number;
   textCase?: TextCaseMode;
 };
 
@@ -138,6 +150,18 @@ function containsArabicScript(value: string) {
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/u.test(value);
 }
 
+function resolveLegacyTextAnimationEffect(value: unknown): TextAnimationEffect | null {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return null;
+  if ((TEXT_ANIMATION_EFFECT_VALUES as readonly string[]).includes(normalized)) {
+    return normalized as TextAnimationEffect;
+  }
+  if ((LEGACY_TEXT_ANIMATION_EFFECT_VALUES as readonly string[]).includes(normalized)) {
+    return 'slideCutFast';
+  }
+  return null;
+}
+
 export function getDefaultTextAnimationText(sentenceText?: string | null, maxWords = MAX_TEXT_ANIMATION_WORDS) {
   const words = getWords(String(sentenceText ?? ''));
   return words.slice(0, maxWords).join(' ').trim();
@@ -176,14 +200,9 @@ export function resolveTextAnimationText(value: string | null | undefined, sente
 }
 
 export function getTextAnimationEffectLabel(effect: SentenceItem['textAnimationEffect'] | null | undefined) {
-  const normalized = effect ?? 'popInBounceHook';
-
-  if (normalized === 'slideCutFast') return 'Slide + cut';
-  if (normalized === 'scalePunchZoom') return 'Scale punch';
-  if (normalized === 'maskReveal') return 'Mask reveal';
-  if (normalized === 'glitchFlashHook') return 'Glitch / flash hook';
-  if (normalized === 'kineticTypography') return 'Kinetic typography';
-  return 'Pop-in / bounce';
+  return resolveLegacyTextAnimationEffect(effect) === 'slideCutFast'
+    ? 'Slide + cut'
+    : 'Slide + cut';
 }
 
 export function isTextAnimationEffectValue(value: string): value is TextAnimationEffect {
@@ -194,20 +213,23 @@ export function getDefaultTextAnimationSettings(
   effect: SentenceItem['textAnimationEffect'] | null | undefined,
   isShortVideo = true,
 ): TextAnimationSettings {
+  const normalizedEffect = resolveLegacyTextAnimationEffect(effect) ?? 'slideCutFast';
   const baseFontSize = isShortVideo ? 13.2 : 8.6;
-  const base: TextAnimationSettings = {
+  return {
+    presetKey: normalizedEffect,
     speed: DEFAULT_TEXT_ANIMATION_SPEED,
-    horizontalAlign: 'center',
-    verticalAlign: 'middle',
-    offsetX: 0,
-    offsetY: 0,
+    horizontalAlign: 'left',
+    contentAlign: 'left',
+    verticalAlign: 'top',
+    offsetX: -5,
+    offsetY: -14,
     fontSizePercent: baseFontSize,
-    maxWidthPercent: isShortVideo ? 76 : 58,
+    maxWidthPercent: isShortVideo ? 72 : 46,
     fontWeight: 820,
     letterSpacingEm: 0.02,
     lineHeight: 0.92,
     textColor: '#ffffff',
-    accentColor: '#facc15',
+    accentColor: '#22d3ee',
     strokeColor: '#0f172a',
     strokeWidthPx: 0,
     shadowOpacity: 0.34,
@@ -217,82 +239,11 @@ export function getDefaultTextAnimationSettings(
     gradientFrom: '#0f172a',
     gradientTo: '#1d4ed8',
     gradientAngleDeg: 135,
-    backgroundDim: 0.38,
-    animationIntensity: 0.82,
+    backgroundDim: 0.44,
+    animationIntensity: 0.92,
+    animatePerWord: false,
+    wordDelaySeconds: DEFAULT_TEXT_ANIMATION_WORD_DELAY,
     textCase: 'uppercase',
-  };
-
-  if (effect === 'slideCutFast') {
-    return {
-      ...base,
-      presetKey: effect,
-      horizontalAlign: 'left',
-      verticalAlign: 'top',
-      offsetX: -5,
-      offsetY: -14,
-      maxWidthPercent: isShortVideo ? 72 : 46,
-      accentColor: '#22d3ee',
-      backgroundDim: 0.44,
-      animationIntensity: 0.92,
-    };
-  }
-  if (effect === 'scalePunchZoom') {
-    return {
-      ...base,
-      presetKey: effect,
-      fontSizePercent: baseFontSize + 1.4,
-      maxWidthPercent: isShortVideo ? 82 : 62,
-      accentColor: '#fb7185',
-      shadowOpacity: 0.44,
-      shadowBlurPx: 22,
-      animationIntensity: 1,
-    };
-  }
-  if (effect === 'maskReveal') {
-    return {
-      ...base,
-      presetKey: effect,
-      verticalAlign: 'bottom',
-      offsetY: 12,
-      maxWidthPercent: isShortVideo ? 84 : 64,
-      accentColor: '#f97316',
-      backgroundDim: 0.48,
-      animationIntensity: 0.76,
-    };
-  }
-  if (effect === 'glitchFlashHook') {
-    return {
-      ...base,
-      presetKey: effect,
-      verticalAlign: 'top',
-      offsetY: -9,
-      fontSizePercent: baseFontSize + 1,
-      accentColor: '#38bdf8',
-      strokeColor: '#020617',
-      strokeWidthPx: 1,
-      backgroundDim: 0.58,
-      animationIntensity: 1,
-    };
-  }
-  if (effect === 'kineticTypography') {
-    return {
-      ...base,
-      presetKey: effect,
-      horizontalAlign: 'left',
-      verticalAlign: 'middle',
-      offsetX: -8,
-      maxWidthPercent: isShortVideo ? 74 : 48,
-      fontSizePercent: baseFontSize - 0.3,
-      accentColor: '#a78bfa',
-      letterSpacingEm: 0.05,
-      lineHeight: 0.88,
-      animationIntensity: 0.95,
-    };
-  }
-
-  return {
-    ...base,
-    presetKey: effect ?? 'popInBounceHook',
   };
 }
 
@@ -301,15 +252,18 @@ export function normalizeTextAnimationSettings(
   fallbackEffect?: SentenceItem['textAnimationEffect'] | null,
   isShortVideo = true,
 ): TextAnimationSettings {
-  const defaults = getDefaultTextAnimationSettings(fallbackEffect ?? 'popInBounceHook', isShortVideo);
+  const defaults = getDefaultTextAnimationSettings(
+    resolveLegacyTextAnimationEffect(fallbackEffect) ?? 'slideCutFast',
+    isShortVideo,
+  );
+  const resolvedPresetKey =
+    resolveLegacyTextAnimationEffect(settings?.presetKey) ?? defaults.presetKey;
 
   return {
-    presetKey:
-      typeof settings?.presetKey === 'string'
-        ? (settings.presetKey as TextAnimationSettings['presetKey'])
-        : defaults.presetKey,
+    presetKey: resolvedPresetKey,
     speed: getNumeric(settings?.speed, defaults.speed ?? DEFAULT_TEXT_ANIMATION_SPEED, TEXT_ANIMATION_SPEED_MIN, TEXT_ANIMATION_SPEED_MAX),
     horizontalAlign: getEnumValue(settings?.horizontalAlign, TEXT_HORIZONTAL_ALIGN_VALUES, defaults.horizontalAlign ?? 'center'),
+    contentAlign: getEnumValue(settings?.contentAlign, TEXT_CONTENT_ALIGN_VALUES, defaults.contentAlign ?? defaults.horizontalAlign ?? 'left'),
     verticalAlign: getEnumValue(settings?.verticalAlign, TEXT_VERTICAL_ALIGN_VALUES, defaults.verticalAlign ?? 'middle'),
     offsetX: getNumeric(settings?.offsetX, defaults.offsetX ?? 0, -35, 35),
     offsetY: getNumeric(settings?.offsetY, defaults.offsetY ?? 0, -35, 35),
@@ -331,6 +285,13 @@ export function normalizeTextAnimationSettings(
     gradientAngleDeg: getNumeric(settings?.gradientAngleDeg, defaults.gradientAngleDeg ?? 135, 0, 360),
     backgroundDim: getNumeric(settings?.backgroundDim, defaults.backgroundDim ?? 0.38, 0, 0.92),
     animationIntensity: getNumeric(settings?.animationIntensity, defaults.animationIntensity ?? 0.82, 0, 1.2),
+    animatePerWord: settings?.animatePerWord === true,
+    wordDelaySeconds: getNumeric(
+      settings?.wordDelaySeconds,
+      defaults.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY,
+      TEXT_ANIMATION_WORD_DELAY_MIN,
+      TEXT_ANIMATION_WORD_DELAY_MAX,
+    ),
     textCase: getEnumValue(settings?.textCase, TEXT_CASE_MODE_VALUES, defaults.textCase ?? 'uppercase'),
   };
 }
@@ -339,21 +300,17 @@ export function resolveTextAnimationEffectFromSettings(
   settings: Record<string, unknown> | TextAnimationSettings | null | undefined,
   fallbackEffect?: SentenceItem['textAnimationEffect'] | null,
 ) {
-  const presetKey = settings?.presetKey;
-  if (isTextAnimationEffectValue(String(presetKey ?? ''))) {
-    return presetKey as TextAnimationEffect;
-  }
-  return fallbackEffect ?? 'popInBounceHook';
+  return (
+    resolveLegacyTextAnimationEffect(settings?.presetKey) ??
+    resolveLegacyTextAnimationEffect(fallbackEffect) ??
+    'slideCutFast'
+  );
 }
 
 function getPreviewAnimationName(effect: SentenceItem['textAnimationEffect'] | null | undefined) {
-  const normalized = effect ?? 'popInBounceHook';
-  if (normalized === 'slideCutFast') return 'av-text-slide-cut';
-  if (normalized === 'scalePunchZoom') return 'av-text-scale-punch';
-  if (normalized === 'maskReveal') return 'av-text-mask-reveal';
-  if (normalized === 'glitchFlashHook') return 'av-text-glitch-flash';
-  if (normalized === 'kineticTypography') return 'av-text-kinetic';
-  return 'av-text-pop-bounce';
+  return resolveLegacyTextAnimationEffect(effect) === 'slideCutFast'
+    ? 'av-text-slide-cut'
+    : 'av-text-slide-cut';
 }
 
 function resolveJustifyContent(alignment: TextHorizontalAlign) {
@@ -394,6 +351,22 @@ function formatDisplayText(value: string, textCase: TextCaseMode) {
   return textCase === 'uppercase' ? value.toUpperCase() : value;
 }
 
+function resolveContentTextAlign(settings: TextAnimationSettings) {
+  return settings.contentAlign ?? settings.horizontalAlign ?? 'left';
+}
+
+function getWordDelayMs(settings: TextAnimationSettings) {
+  return Math.round(
+    1000 *
+      getNumeric(
+        settings.wordDelaySeconds,
+        DEFAULT_TEXT_ANIMATION_WORD_DELAY,
+        TEXT_ANIMATION_WORD_DELAY_MIN,
+        TEXT_ANIMATION_WORD_DELAY_MAX,
+      ),
+  );
+}
+
 export function TextAnimationPreview({
   sentenceText,
   text,
@@ -411,7 +384,7 @@ export function TextAnimationPreview({
 }: TextAnimationPreviewProps) {
   const resolvedEffect = resolveTextAnimationEffectFromSettings(
     settings,
-    effect ?? 'popInBounceHook',
+    effect ?? 'slideCutFast',
   );
   const resolvedSettings = normalizeTextAnimationSettings(
     settings,
@@ -447,22 +420,21 @@ export function TextAnimationPreview({
   const animationName = getPreviewAnimationName(resolvedEffect);
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
   const words = resolvedText.split(/\s+/u).filter(Boolean);
+  const animatePerWord = resolvedSettings.animatePerWord === true && words.length > 1;
+  const wordDelayMs = getWordDelayMs(resolvedSettings);
+  const contentAlign = resolveContentTextAlign(resolvedSettings);
   const textStyle: CSSProperties = {
     color: resolvedSettings.textColor,
     fontWeight: resolvedSettings.fontWeight,
     fontSize: `clamp(1.2rem, ${(resolvedSettings.fontSizePercent ?? 12).toFixed(2)}cqw, 5.8rem)`,
     lineHeight: String(resolvedSettings.lineHeight ?? 0.92),
     letterSpacing: `${(resolvedSettings.letterSpacingEm ?? 0.02).toFixed(3)}em`,
-    textAlign: resolvedSettings.horizontalAlign,
+    textAlign: contentAlign,
     maxWidth: `${(resolvedSettings.maxWidthPercent ?? 76).toFixed(1)}%`,
     fontFamily: resolvedFontFamily,
     textShadow: `0 ${(6 + (resolvedSettings.animationIntensity ?? 0.82) * 6).toFixed(1)}px ${(resolvedSettings.shadowBlurPx ?? 18).toFixed(1)}px rgba(2, 6, 23, ${(resolvedSettings.shadowOpacity ?? 0.34).toFixed(3)})`,
     WebkitTextStroke: strokeWidthPx > 0 ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
-    filter: resolvedEffect === 'glitchFlashHook'
-      ? `drop-shadow(-2px 0 0 rgba(244, 63, 94, 0.55)) drop-shadow(2px 0 0 rgba(56, 189, 248, 0.55))`
-      : resolvedEffect === 'scalePunchZoom'
-        ? `drop-shadow(0 0 ${(10 + (resolvedSettings.animationIntensity ?? 0.82) * 20).toFixed(0)}px ${resolvedSettings.accentColor}66)`
-        : undefined,
+    whiteSpace: 'pre-wrap',
   };
 
   return (
@@ -475,40 +447,10 @@ export function TextAnimationPreview({
     >
       <style>
         {`
-          @keyframes av-text-pop-bounce {
-            0% { opacity: 0; transform: translate3d(0, 22%, 0) scale(0.68); }
-            38% { opacity: 1; transform: translate3d(0, -5%, 0) scale(1.08); }
-            68% { transform: translate3d(0, 1.5%, 0) scale(0.98); }
-            100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-          }
           @keyframes av-text-slide-cut {
-            0% { opacity: 0; clip-path: inset(0 100% 0 0); transform: translate3d(-18%, 0, 0); }
-            40% { opacity: 1; clip-path: inset(0 16% 0 0); transform: translate3d(0, 0, 0); }
-            100% { opacity: 1; clip-path: inset(0 0 0 0); transform: translate3d(0, 0, 0); }
-          }
-          @keyframes av-text-scale-punch {
-            0% { opacity: 0; transform: scale(0.55) rotate(-4deg); }
-            30% { opacity: 1; transform: scale(1.18) rotate(2deg); }
-            58% { transform: scale(0.95) rotate(-1deg); }
-            100% { opacity: 1; transform: scale(1) rotate(0deg); }
-          }
-          @keyframes av-text-mask-reveal {
-            0% { opacity: 0; clip-path: inset(0 0 100% 0); transform: translate3d(0, 16%, 0); }
-            50% { opacity: 1; clip-path: inset(0 0 18% 0); }
-            100% { opacity: 1; clip-path: inset(0 0 0 0); transform: translate3d(0, 0, 0); }
-          }
-          @keyframes av-text-glitch-flash {
-            0% { opacity: 0; transform: translate3d(0, 0, 0); }
-            10% { opacity: 1; transform: translate3d(-2%, 0, 0); }
-            22% { transform: translate3d(2%, 0, 0); }
-            30% { transform: translate3d(-1%, 0, 0); }
-            42% { opacity: 1; filter: brightness(1.4); }
-            100% { opacity: 1; transform: translate3d(0, 0, 0); filter: brightness(1); }
-          }
-          @keyframes av-text-kinetic {
-            0% { opacity: 0; letter-spacing: 0.22em; transform: translate3d(-6%, 0, 0) skewX(-10deg); }
-            45% { opacity: 1; letter-spacing: 0.06em; transform: translate3d(1%, 0, 0) skewX(0deg); }
-            100% { opacity: 1; letter-spacing: inherit; transform: translate3d(0, 0, 0); }
+            0% { opacity: 0; clip-path: inset(0 100% 0 0); transform: translate3d(-24%, 0, 0) skewX(-10deg); filter: blur(14px); }
+            40% { filter: blur(0.6px); }
+            100% { opacity: 1; clip-path: inset(0 0 0 0); transform: translate3d(0, 0, 0) skewX(0deg); filter: blur(0); }
           }
           @keyframes av-text-preview-dim {
             0% { opacity: 0.35; }
@@ -569,23 +511,57 @@ export function TextAnimationPreview({
         <div
           style={{
             ...textStyle,
-            animationName: enableMotion ? animationName : undefined,
-            animationDuration: enableMotion ? `${animationDurationMs}ms` : undefined,
-            animationTimingFunction: enableMotion
-              ? 'cubic-bezier(0.22, 1, 0.36, 1)'
+            animationName: enableMotion && !animatePerWord ? animationName : undefined,
+            animationDuration: enableMotion && !animatePerWord ? `${animationDurationMs}ms` : undefined,
+            animationTimingFunction: enableMotion && !animatePerWord
+              ? 'cubic-bezier(0.12, 0.88, 0.24, 1)'
               : undefined,
-            animationFillMode: enableMotion ? 'both' : undefined,
-            animationIterationCount: enableMotion
+            animationFillMode: enableMotion && !animatePerWord ? 'both' : undefined,
+            animationIterationCount: enableMotion && !animatePerWord
               ? repeatMotion
                 ? 'infinite'
                 : 1
               : undefined,
           }}
         >
-          <span style={{ color: resolvedSettings.accentColor }}>
-            {words.slice(0, 1).join(' ')}
-          </span>
-          {words.length > 1 ? ` ${words.slice(1).join(' ')}` : ''}
+          {animatePerWord
+            ? words.map((word, index) => {
+                const isAccentWord = index === 0;
+                return (
+                  <span key={`${word}-${index}`}>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
+                        animationName: enableMotion ? animationName : undefined,
+                        animationDuration: enableMotion ? `${animationDurationMs}ms` : undefined,
+                        animationTimingFunction: enableMotion
+                          ? 'cubic-bezier(0.12, 0.88, 0.24, 1)'
+                          : undefined,
+                        animationFillMode: enableMotion ? 'both' : undefined,
+                        animationIterationCount: enableMotion
+                          ? repeatMotion
+                            ? 'infinite'
+                            : 1
+                          : undefined,
+                        animationDelay: enableMotion ? `${index * wordDelayMs}ms` : undefined,
+                        willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
+                      }}
+                    >
+                      {word}
+                    </span>
+                    {index < words.length - 1 ? ' ' : null}
+                  </span>
+                );
+              })
+            : (
+              <>
+                <span style={{ color: resolvedSettings.accentColor }}>
+                  {words.slice(0, 1).join(' ')}
+                </span>
+                {words.length > 1 ? ` ${words.slice(1).join(' ')}` : ''}
+              </>
+            )}
         </div>
       </div>
     </div>

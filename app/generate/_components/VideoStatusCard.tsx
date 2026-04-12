@@ -213,6 +213,7 @@ export function VideoStatusCard({
                 isShortVideo={isShortVideo}
                 scriptId={scriptId}
                 script={scriptTextForUpload}
+                scriptCharacters={scriptCharacters}
             />
             <TikTokUploadModal
                 isOpen={showTikTokModal}
@@ -221,6 +222,7 @@ export function VideoStatusCard({
                 isShortVideo={isShortVideo}
                 scriptId={scriptId}
                 script={scriptTextForUpload}
+                scriptCharacters={scriptCharacters}
             />
 
             {/* Failed State */}

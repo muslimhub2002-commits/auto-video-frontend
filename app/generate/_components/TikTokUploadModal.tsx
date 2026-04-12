@@ -21,6 +21,11 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import {
+  TIKTOK_WALLPAPER_THEME,
+  WallpaperGeneratorSection,
+  type SocialUploadScriptCharacter,
+} from './social/WallpaperGeneratorSection';
 
 interface TikTokUploadModalProps {
   isOpen: boolean;
@@ -29,6 +34,7 @@ interface TikTokUploadModalProps {
   isShortVideo: boolean;
   scriptId: string | null;
   script: string;
+  scriptCharacters: SocialUploadScriptCharacter[];
 }
 
 type TikTokCreatorInfo = {
@@ -117,6 +123,7 @@ export function TikTokUploadModal({
   isShortVideo,
   scriptId,
   script,
+  scriptCharacters,
 }: TikTokUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
@@ -143,6 +150,7 @@ export function TikTokUploadModal({
   const [seoError, setSeoError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<TikTokUploadResponse | null>(null);
+  const [isWallpaperBusy, setIsWallpaperBusy] = useState(false);
 
   const popupRef = useRef<Window | null>(null);
   const popupIntervalRef = useRef<number | null>(null);
@@ -285,7 +293,8 @@ export function TikTokUploadModal({
     isConnectingTikTok ||
     isLoadingCreatorInfo ||
     isGeneratingSeo ||
-    cloudinaryStage !== 'idle';
+    cloudinaryStage !== 'idle' ||
+    isWallpaperBusy;
 
   const privacyOptions = Array.isArray(creatorInfo?.privacy_level_options)
     ? creatorInfo.privacy_level_options
@@ -703,6 +712,24 @@ export function TikTokUploadModal({
               </div>
             </div>
           </div>
+
+          {!isShortVideo ? (
+            <WallpaperGeneratorSection
+              isOpen={isOpen}
+              isShortVideo={isShortVideo}
+              script={script}
+              scriptCharacters={scriptCharacters}
+              disabled={isBusy}
+              onBusyChange={setIsWallpaperBusy}
+              theme={TIKTOK_WALLPAPER_THEME}
+              copy={{
+                title: 'Promo Image Generator',
+                description: 'Generate a long-form promotional image from your script, fine-tune the look, and download it as a separate asset for TikTok promotion.',
+                promptNote: 'Uses your full script to generate a 16:9 promo-style wallpaper image.',
+                standaloneNote: 'This image is standalone here and does not change the TikTok upload request.',
+              }}
+            />
+          ) : null}
 
           <div className="space-y-4">
             <div className="space-y-2">

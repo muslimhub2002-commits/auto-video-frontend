@@ -18,6 +18,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
 import { api } from '@/lib/api';
+import {
+  META_WALLPAPER_THEME,
+  WallpaperGeneratorSection,
+  type SocialUploadScriptCharacter,
+} from './social/WallpaperGeneratorSection';
 
 type MetaPlatform = 'facebook' | 'instagram';
 
@@ -28,6 +33,7 @@ interface MetaUploadModalProps {
   isShortVideo: boolean;
   scriptId: string | null;
   script: string;
+  scriptCharacters: SocialUploadScriptCharacter[];
 }
 
 type PlatformResult = {
@@ -183,6 +189,7 @@ export function MetaUploadModal({
   isShortVideo,
   scriptId,
   script,
+  scriptCharacters,
 }: MetaUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
@@ -207,6 +214,7 @@ export function MetaUploadModal({
   const [seoError, setSeoError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<MetaUploadResponse | null>(null);
+  const [isWallpaperBusy, setIsWallpaperBusy] = useState(false);
 
   const META_API_URL =
     process.env.NEXT_PUBLIC_META_API_URL ||
@@ -367,7 +375,8 @@ export function MetaUploadModal({
     isGeneratingSeo ||
     cloudinaryStage !== 'idle' ||
     isExchangingToken ||
-    isRefreshingCredentials;
+    isRefreshingCredentials ||
+    isWallpaperBusy;
 
   const togglePlatform = (platform: MetaPlatform) => {
     setSelectedPlatforms((current) => {
@@ -621,6 +630,24 @@ export function MetaUploadModal({
               </div>
             </div>
           </div>
+
+          {!isShortVideo ? (
+            <WallpaperGeneratorSection
+              isOpen={isOpen}
+              isShortVideo={isShortVideo}
+              script={script}
+              scriptCharacters={scriptCharacters}
+              disabled={isBusy}
+              onBusyChange={setIsWallpaperBusy}
+              theme={META_WALLPAPER_THEME}
+              copy={{
+                title: 'Cover Image Generator',
+                description: 'Create a long-form promotional image from your script, then refine its look or download it as a standalone social asset.',
+                promptNote: 'Uses your full script to generate a 16:9 promo-style wallpaper image.',
+                standaloneNote: 'This asset stays standalone in Meta upload flow and does not change the upload payload.',
+              }}
+            />
+          ) : null}
 
           {/* ── Token status banner ── */}
           {!isLoadingCredStatus && credentialStatus ? (

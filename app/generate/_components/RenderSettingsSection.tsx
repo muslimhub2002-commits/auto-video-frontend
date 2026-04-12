@@ -5,6 +5,8 @@ type RenderSettingsSectionProps = {
     isLongForm: boolean;
     onIsShortChange: (value: boolean) => void;
     disableIsShort?: boolean;
+    addBackgroundSoundtrack: boolean;
+    onAddBackgroundSoundtrackChange: (value: boolean) => void;
     useLowerFps: boolean;
     onUseLowerFpsChange: (value: boolean) => void;
     useLowerResolution: boolean;
@@ -20,6 +22,8 @@ export function RenderSettingsSection({
     isLongForm,
     onIsShortChange,
     disableIsShort = false,
+    addBackgroundSoundtrack,
+    onAddBackgroundSoundtrackChange,
     useLowerFps,
     onUseLowerFpsChange,
     useLowerResolution,
@@ -122,6 +126,37 @@ export function RenderSettingsSection({
                             </span>
                         </div>
                         <p className="text-xs text-gray-500 mt-1">Reveal subtitle words progressively at the bottom of each scene</p>
+                    </div>
+                </label>
+                <label
+                    className={`relative flex items-start gap-3 p-4 rounded-xl border-2 bg-white cursor-pointer transition-all duration-300 group ${addBackgroundSoundtrack
+                            ? 'border-indigo-400 shadow-lg shadow-indigo-100'
+                            : 'border-gray-200 hover:border-indigo-300 hover:shadow-md'
+                        }`}
+                >
+                    <div className="relative mt-0.5">
+                        <input
+                            type="checkbox"
+                            className="peer h-5 w-5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all duration-300 cursor-pointer checked:scale-110 checked:border-indigo-500"
+                            checked={addBackgroundSoundtrack}
+                            onChange={(e) => onAddBackgroundSoundtrackChange(e.target.checked)}
+                        />
+                        <div
+                            className={`absolute inset-0 rounded bg-indigo-500 opacity-0 transition-opacity duration-300 pointer-events-none ${addBackgroundSoundtrack ? 'animate-ping' : ''
+                                }`}
+                            style={{ animationIterationCount: 1, animationDuration: '0.5s' }}
+                        ></div>
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">
+                                Add Soundtrack
+                            </span>
+                            <span className="px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 rounded-full">
+                                Audio
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">Show soundtrack controls and include background music in the render</p>
                     </div>
                 </label>
                 <label

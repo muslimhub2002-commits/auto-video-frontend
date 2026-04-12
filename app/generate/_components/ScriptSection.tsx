@@ -16,8 +16,13 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion';
-import { Loader2, Sparkles, FileText, X, Save } from 'lucide-react';
+import { Loader2, Sparkles, FileText, Lightbulb, RefreshCw, X, Save } from 'lucide-react';
 import { LlmModelSelect } from './LlmModelSelect';
+
+type ScriptIdeaOption = {
+  id: string;
+  title: string;
+};
 
 interface ScriptSectionProps {
   script: string;
@@ -44,9 +49,15 @@ interface ScriptSectionProps {
   scriptModel: string;
   setScriptModel: (value: string) => void;
   isRandomScriptLoading: boolean;
+  isScriptIdeasLoading: boolean;
   isSplitting: boolean;
   randomScriptError: string | null;
+  scriptIdeasError: string | null;
   splitError: string | null;
+  scriptIdeas: ScriptIdeaOption[];
+  selectedScriptIdeaTitle: string | null;
+  onGenerateScriptIdeas: () => void;
+  onGenerateFromScriptIdea: (idea: ScriptIdeaOption) => void;
   onGenerateRandomScript: () => void;
   onSplitScript: () => void;
   onResetScript: () => void;
@@ -90,9 +101,15 @@ export function ScriptSection(props: ScriptSectionProps) {
     scriptModel,
     setScriptModel,
     isRandomScriptLoading,
+    isScriptIdeasLoading,
     isSplitting,
     randomScriptError,
+    scriptIdeasError,
     splitError,
+    scriptIdeas,
+    selectedScriptIdeaTitle,
+    onGenerateScriptIdeas,
+    onGenerateFromScriptIdea,
     onGenerateRandomScript,
     onSplitScript,
     onResetScript,
@@ -505,7 +522,7 @@ export function ScriptSection(props: ScriptSectionProps) {
               type="button"
               size="default"
               onClick={onGenerateRandomScript}
-              disabled={isRandomScriptLoading}
+              disabled={isRandomScriptLoading || isScriptIdeasLoading}
               className="gap-2 bg-linear-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-md hover:shadow-lg transition-all"
             >
               {isRandomScriptLoading ? (
@@ -517,6 +534,25 @@ export function ScriptSection(props: ScriptSectionProps) {
                 <>
                   <Sparkles className="h-4 w-4" />
                   Generate AI Script
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              size="default"
+              onClick={onGenerateScriptIdeas}
+              disabled={isScriptIdeasLoading || isRandomScriptLoading}
+              className="gap-2 bg-linear-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-md hover:shadow-lg transition-all"
+            >
+              {isScriptIdeasLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Generating ideas...
+                </>
+              ) : (
+                <>
+                  <Lightbulb className="h-4 w-4" />
+                  Generate Script Ideas
                 </>
               )}
             </Button>
@@ -612,6 +648,104 @@ export function ScriptSection(props: ScriptSectionProps) {
             )}
           </div>
 
+          {(isScriptIdeasLoading || scriptIdeasError || scriptIdeas.length > 0) ? (
+            <div className="rounded-2xl border border-amber-200 bg-linear-to-br from-amber-50 via-white to-orange-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <div className="w-1 h-4 bg-amber-500 rounded-full"></div>
+                    Script Title Ideas
+                  </h4>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Choose one title and the full script will be generated from that selected subject title.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={onGenerateScriptIdeas}
+                  disabled={isScriptIdeasLoading || isRandomScriptLoading}
+                  className="gap-2 border-amber-300 bg-white hover:bg-amber-50"
+                >
+                  {isScriptIdeasLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Regenerate
+                </Button>
+              </div>
+
+              {isScriptIdeasLoading ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-amber-100 bg-white/90 p-4"
+                    >
+                      <div className="h-4 w-2/3 animate-pulse rounded-full bg-amber-100" />
+                      <div className="mt-4 h-9 w-32 animate-pulse rounded-xl bg-orange-100" />
+                    </div>
+                  ))}
+                </div>
+              ) : scriptIdeasError ? (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-white/90 p-4 text-sm text-red-600">
+                  {scriptIdeasError}
+                </div>
+              ) : (
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {scriptIdeas.map((idea, index) => {
+                    const isSelected = selectedScriptIdeaTitle === idea.title;
+
+                    return (
+                      <div
+                        key={idea.id}
+                        className={`rounded-2xl border p-4 transition-all ${
+                          isSelected
+                            ? 'border-amber-400 bg-white shadow-md shadow-amber-200/60'
+                            : 'border-amber-100 bg-white/90 shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${
+                            isSelected
+                              ? 'bg-linear-to-br from-amber-500 to-orange-600 text-white'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {index + 1}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold leading-relaxed text-gray-900">
+                              {idea.title}
+                            </p>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => onGenerateFromScriptIdea(idea)}
+                          disabled={isRandomScriptLoading}
+                          className="mt-4 gap-2 bg-linear-to-r from-amber-500 to-orange-600 text-white hover:from-amber-600 hover:to-orange-700"
+                        >
+                          {isRandomScriptLoading && isSelected ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3.5 w-3.5" />
+                          )}
+                          {isSelected && isRandomScriptLoading
+                            ? 'Generating...'
+                            : 'Generate This Script'}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {/* Script Textarea */}
           <div className="space-y-3">
             <Label htmlFor="script" className="text-sm font-medium text-gray-700">
@@ -632,9 +766,9 @@ export function ScriptSection(props: ScriptSectionProps) {
                 <span className="h-1 w-1 rounded-full bg-gray-400"></span>
                 <span>{script.length} characters</span>
               </div>
-              {(randomScriptError || splitError) && (
+              {(randomScriptError || scriptIdeasError || splitError) && (
                 <p className="text-xs text-red-500">
-                  {randomScriptError || splitError}
+                  {randomScriptError || scriptIdeasError || splitError}
                 </p>
               )}
             </div>

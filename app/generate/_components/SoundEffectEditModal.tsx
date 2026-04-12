@@ -63,6 +63,7 @@ type SoundEffectEditModalProps = {
   isSavingAsPreset?: boolean;
   showSaveAsPreset?: boolean;
   showSaveButton?: boolean;
+  showEditPresetsSection?: boolean;
   canApply?: boolean;
   actionError?: string | null;
   onClose: () => void;
@@ -194,6 +195,7 @@ export function SoundEffectEditModal({
   isSavingAsPreset,
   showSaveAsPreset = true,
   showSaveButton = true,
+  showEditPresetsSection = true,
   canApply = true,
   actionError = null,
   onClose,
@@ -840,6 +842,7 @@ export function SoundEffectEditModal({
   }, [isOpen, audioUrl, companionAudioDefaultEnabled, companionAudioUrl, initialName, initialVolumePercent, initialAudioSettings]);
 
   useEffect(() => {
+    if (!showEditPresetsSection) return;
     if (!isOpen) return;
 
     const timeoutId = window.setTimeout(() => {
@@ -849,13 +852,14 @@ export function SoundEffectEditModal({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isOpen, presetSearch]);
+  }, [isOpen, presetSearch, showEditPresetsSection]);
 
   useEffect(() => {
+    if (!showEditPresetsSection) return;
     if (!isOpen) return;
     void fetchPresetItems(presetPage, debouncedPresetSearch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, presetPage, debouncedPresetSearch]);
+  }, [isOpen, presetPage, debouncedPresetSearch, showEditPresetsSection]);
 
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined') return;
@@ -1187,7 +1191,7 @@ export function SoundEffectEditModal({
 
   return (
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-90 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md animate-in fade-in duration-200"
       onClick={handleClose}
       role="dialog"
       aria-modal="true"
@@ -1218,200 +1222,202 @@ export function SoundEffectEditModal({
 
           <div className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <div className="flex h-full col-span-2 flex-col rounded-[1.75rem] border border-white/10 bg-black/30 p-5 gap-3">
-              <Accordion type="single" collapsible className="w-full rounded-2xl border border-white/10 bg-white/5 px-4">
-                <AccordionItem value="presets" className="border-none">
-                  <AccordionTrigger className="py-4 text-left text-white hover:no-underline">
-                    <div className="flex flex-wrap items-start justify-between gap-3 pr-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300">Edit presets</p>
-                        <p className="mt-1 text-sm text-slate-300">
-                          Save this mix as a reusable preset or import one of your saved presets.
-                        </p>
-                      </div>
-                      {activePreset ? (
-                        <span className="inline-flex items-center rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
-                          Loaded preset
-                        </span>
-                      ) : null}
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-4">
-                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
-                      <div className="space-y-4">
-                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                          <div>
-                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Preset title</p>
-                            <Input
-                              value={presetTitle}
-                              onChange={(event) => {
-                                setPresetTitle(event.target.value);
-                                setPresetError(null);
-                                setShowPresetSaveChoices(false);
-                              }}
-                              className="h-11 border-white/15 bg-white/10 text-white placeholder:text-slate-400"
-                              placeholder="Preset title"
-                              disabled={isBusy || isSavingEditPreset}
-                            />
-                          </div>
-                          <div>
-                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Find saved presets</p>
-                            <Input
-                              value={presetSearch}
-                              onChange={(event) => {
-                                setPresetSearch(event.target.value);
-                                setPresetPage(1);
-                                setPresetError(null);
-                              }}
-                              className="h-11 border-white/15 bg-white/10 text-white placeholder:text-slate-400"
-                              placeholder="Search presets"
-                              disabled={isBusy || isSavingEditPreset}
-                            />
-                          </div>
+              {showEditPresetsSection ? (
+                <Accordion type="single" collapsible className="w-full rounded-2xl border border-white/10 bg-white/5 px-4">
+                  <AccordionItem value="presets" className="border-none">
+                    <AccordionTrigger className="py-4 text-left text-white hover:no-underline">
+                      <div className="flex flex-wrap items-start justify-between gap-3 pr-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300">Edit presets</p>
+                          <p className="mt-1 text-sm text-slate-300">
+                            Save this mix as a reusable preset or import one of your saved presets.
+                          </p>
                         </div>
-
-                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                          <div>
-                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Import preset</p>
-                            <Select
-                              value={selectedPresetId}
-                              onValueChange={(value) => {
-                                setSelectedPresetId(value);
-                                const nextPreset = presetItems.find((item) => item.id === value);
-                                if (!nextPreset) return;
-                                hydrateFromPreset(nextPreset);
-                              }}
-                              disabled={isBusy || isSavingEditPreset || isLoadingPresets || presetItems.length === 0}
-                            >
-                              <SelectTrigger className="h-11 border-white/15 bg-white/10 text-white data-placeholder:text-slate-400">
-                                <SelectValue placeholder={isLoadingPresets ? 'Loading presets...' : 'Select a preset to import'} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {presetItems.map((preset) => (
-                                  <SelectItem key={preset.id} value={preset.id}>
-                                    {preset.title}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-11 w-11 rounded-xl border-red-300/30 bg-red-500/10 px-0 text-red-100 hover:bg-red-500/20"
-                              disabled={!activePreset || isBusy || isSavingEditPreset || isDeletingEditPreset}
-                              onClick={() => void deleteActivePreset()}
-                              aria-label="Delete current preset"
-                              title="Delete current preset"
-                            >
-                              {isDeletingEditPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-11 rounded-xl border-white/15 bg-white/5 text-white hover:bg-white/10"
-                              disabled={!activePreset || isBusy || isSavingEditPreset || isDeletingEditPreset}
-                              onClick={() => {
-                                setActivePreset(null);
-                                setSelectedPresetId('');
-                                setShowPresetSaveChoices(false);
-                                setPresetError(null);
-                              }}
-                            >
-                              Detach
-                            </Button>
-                            <Button
-                              type="button"
-                              className="h-11 rounded-xl bg-linear-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-600 hover:to-blue-700"
-                              disabled={isBusy || isSavingEditPreset || isDeletingEditPreset}
-                              onClick={() => {
-                                setPresetError(null);
-                                if (activePreset) {
-                                  setShowPresetSaveChoices(true);
-                                  return;
-                                }
-                                void createPreset();
-                              }}
-                            >
-                              {isSavingEditPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                              Save edit preset
-                            </Button>
-                          </div>
-                        </div>
-
-                        {presetTotalPages > 1 ? (
-                          <Pagination
-                            currentPage={presetPage}
-                            totalPages={presetTotalPages}
-                            onPageChange={(nextPage) => {
-                              if (nextPage === presetPage) return;
-                              setPresetPage(nextPage);
-                            }}
-                          />
+                        {activePreset ? (
+                          <span className="inline-flex items-center rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                            Loaded preset
+                          </span>
                         ) : null}
                       </div>
-                    </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+                        <div className="space-y-4">
+                          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                            <div>
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Preset title</p>
+                              <Input
+                                value={presetTitle}
+                                onChange={(event) => {
+                                  setPresetTitle(event.target.value);
+                                  setPresetError(null);
+                                  setShowPresetSaveChoices(false);
+                                }}
+                                className="h-11 border-white/15 bg-white/10 text-white placeholder:text-slate-400"
+                                placeholder="Preset title"
+                                disabled={isBusy || isSavingEditPreset}
+                              />
+                            </div>
+                            <div>
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Find saved presets</p>
+                              <Input
+                                value={presetSearch}
+                                onChange={(event) => {
+                                  setPresetSearch(event.target.value);
+                                  setPresetPage(1);
+                                  setPresetError(null);
+                                }}
+                                className="h-11 border-white/15 bg-white/10 text-white placeholder:text-slate-400"
+                                placeholder="Search presets"
+                                disabled={isBusy || isSavingEditPreset}
+                              />
+                            </div>
+                          </div>
 
-                    {showPresetSaveChoices ? (
-                      <div className="mt-4 rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-amber-100">
-                              {activePreset
-                                ? isImportedPresetDirty
-                                  ? `Save changes to ${activePreset.title}`
-                                  : `Choose how to save ${activePreset.title}`
-                                : 'Choose how to save this preset'}
-                            </p>
-                            <p className="mt-1 text-xs text-amber-50/80">
-                              Override the imported preset or save the current values as a new preset entity.
-                            </p>
+                          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                            <div>
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Import preset</p>
+                              <Select
+                                value={selectedPresetId}
+                                onValueChange={(value) => {
+                                  setSelectedPresetId(value);
+                                  const nextPreset = presetItems.find((item) => item.id === value);
+                                  if (!nextPreset) return;
+                                  hydrateFromPreset(nextPreset);
+                                }}
+                                disabled={isBusy || isSavingEditPreset || isLoadingPresets || presetItems.length === 0}
+                              >
+                                <SelectTrigger className="h-11 border-white/15 bg-white/10 text-white data-placeholder:text-slate-400">
+                                  <SelectValue placeholder={isLoadingPresets ? 'Loading presets...' : 'Select a preset to import'} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {presetItems.map((preset) => (
+                                    <SelectItem key={preset.id} value={preset.id}>
+                                      {preset.title}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-11 w-11 rounded-xl border-red-300/30 bg-red-500/10 px-0 text-red-100 hover:bg-red-500/20"
+                                disabled={!activePreset || isBusy || isSavingEditPreset || isDeletingEditPreset}
+                                onClick={() => void deleteActivePreset()}
+                                aria-label="Delete current preset"
+                                title="Delete current preset"
+                              >
+                                {isDeletingEditPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-11 rounded-xl border-white/15 bg-white/5 text-white hover:bg-white/10"
+                                disabled={!activePreset || isBusy || isSavingEditPreset || isDeletingEditPreset}
+                                onClick={() => {
+                                  setActivePreset(null);
+                                  setSelectedPresetId('');
+                                  setShowPresetSaveChoices(false);
+                                  setPresetError(null);
+                                }}
+                              >
+                                Detach
+                              </Button>
+                              <Button
+                                type="button"
+                                className="h-11 rounded-xl bg-linear-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-600 hover:to-blue-700"
+                                disabled={isBusy || isSavingEditPreset || isDeletingEditPreset}
+                                onClick={() => {
+                                  setPresetError(null);
+                                  if (activePreset) {
+                                    setShowPresetSaveChoices(true);
+                                    return;
+                                  }
+                                  void createPreset();
+                                }}
+                              >
+                                {isSavingEditPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                Save edit preset
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-10 rounded-xl border-amber-200/40 bg-transparent text-amber-50 hover:bg-amber-300/10"
-                              disabled={isSavingEditPreset || isDeletingEditPreset}
-                              onClick={() => setShowPresetSaveChoices(false)}
-                            >
-                              Cancel
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-10 rounded-xl border-amber-200/40 bg-transparent text-amber-50 hover:bg-amber-300/10"
-                              disabled={isSavingEditPreset || isDeletingEditPreset}
-                              onClick={() => void overrideActivePreset()}
-                            >
-                              Override current preset
-                            </Button>
-                            <Button
-                              type="button"
-                              className="h-10 rounded-xl bg-linear-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600"
-                              disabled={isSavingEditPreset || isDeletingEditPreset}
-                              onClick={() => {
-                                setActivePreset(null);
-                                setSelectedPresetId('');
-                                void createPreset();
+
+                          {presetTotalPages > 1 ? (
+                            <Pagination
+                              currentPage={presetPage}
+                              totalPages={presetTotalPages}
+                              onPageChange={(nextPage) => {
+                                if (nextPage === presetPage) return;
+                                setPresetPage(nextPage);
                               }}
-                            >
-                              Save as new preset
-                            </Button>
-                          </div>
+                            />
+                          ) : null}
                         </div>
                       </div>
-                    ) : null}
 
-                    {presetError ? (
-                      <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                        {presetError}
-                      </div>
-                    ) : null}
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+                      {showPresetSaveChoices ? (
+                        <div className="mt-4 rounded-2xl border border-amber-300/30 bg-amber-400/10 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-amber-100">
+                                {activePreset
+                                  ? isImportedPresetDirty
+                                    ? `Save changes to ${activePreset.title}`
+                                    : `Choose how to save ${activePreset.title}`
+                                  : 'Choose how to save this preset'}
+                              </p>
+                              <p className="mt-1 text-xs text-amber-50/80">
+                                Override the imported preset or save the current values as a new preset entity.
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-10 rounded-xl border-amber-200/40 bg-transparent text-amber-50 hover:bg-amber-300/10"
+                                disabled={isSavingEditPreset || isDeletingEditPreset}
+                                onClick={() => setShowPresetSaveChoices(false)}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-10 rounded-xl border-amber-200/40 bg-transparent text-amber-50 hover:bg-amber-300/10"
+                                disabled={isSavingEditPreset || isDeletingEditPreset}
+                                onClick={() => void overrideActivePreset()}
+                              >
+                                Override current preset
+                              </Button>
+                              <Button
+                                type="button"
+                                className="h-10 rounded-xl bg-linear-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600"
+                                disabled={isSavingEditPreset || isDeletingEditPreset}
+                                onClick={() => {
+                                  setActivePreset(null);
+                                  setSelectedPresetId('');
+                                  void createPreset();
+                                }}
+                              >
+                                Save as new preset
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {presetError ? (
+                        <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                          {presetError}
+                        </div>
+                      ) : null}
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              ) : null}
 
               <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="min-w-0 flex-1">

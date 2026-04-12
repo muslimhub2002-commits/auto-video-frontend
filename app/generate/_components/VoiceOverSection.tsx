@@ -62,8 +62,9 @@ interface VoiceOverSectionProps {
   onOpenLibrary: () => void;
   onSaveVoice: () => void;
   onOpenVoiceEditor?: () => void;
-  elevenLabsSettingsSummary?: string | null;
   onOpenElevenLabsSettings?: () => void;
+  canManageVoiceChunks?: boolean;
+  onOpenVoiceChunkManager?: () => void;
   canManageSentenceVoices?: boolean;
   onOpenSentenceVoiceManager?: () => void;
 }
@@ -100,8 +101,9 @@ export function VoiceOverSection({
   onOpenLibrary,
   onSaveVoice,
   onOpenVoiceEditor,
-  elevenLabsSettingsSummary,
   onOpenElevenLabsSettings,
+  canManageVoiceChunks,
+  onOpenVoiceChunkManager,
   canManageSentenceVoices,
   onOpenSentenceVoiceManager,
 }: VoiceOverSectionProps) {
@@ -216,7 +218,6 @@ export function VoiceOverSection({
       const decoder = new TextDecoder();
       let acc = '';
 
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -891,6 +892,18 @@ export function VoiceOverSection({
                     >
                       <SlidersHorizontal className="h-3 w-3" />
                       Sentences
+                    </Button>
+                  ) : null}
+                  {!isPerSentenceMode && canManageVoiceChunks ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={onOpenVoiceChunkManager}
+                      className="flex-1 gap-1.5 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
+                    >
+                      <SlidersHorizontal className="h-3 w-3" />
+                      Chunks
                     </Button>
                   ) : null}
                   <Button
