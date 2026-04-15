@@ -2631,6 +2631,8 @@ function SentenceEditorCardComponent({
                     text={item.textAnimationText}
                     effect={resolvedTextAnimationEffect}
                     settings={item.textAnimationSettings}
+                    visualEffect={item.visualEffect ?? null}
+                    imageFilterSettings={item.imageFilterSettings ?? null}
                     backgroundImageUrl={textPreviewBackgroundUrl}
                     backgroundVideoUrl={textPreviewBackgroundVideoUrl}
                     isShortVideo={isShortVideo}
@@ -4194,6 +4196,8 @@ function SentenceEditorCardComponent({
             text={item.textAnimationText}
             effect={resolvedTextAnimationEffect}
             settings={resolvedTextAnimationSettings}
+            visualEffect={item.visualEffect ?? null}
+            imageFilterSettings={item.imageFilterSettings ?? null}
             backgroundImageUrl={textPreviewBackgroundUrl}
             backgroundVideoUrl={textPreviewBackgroundVideoUrl}
             isPreviewClosing={isTextPreviewOverlayClosing}

@@ -11,6 +11,8 @@ type TextPreviewOverlayProps = {
   text?: string | null;
   effect?: SentenceItem['textAnimationEffect'] | null;
   settings?: Record<string, unknown> | TextAnimationSettings | null;
+  visualEffect?: SentenceItem['visualEffect'] | null;
+  imageFilterSettings?: Record<string, unknown> | null;
   backgroundImageUrl?: string | null;
   backgroundVideoUrl?: string | null;
   isPreviewClosing: boolean;
@@ -23,6 +25,8 @@ export function TextPreviewOverlay({
   text,
   effect,
   settings,
+  visualEffect,
+  imageFilterSettings,
   backgroundImageUrl,
   backgroundVideoUrl,
   isPreviewClosing,
@@ -63,6 +67,8 @@ export function TextPreviewOverlay({
           text={text}
           effect={effect}
           settings={settings}
+          visualEffect={visualEffect}
+          imageFilterSettings={imageFilterSettings}
           backgroundImageUrl={backgroundImageUrl}
           backgroundVideoUrl={backgroundVideoUrl}
           isShortVideo={isShortVideo}

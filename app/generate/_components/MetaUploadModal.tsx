@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import { api } from '@/lib/api';
 import {
   META_WALLPAPER_THEME,
@@ -120,65 +120,6 @@ function getCredentialHeadline(status: MetaCredentialStatus): string {
     case 'not_connected':
     default:
       return 'No shared Meta connection is configured yet.';
-  }
-}
-
-function isCloudinaryUrl(url: string) {
-  return /^(https?:\/\/)?res\.cloudinary\.com\//i.test(url || '');
-}
-
-function getFileNameFromUrl(urlString: string): string {
-  try {
-    const parsed = new URL(urlString);
-    const lastSegment = String(parsed.pathname.split('/').pop() ?? '').trim();
-    if (lastSegment) return lastSegment;
-  } catch {
-    // ignore
-  }
-
-  return 'video.mp4';
-}
-
-async function downloadVideoAsFile(url: string, timeoutMs: number): Promise<File> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      cache: 'no-store',
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(
-        `Failed to download video before Meta upload (${res.status}): ${text || res.statusText}`,
-      );
-    }
-
-    const contentType = res.headers.get('content-type') || 'video/mp4';
-    const buffer = await res.arrayBuffer();
-    if (!buffer || buffer.byteLength === 0) {
-      throw new Error('Downloaded video is empty.');
-    }
-
-    return new File([buffer], getFileNameFromUrl(url), { type: contentType });
-  } catch (err: unknown) {
-    const isAbort =
-      typeof err === 'object' &&
-      err !== null &&
-      'name' in err &&
-      (err as { name?: unknown }).name === 'AbortError';
-
-    if (isAbort) {
-      throw new Error(
-        'Timed out while downloading the rendered video bytes. Confirm the video URL opens successfully in the browser.',
-      );
-    }
-
-    throw err;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -391,24 +332,21 @@ export function MetaUploadModal({
     const trimmed = String(inputUrl ?? '').trim();
     if (!trimmed) throw new Error('Missing video URL');
 
-    if (isCloudinaryUrl(trimmed)) return trimmed;
-
     if (cloudinaryCachedForVideoUrl === trimmed && cloudinaryCachedUrl) {
       return cloudinaryCachedUrl;
     }
 
     setCloudinaryStage('downloading');
     try {
-      const file = await downloadVideoAsFile(trimmed, 600_000);
-      setCloudinaryStage('uploading');
-      const cloudinaryUrl = await uploadToCloudinaryUnsigned(file, {
+      const preparedUrl = await ensureManagedPublicUrl(trimmed, {
         resourceType: 'video',
         folder: 'auto-video-generator/meta-uploads',
+        filename: 'meta-upload.mp4',
       });
 
       setCloudinaryCachedForVideoUrl(trimmed);
-      setCloudinaryCachedUrl(cloudinaryUrl);
-      return cloudinaryUrl;
+      setCloudinaryCachedUrl(preparedUrl);
+      return preparedUrl;
     } finally {
       setCloudinaryStage('idle');
     }
@@ -889,8 +827,8 @@ export function MetaUploadModal({
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>
                 {cloudinaryStage === 'downloading'
-                  ? 'Preparing the rendered video for public upload...'
-                  : 'Uploading the video to temporary hosting for Meta...'}
+                  ? 'Preparing a public video URL for Meta...'
+                  : 'Preparing a public video URL for Meta...'}
               </span>
             </div>
           ) : null}

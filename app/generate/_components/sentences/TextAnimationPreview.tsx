@@ -1,11 +1,13 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import {
   getDefaultImageMotionSettings,
   getDefaultImageMotionSpeed,
+  normalizeImageFilterSettings,
+  resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
 
 export const TEXT_ANIMATION_EFFECT_VALUES = [
@@ -56,6 +58,11 @@ export const TEXT_SCENE_FONT_MAX_PX = 92.8;
 export const TEXT_SCENE_DEFAULT_FONT_FAMILY = 'Oswald, system-ui, sans-serif';
 export const TEXT_SCENE_ARABIC_FONT_FAMILY = 'Noto Kufi Arabic, sans-serif';
 const BACKGROUND_PREVIEW_MOTION_DURATION_MS = 6200;
+const SLIDE_CUT_EASING = [0.12, 0.88, 0.24, 1] as const;
+const NEWTON_ITERATIONS = 4;
+const NEWTON_MIN_SLOPE = 0.001;
+const SUBDIVISION_PRECISION = 0.0000001;
+const SUBDIVISION_MAX_ITERATIONS = 10;
 
 export type TextAnimationSettings = {
   presetKey?: TextAnimationEffect | 'custom';
@@ -99,6 +106,8 @@ type TextAnimationPreviewProps = {
   text?: string | null;
   effect?: SentenceItem['textAnimationEffect'] | null;
   settings?: Record<string, unknown> | TextAnimationSettings | null;
+  visualEffect?: SentenceItem['visualEffect'] | null;
+  imageFilterSettings?: Record<string, unknown> | null;
   backgroundImageUrl?: string | null;
   backgroundVideoUrl?: string | null;
   isShortVideo?: boolean;
@@ -307,12 +316,6 @@ export function resolveTextAnimationEffectFromSettings(
   );
 }
 
-function getPreviewAnimationName(effect: SentenceItem['textAnimationEffect'] | null | undefined) {
-  return resolveLegacyTextAnimationEffect(effect) === 'slideCutFast'
-    ? 'av-text-slide-cut'
-    : 'av-text-slide-cut';
-}
-
 function resolveJustifyContent(alignment: TextHorizontalAlign) {
   if (alignment === 'left') return 'flex-start';
   if (alignment === 'right') return 'flex-end';
@@ -367,11 +370,178 @@ function getWordDelayMs(settings: TextAnimationSettings) {
   );
 }
 
+function interpolateNumber(
+  value: number,
+  inputRange: readonly number[],
+  outputRange: readonly number[],
+) {
+  if (inputRange.length !== outputRange.length) {
+    throw new Error('Input and output ranges must be the same length');
+  }
+
+  if (inputRange.length === 0) return 0;
+  if (value <= inputRange[0]) return outputRange[0];
+
+  for (let index = 1; index < inputRange.length; index += 1) {
+    if (value <= inputRange[index]) {
+      const startInput = inputRange[index - 1];
+      const endInput = inputRange[index];
+      const startOutput = outputRange[index - 1];
+      const endOutput = outputRange[index];
+      const segmentProgress = (value - startInput) / (endInput - startInput || 1);
+      return startOutput + (endOutput - startOutput) * segmentProgress;
+    }
+  }
+
+  return outputRange[outputRange.length - 1];
+}
+
+function calcBezierCoefficientA(a1: number, a2: number) {
+  return 1 - 3 * a2 + 3 * a1;
+}
+
+function calcBezierCoefficientB(a1: number, a2: number) {
+  return 3 * a2 - 6 * a1;
+}
+
+function calcBezierCoefficientC(a1: number) {
+  return 3 * a1;
+}
+
+function calcBezierValue(t: number, a1: number, a2: number) {
+  return (
+    ((calcBezierCoefficientA(a1, a2) * t + calcBezierCoefficientB(a1, a2)) * t +
+      calcBezierCoefficientC(a1)) *
+    t
+  );
+}
+
+function getBezierSlope(t: number, a1: number, a2: number) {
+  return (
+    3 * calcBezierCoefficientA(a1, a2) * t * t +
+    2 * calcBezierCoefficientB(a1, a2) * t +
+    calcBezierCoefficientC(a1)
+  );
+}
+
+function binarySubdivide(x: number, lowerBound: number, upperBound: number, x1: number, x2: number) {
+  let currentX = 0;
+  let currentT = 0;
+  let start = lowerBound;
+  let end = upperBound;
+
+  for (let index = 0; index < SUBDIVISION_MAX_ITERATIONS; index += 1) {
+    currentT = start + (end - start) / 2;
+    currentX = calcBezierValue(currentT, x1, x2) - x;
+    if (Math.abs(currentX) <= SUBDIVISION_PRECISION) {
+      return currentT;
+    }
+    if (currentX > 0) {
+      end = currentT;
+    } else {
+      start = currentT;
+    }
+  }
+
+  return currentT;
+}
+
+function newtonRaphsonIterate(x: number, guessT: number, x1: number, x2: number) {
+  let currentGuess = guessT;
+
+  for (let index = 0; index < NEWTON_ITERATIONS; index += 1) {
+    const currentSlope = getBezierSlope(currentGuess, x1, x2);
+    if (currentSlope === 0) {
+      return currentGuess;
+    }
+    const currentX = calcBezierValue(currentGuess, x1, x2) - x;
+    currentGuess -= currentX / currentSlope;
+  }
+
+  return currentGuess;
+}
+
+function getBezierProgress(x: number, x1: number, y1: number, x2: number, y2: number) {
+  if (x1 === y1 && x2 === y2) {
+    return x;
+  }
+
+  const initialSlope = getBezierSlope(x, x1, x2);
+  const solvedT =
+    initialSlope >= NEWTON_MIN_SLOPE
+      ? newtonRaphsonIterate(x, x, x1, x2)
+      : initialSlope === 0
+        ? x
+        : binarySubdivide(x, 0, 1, x1, x2);
+
+  return calcBezierValue(solvedT, y1, y2);
+}
+
+function buildImageLookFilter(settings: ReturnType<typeof normalizeImageFilterSettings>) {
+  return [
+    `saturate(${(settings.saturation ?? 1).toFixed(3)})`,
+    `contrast(${(settings.contrast ?? 1).toFixed(3)})`,
+    `brightness(${(settings.brightness ?? 1).toFixed(3)})`,
+    (settings.blurPx ?? 0) > 0.001 ? `blur(${(settings.blurPx ?? 0).toFixed(2)}px)` : null,
+    (settings.sepia ?? 0) > 0.001 ? `sepia(${(settings.sepia ?? 0).toFixed(3)})` : null,
+    (settings.grayscale ?? 0) > 0.001
+      ? `grayscale(${(settings.grayscale ?? 0).toFixed(3)})`
+      : null,
+    Math.abs(settings.hueRotateDeg ?? 0) > 0.001
+      ? `hue-rotate(${(settings.hueRotateDeg ?? 0).toFixed(2)}deg)`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ') || undefined;
+}
+
+function getStablePreviewSeed(value: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967295;
+}
+
+function getSlideCutAnimatedStyle(
+  elapsedMs: number,
+  durationMs: number,
+  animationIntensity: number,
+): CSSProperties {
+  const progress = clamp(elapsedMs / Math.max(durationMs, 1), 0, 1);
+  const easedProgress = getBezierProgress(
+    progress,
+    SLIDE_CUT_EASING[0],
+    SLIDE_CUT_EASING[1],
+    SLIDE_CUT_EASING[2],
+    SLIDE_CUT_EASING[3],
+  );
+  const leadDistance = 20 + animationIntensity * 8;
+  const skewStart = -7 - animationIntensity * 4;
+  const blurStart = 8 + animationIntensity * 8;
+  const translateXPercent = interpolateNumber(easedProgress, [0, 1], [-leadDistance, 0]);
+  const clipRight = interpolateNumber(easedProgress, [0, 1], [100, 0]);
+  const skew = interpolateNumber(easedProgress, [0, 1], [skewStart, 0]);
+  const blurPx = interpolateNumber(easedProgress, [0, 0.4, 1], [blurStart, 0.6, 0]);
+
+  return {
+    opacity: interpolateNumber(easedProgress, [0, 0.18, 1], [0, 1, 1]),
+    transform: `translate3d(${translateXPercent.toFixed(2)}%, 0, 0) skewX(${skew.toFixed(2)}deg)`,
+    clipPath: `inset(0 ${clipRight.toFixed(2)}% 0 0)`,
+    filter: `blur(${blurPx.toFixed(2)}px)`,
+  };
+}
+
 export function TextAnimationPreview({
   sentenceText,
   text,
   effect,
   settings,
+  visualEffect,
+  imageFilterSettings,
   backgroundImageUrl,
   backgroundVideoUrl,
   isShortVideo = true,
@@ -417,12 +587,71 @@ export function TextAnimationPreview({
     1800,
     BACKGROUND_PREVIEW_MOTION_DURATION_MS / getDefaultImageMotionSpeed(isShortVideo),
   );
-  const animationName = getPreviewAnimationName(resolvedEffect);
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
   const words = resolvedText.split(/\s+/u).filter(Boolean);
   const animatePerWord = resolvedSettings.animatePerWord === true && words.length > 1;
   const wordDelayMs = getWordDelayMs(resolvedSettings);
+  const totalAnimationWindowMs = animationDurationMs + (animatePerWord ? wordDelayMs * Math.max(0, words.length - 1) : 0);
+  const [animationElapsedMs, setAnimationElapsedMs] = useState(0);
   const contentAlign = resolveContentTextAlign(resolvedSettings);
+  const resolvedBackgroundLook = normalizeImageFilterSettings(
+    imageFilterSettings,
+    visualEffect ?? null,
+  );
+  const normalizedVisualEffect = resolveVisualEffectFromSettings(
+    resolvedBackgroundLook,
+    visualEffect ?? null,
+  );
+  const backgroundMediaFilter = buildImageLookFilter(resolvedBackgroundLook);
+  const shouldShowGlassOverlay =
+    normalizedVisualEffect === 'glassReflections' ||
+    normalizedVisualEffect === 'glassStrong' ||
+    (resolvedBackgroundLook.glassOverlayOpacity ?? 0) > 0.001;
+  const previewSeed = getStablePreviewSeed(
+    `${resolvedText}|${resolvedBackgroundImageUrl ?? ''}|${resolvedBackgroundVideoUrl ?? ''}|${String(motionResetKey ?? '')}`,
+  );
+  const lightingX = ((previewSeed * 320) % 100 + 100) % 100;
+  const lightingY = (35 + 25 * Math.sin(previewSeed * 8) + 100) % 100;
+  const lightingAlpha =
+    (0.22 + 0.1 * Math.sin(previewSeed * 12)) *
+    (resolvedBackgroundLook.animatedLightingIntensity ?? 0);
+
+  useEffect(() => {
+    if (!enableMotion) {
+      return undefined;
+    }
+
+    let animationFrameId = 0;
+    const startedAt = performance.now();
+    const cycleDurationMs = Math.max(totalAnimationWindowMs, 1);
+
+    const updateFrame = (now: number) => {
+      const elapsed = now - startedAt;
+      const nextElapsed = repeatMotion
+        ? elapsed % cycleDurationMs
+        : Math.min(elapsed, cycleDurationMs);
+
+      setAnimationElapsedMs(nextElapsed);
+
+      if (repeatMotion || elapsed < cycleDurationMs) {
+        animationFrameId = window.requestAnimationFrame(updateFrame);
+      }
+    };
+
+    animationFrameId = window.requestAnimationFrame(updateFrame);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [enableMotion, motionResetKey, repeatMotion, totalAnimationWindowMs]);
+
+  const blockAnimatedStyle = enableMotion
+    ? getSlideCutAnimatedStyle(
+        animationElapsedMs,
+        animationDurationMs,
+        resolvedSettings.animationIntensity ?? 0.82,
+      )
+    : null;
   const textStyle: CSSProperties = {
     color: resolvedSettings.textColor,
     fontWeight: resolvedSettings.fontWeight,
@@ -447,11 +676,6 @@ export function TextAnimationPreview({
     >
       <style>
         {`
-          @keyframes av-text-slide-cut {
-            0% { opacity: 0; clip-path: inset(0 100% 0 0); transform: translate3d(-24%, 0, 0) skewX(-10deg); filter: blur(14px); }
-            40% { filter: blur(0.6px); }
-            100% { opacity: 1; clip-path: inset(0 0 0 0); transform: translate3d(0, 0, 0) skewX(0deg); filter: blur(0); }
-          }
           @keyframes av-text-preview-dim {
             0% { opacity: 0.35; }
             100% { opacity: 1; }
@@ -463,30 +687,67 @@ export function TextAnimationPreview({
         `}
       </style>
 
-      {hasBackgroundVideo ? (
-        <video
-          src={resolvedBackgroundVideoUrl}
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-          autoPlay
-          muted
-          loop
-          playsInline
-        />
-      ) : null}
+      {hasBackgroundImage || hasBackgroundVideo ? (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ filter: backgroundMediaFilter }}
+        >
+          {hasBackgroundVideo ? (
+            <video
+              src={resolvedBackgroundVideoUrl}
+              className="absolute inset-0 h-full w-full object-cover"
+              autoPlay
+              muted
+              loop
+              playsInline
+              style={{
+                transformOrigin: `${(defaultBackgroundMotion.originX ?? 50).toFixed(1)}% ${(defaultBackgroundMotion.originY ?? 50).toFixed(1)}%`,
+                animation: enableMotion
+                  ? `av-text-preview-default-scale ${backgroundMotionDurationMs}ms ease-in-out infinite`
+                  : undefined,
+                willChange: enableMotion ? 'transform' : undefined,
+              }}
+            />
+          ) : null}
 
-      {hasBackgroundImage ? (
-        <img
-          src={resolvedBackgroundImageUrl}
-          alt="Text scene background"
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-          style={{
-            transformOrigin: `${(defaultBackgroundMotion.originX ?? 50).toFixed(1)}% ${(defaultBackgroundMotion.originY ?? 50).toFixed(1)}%`,
-            animation: enableMotion
-              ? `av-text-preview-default-scale ${backgroundMotionDurationMs}ms ease-in-out infinite`
-              : undefined,
-            willChange: enableMotion ? 'transform' : undefined,
-          }}
-        />
+          {hasBackgroundImage ? (
+            <img
+              src={resolvedBackgroundImageUrl}
+              alt="Text scene background"
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{
+                transformOrigin: `${(defaultBackgroundMotion.originX ?? 50).toFixed(1)}% ${(defaultBackgroundMotion.originY ?? 50).toFixed(1)}%`,
+                animation: enableMotion
+                  ? `av-text-preview-default-scale ${backgroundMotionDurationMs}ms ease-in-out infinite`
+                  : undefined,
+                willChange: enableMotion ? 'transform' : undefined,
+              }}
+            />
+          ) : null}
+
+          {(resolvedBackgroundLook.animatedLightingIntensity ?? 0) > 0.001 ? (
+            <div
+              className="absolute inset-0"
+              style={{
+                opacity: Math.max(0, Math.min(0.42, lightingAlpha)),
+                mixBlendMode: 'screen',
+                background: `radial-gradient(circle at ${lightingX.toFixed(2)}% ${lightingY.toFixed(2)}%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)`,
+              }}
+            />
+          ) : null}
+
+          {shouldShowGlassOverlay ? (
+            <div
+              className="absolute inset-0"
+              style={{
+                opacity: resolvedBackgroundLook.glassOverlayOpacity ?? 0,
+                mixBlendMode: 'screen',
+                background:
+                  'linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 18%, rgba(255,255,255,0.00) 45%, rgba(255,255,255,0.10) 62%, rgba(255,255,255,0.00) 100%)',
+              }}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {hasBackgroundImage || hasBackgroundVideo ? (
@@ -511,21 +772,21 @@ export function TextAnimationPreview({
         <div
           style={{
             ...textStyle,
-            animationName: enableMotion && !animatePerWord ? animationName : undefined,
-            animationDuration: enableMotion && !animatePerWord ? `${animationDurationMs}ms` : undefined,
-            animationTimingFunction: enableMotion && !animatePerWord
-              ? 'cubic-bezier(0.12, 0.88, 0.24, 1)'
-              : undefined,
-            animationFillMode: enableMotion && !animatePerWord ? 'both' : undefined,
-            animationIterationCount: enableMotion && !animatePerWord
-              ? repeatMotion
-                ? 'infinite'
-                : 1
+            ...(animatePerWord ? null : blockAnimatedStyle),
+            willChange: enableMotion && !animatePerWord
+              ? 'transform, opacity, clip-path, filter'
               : undefined,
           }}
         >
           {animatePerWord
             ? words.map((word, index) => {
+                const animatedWordStyle = enableMotion
+                  ? getSlideCutAnimatedStyle(
+                      Math.max(0, animationElapsedMs - index * wordDelayMs),
+                      animationDurationMs,
+                      resolvedSettings.animationIntensity ?? 0.82,
+                    )
+                  : null;
                 const isAccentWord = index === 0;
                 return (
                   <span key={`${word}-${index}`}>
@@ -533,18 +794,7 @@ export function TextAnimationPreview({
                       style={{
                         display: 'inline-block',
                         color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
-                        animationName: enableMotion ? animationName : undefined,
-                        animationDuration: enableMotion ? `${animationDurationMs}ms` : undefined,
-                        animationTimingFunction: enableMotion
-                          ? 'cubic-bezier(0.12, 0.88, 0.24, 1)'
-                          : undefined,
-                        animationFillMode: enableMotion ? 'both' : undefined,
-                        animationIterationCount: enableMotion
-                          ? repeatMotion
-                            ? 'infinite'
-                            : 1
-                          : undefined,
-                        animationDelay: enableMotion ? `${index * wordDelayMs}ms` : undefined,
+                        ...(animatedWordStyle ?? null),
                         willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
                       }}
                     >

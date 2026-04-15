@@ -1386,6 +1386,8 @@ export function ImageEffectsDetailModal({
                 text={draftTextAnimationText}
                 effect={draftTextAnimationEffect}
                 settings={resolvedText}
+                visualEffect={draftVisualEffect}
+                imageFilterSettings={resolvedLook}
                 backgroundImageUrl={resolvedTextPreviewBackgroundUrl}
                 backgroundVideoUrl={resolvedTextPreviewBackgroundVideoUrl}
                 isShortVideo={isShortVideo}

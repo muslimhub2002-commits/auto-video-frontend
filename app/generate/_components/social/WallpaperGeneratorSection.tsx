@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
-import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { uploadManagedFile } from '@/lib/cloudinary';
 import { useImageModelOptions } from '../../_hooks/useImageModelOptions';
 import { LlmModelSelect } from '../LlmModelSelect';
 import {
@@ -508,7 +508,7 @@ export function WallpaperGeneratorSection({
 
     setIsUploadingWallpaper(true);
     try {
-      const url = await uploadToCloudinaryUnsigned(file, {
+      const url = await uploadManagedFile(file, {
         resourceType: 'image',
         folder: 'auto-video-generator/wallpapers',
       });

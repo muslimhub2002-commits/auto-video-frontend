@@ -60,7 +60,7 @@ import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useSentencesEditor } from './_hooks/useSentencesEditor';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
-import { mapWithConcurrency, uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { mapWithConcurrency, uploadManagedFile } from '@/lib/cloudinary';
 import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -2345,7 +2345,7 @@ export function GeneratePageInner() {
     });
   };
 
-  const persistVoiceOverChunksToCloudinary = async (
+  const persistVoiceOverChunksToManagedStorage = async (
     chunks: VoiceOverChunkState[],
   ): Promise<ScriptVoiceOverChunkDto[] | null> => {
     if (!hasPersistableVoiceChunks(chunks)) {
@@ -2367,8 +2367,8 @@ export function GeneratePageInner() {
           throw new Error('A generated voice chunk is missing its audio file. Please regenerate the voice-over.');
         }
 
-        chunkUrl = await uploadToCloudinaryUnsigned(chunk.sourceFile, {
-          resourceType: 'video',
+        chunkUrl = await uploadManagedFile(chunk.sourceFile, {
+          resourceType: 'audio',
           folder: 'auto-video-generator/voice-chunks',
         });
       }
@@ -2449,12 +2449,12 @@ export function GeneratePageInner() {
     };
   };
 
-  const persistSentenceVoiceFileToCloudinary = async (params: {
+  const persistSentenceVoiceFileToManagedStorage = async (params: {
     file: File;
     sentenceId: string;
   }) => {
-    return await uploadToCloudinaryUnsigned(params.file, {
-      resourceType: 'video',
+    return await uploadManagedFile(params.file, {
+      resourceType: 'audio',
       folder: `auto-video-generator/sentence-voice-overs/${params.sentenceId}`,
     });
   };
@@ -2830,6 +2830,7 @@ export function GeneratePageInner() {
           s.textAnimationSettings,
           s.textAnimationEffect,
         );
+        const visualEffect = s.visualEffect ?? null;
         const backgroundAsset = resolveTextSceneRenderBackgroundAsset(
           s,
           effectiveIsShort,
@@ -2852,6 +2853,10 @@ export function GeneratePageInner() {
             textAnimationEffect,
             effectiveIsShort,
           ),
+          ...(visualEffect ? { visualEffect } : {}),
+          ...(s.imageFilterSettings
+            ? { imageFilterSettings: normalizeSettingsObject(s.imageFilterSettings) }
+            : {}),
           ...(textBackgroundVideoUrl
             ? { textBackgroundVideoUrl }
             : {}),
@@ -3125,8 +3130,8 @@ export function GeneratePageInner() {
       throw new Error('Please provide a voice-over.');
     }
 
-    const uploadedUrl = await uploadToCloudinaryUnsigned(voiceOver, {
-      resourceType: 'video',
+    const uploadedUrl = await uploadManagedFile(voiceOver, {
+      resourceType: 'audio',
       folder: 'auto-video-generator/render-voiceovers',
     });
 
@@ -3200,7 +3205,7 @@ export function GeneratePageInner() {
           return stageRenderAssetLocally(fileToUpload, 'image');
         }
 
-        return uploadToCloudinaryUnsigned(fileToUpload, {
+        return uploadManagedFile(fileToUpload, {
           resourceType: 'image',
           folder: 'auto-video-generator/render-images',
         });
@@ -3235,7 +3240,7 @@ export function GeneratePageInner() {
         return stageRenderAssetLocally(fileToUpload, 'image');
       }
 
-      const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
+      const uploadedUrl = await uploadManagedFile(fileToUpload, {
         resourceType: 'image',
         folder: 'auto-video-generator/render-images',
       });
@@ -3286,7 +3291,7 @@ export function GeneratePageInner() {
         return stageRenderAssetLocally(fileToUpload, 'image');
       }
 
-      const uploadedUrl = await uploadToCloudinaryUnsigned(fileToUpload, {
+      const uploadedUrl = await uploadManagedFile(fileToUpload, {
         resourceType: 'image',
         folder: 'auto-video-generator/render-images',
       });
@@ -4597,7 +4602,7 @@ export function GeneratePageInner() {
           : '';
 
       // If the user provided style instructions, generate a fresh preview so the audio matches.
-      // Otherwise use the cached Cloudinary preview URL endpoint.
+      // Otherwise use the cached managed preview URL endpoint.
       if (voiceProvider === 'google' && style) {
         const previewText = 'Hello! This is a short preview of the selected voice.';
 
@@ -5460,20 +5465,19 @@ export function GeneratePageInner() {
     }));
 
   const persistVoiceToLibrary = async (file: File) => {
-    // Upload directly to Cloudinary from the client to avoid Vercel serverless limits.
-    const cloudinaryUrl = await uploadToCloudinaryUnsigned(file, {
-      resourceType: 'video',
+    const managedUrl = await uploadManagedFile(file, {
+      resourceType: 'audio',
       folder: 'auto-video-generator/voices',
     });
 
     const hash = await sha256HexForFile(file);
 
     const response = await api.post<{ id: string }>('/voices/url', {
-      voice: cloudinaryUrl,
+      voice: managedUrl,
       hash: hash ?? undefined,
     });
 
-    return { id: response.data.id, url: cloudinaryUrl };
+    return { id: response.data.id, url: managedUrl };
   };
 
   const syncPersistedVoiceChunksIntoState = (
@@ -5498,7 +5502,9 @@ export function GeneratePageInner() {
     voiceId: string;
     chunks: VoiceOverChunkState[];
   }) => {
-    const voiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(params.chunks);
+    const voiceOverChunksPayload = await persistVoiceOverChunksToManagedStorage(
+      params.chunks,
+    );
 
     await api.patch(`/scripts/${encodeURIComponent(params.scriptId)}`, {
       voice_id: params.voiceId,
@@ -5975,7 +5981,9 @@ export function GeneratePageInner() {
 
       const sentencePayload = buildRenderSentencePayload(sentences);
       const useLocalRenderTransport = shouldUseLocalRenderTransport();
-      const audioUrl = await resolveRenderAudioUrl(useLocalRenderTransport);
+      const audioUrl = voiceOver
+        ? null
+        : await resolveRenderAudioUrl(useLocalRenderTransport);
       const imageUrls = await buildRenderImageUrls(sentences, useLocalRenderTransport);
       const secondaryImageUrls = await buildRenderSecondaryImageUrls(
         sentences,
@@ -5983,10 +5991,11 @@ export function GeneratePageInner() {
       );
       const requiresMultipartTextBackgroundVideos =
         hasTextBackgroundVideoUploadsForRender(sentences);
+      const requiresMultipartVoiceOver = Boolean(voiceOver);
 
       let res: Response | null = null;
 
-      if (!requiresMultipartTextBackgroundVideos) {
+      if (!requiresMultipartTextBackgroundVideos && !requiresMultipartVoiceOver && audioUrl) {
         res = await fetch(`${API_URL}/videos/url`, {
           method: 'POST',
           headers: {
@@ -6021,7 +6030,7 @@ export function GeneratePageInner() {
         const fallbackForm = new FormData();
         if (voiceOver) {
           fallbackForm.append('voiceOver', voiceOver);
-        } else {
+        } else if (audioUrl) {
           fallbackForm.append('audioUrl', audioUrl);
         }
         fallbackForm.append('sentences', JSON.stringify(sentencePayload));
@@ -9461,7 +9470,7 @@ export function GeneratePageInner() {
           payload.push({
             text: s.text,
             voice_over_url: s.voiceOverFile
-              ? await persistSentenceVoiceFileToCloudinary({
+              ? await persistSentenceVoiceFileToManagedStorage({
                   file: s.voiceOverFile,
                   sentenceId: s.id,
                 })
@@ -9718,7 +9727,7 @@ export function GeneratePageInner() {
       };
 
       const fullSentencePayload = await buildSentencePayload(fullSnapshot.sentences, 'full');
-      const fullVoiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(
+      const fullVoiceOverChunksPayload = await persistVoiceOverChunksToManagedStorage(
         fullSnapshot.voiceOverChunks,
       );
 
@@ -9795,7 +9804,7 @@ export function GeneratePageInner() {
             // Optionally attach a voice-over to the short if available
             let shortVoiceId = snap?.savedVoiceId ?? null;
             let shortVoiceLibraryUrl = snap?.voiceLibraryUrl ?? null;
-            const shortVoiceOverChunksPayload = await persistVoiceOverChunksToCloudinary(
+            const shortVoiceOverChunksPayload = await persistVoiceOverChunksToManagedStorage(
               snap?.voiceOverChunks ?? [],
             );
             const persistedShortVoiceChunks = syncPersistedVoiceChunksIntoState(

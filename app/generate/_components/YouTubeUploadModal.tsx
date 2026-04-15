@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { api } from '@/lib/api';
-import { uploadToCloudinaryUnsigned } from '@/lib/cloudinary';
+import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import {
   WallpaperGeneratorSection,
   YOUTUBE_WALLPAPER_THEME,
@@ -150,204 +150,25 @@ export function YouTubeUploadModal({
       .filter((t) => t.length > 0);
   };
 
-  const isCloudinaryUrl = (url: string) => {
-    return /^(https?:\/\/)?res\.cloudinary\.com\//i.test(url || '');
-  };
-
-  const getFileNameFromUrl = (urlString: string): string => {
-    try {
-      const u = new URL(urlString);
-      const last = (u.pathname.split('/').pop() || '').trim();
-      if (last && /\.(mp4|mov|webm|mkv)$/i.test(last)) return last;
-    } catch {
-      // ignore
-    }
-    return 'video.mp4';
-  };
-
-  const fetchWithTimeout = async (url: string, timeoutMs: number) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { signal: controller.signal });
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  const downloadVideoAsFile = async (url: string, timeoutMs: number): Promise<File> => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const res = await fetch(url, {
-        signal: controller.signal,
-        // Avoid any caching weirdness when repeatedly retrying the same local URL.
-        cache: 'no-store',
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(
-          `Failed to download video before Cloudinary upload (${res.status}): ${text || res.statusText}`,
-        );
-      }
-
-      const contentType = res.headers.get('content-type') || 'video/mp4';
-      const contentLengthHeader = res.headers.get('content-length');
-      const expectedLength = contentLengthHeader ? Number(contentLengthHeader) : null;
-
-      const fileName = getFileNameFromUrl(url);
-
-      // Prefer streaming so we can detect stalled connections.
-      const body = res.body;
-      if (body && typeof body.getReader === 'function') {
-        const reader = body.getReader();
-        const chunks: ArrayBuffer[] = [];
-        let received = 0;
-
-        while (true) {
-          // If the server stops sending bytes (but keeps the connection open), abort.
-          const stallMs = 60_000;
-          let stallTimer: ReturnType<typeof setTimeout> | null = null;
-          const { done, value } = await Promise.race([
-            reader.read(),
-            new Promise<never>((_, reject) => {
-              stallTimer = setTimeout(() => {
-                controller.abort();
-                reject(
-                  new Error(
-                    'Video download stalled (no progress for 60s). This can happen if the backend /static server keeps the connection open without finishing the MP4 response.',
-                  ),
-                );
-              }, stallMs);
-            }),
-          ]).finally(() => {
-            if (stallTimer) clearTimeout(stallTimer);
-          });
-          if (done) break;
-          if (value) {
-            // Convert to a real ArrayBuffer slice so it matches BlobPart types reliably.
-            const ab = value.buffer.slice(
-              value.byteOffset,
-              value.byteOffset + value.byteLength,
-            );
-            chunks.push(ab);
-            received += value.byteLength;
-          }
-        }
-
-        if (received === 0) {
-          throw new Error(
-            'Downloaded video is empty (0 bytes). This usually means the server closed the connection early or the static route is misconfigured.',
-          );
-        }
-
-        if (expectedLength && Number.isFinite(expectedLength) && received < expectedLength) {
-          throw new Error(
-            `Downloaded incomplete video (${received}/${expectedLength} bytes). Try reloading and re-rendering; also confirm /static/videos responses complete in the browser.`,
-          );
-        }
-
-        return new File(chunks, fileName, { type: contentType });
-      }
-
-      // Fallback: buffer whole response.
-      const buffer = await res.arrayBuffer();
-      if (!buffer || buffer.byteLength === 0) {
-        throw new Error(
-          'Downloaded video is empty (0 bytes). This usually means the server closed the connection early or the static route is misconfigured.',
-        );
-      }
-      return new File([buffer], fileName, { type: contentType });
-    } catch (err: unknown) {
-      const isAbort =
-        typeof err === 'object' &&
-        err !== null &&
-        'name' in err &&
-        (err as { name?: unknown }).name === 'AbortError';
-
-      if (isAbort) {
-        throw new Error(
-          'Timed out while downloading the rendered video bytes. Large videos can take a while. Confirm the /static/videos URL stays open and downloading in the browser.',
-        );
-      }
-
-      throw err;
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
   const ensureYoutubePublicVideoUrl = async (inputUrl: string): Promise<string> => {
     const trimmed = String(inputUrl ?? '').trim();
     if (!trimmed) throw new Error('Missing video URL');
 
-    // If it's already publicly reachable (Cloudinary), no extra work.
-    if (isCloudinaryUrl(trimmed)) return trimmed;
-
-    // Cache per source videoUrl so we don't re-upload on retries.
     if (cloudinaryCachedForVideoUrl === trimmed && cloudinaryCachedUrl) {
       return cloudinaryCachedUrl;
-    }
-    // Browser security: an HTTPS page cannot fetch an HTTP localhost URL (mixed content).
-    // This commonly happens when the frontend is on Vercel (https) but rendering is local (http://127.0.0.1).
-    if (
-      typeof window !== 'undefined' &&
-      window.location?.protocol === 'https:' &&
-      /^http:\/\//i.test(trimmed)
-    ) {
-      try {
-        const parsed = new URL(trimmed);
-        const host = (parsed.hostname || '').toLowerCase();
-        const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-        if (isLocal) {
-          throw new Error(
-            'Cannot upload this video for YouTube because the app is running on HTTPS but the rendered video URL is HTTP (localhost). Your browser blocks downloading it (mixed content). Run the frontend locally (http) or expose the local backend over HTTPS (e.g. via a tunnel) so the video URL is https.',
-          );
-        }
-      } catch {
-        // ignore URL parsing errors here; fetch will error with a useful message.
-      }
     }
 
     setCloudinaryStage('downloading');
     try {
-      let file: File;
-      try {
-        // End-to-end timeout (fetch + reading the full body).
-        // 10 minutes is deliberate for longer renders and slower disks.
-        file = await downloadVideoAsFile(trimmed, 600_000);
-      } catch (err: unknown) {
-        const isAbort =
-          typeof err === 'object' &&
-          err !== null &&
-          'name' in err &&
-          (err as { name?: unknown }).name === 'AbortError';
-
-        if (isAbort) {
-          throw new Error(
-            'Timed out while downloading the rendered video. Make sure the backend is running and the /static/videos URL is reachable.',
-          );
-        }
-
-        // This is what browsers typically throw for CORS/mixed-content/network failures.
-        throw new Error(
-          err instanceof Error && err.message.trim()
-            ? err.message
-            : 'Failed to download the rendered video from the provided URL. If the request appears in the Network tab but then fails, this is often a CORS issue on the backend /static route. Also confirm the backend is running and the URL opens in a new tab.',
-        );
-      }
-
-      setCloudinaryStage('uploading');
-      const cloudinaryUrl = await uploadToCloudinaryUnsigned(file, {
+      const preparedUrl = await ensureManagedPublicUrl(trimmed, {
         resourceType: 'video',
         folder: 'auto-video-generator/youtube-uploads',
+        filename: 'youtube-upload.mp4',
       });
 
       setCloudinaryCachedForVideoUrl(trimmed);
-      setCloudinaryCachedUrl(cloudinaryUrl);
-      return cloudinaryUrl;
+      setCloudinaryCachedUrl(preparedUrl);
+      return preparedUrl;
     } finally {
       setCloudinaryStage('idle');
     }
@@ -507,11 +328,10 @@ export function YouTubeUploadModal({
       const tags = parseTagsPreserveOrder(youtubeTags);
       tags.join(',');
       const token = localStorage.getItem('token');
-      // 1) Upload the rendered video to Cloudinary first, then use that public URL
-      // for YouTube upload (Vercel must be able to download it).
+      // 1) Ensure the rendered video has a stable public URL before upload.
       const publicVideoUrl = await ensureYoutubePublicVideoUrl(videoUrl);
 
-      // 2) Upload to YouTube using the Cloudinary URL.
+      // 2) Upload to YouTube using the prepared public URL.
       const response = await fetch(`${YOUTUBE_API_URL}/youtube/upload`, {
         method: 'POST',
         headers: {
@@ -1055,12 +875,7 @@ export function YouTubeUploadModal({
               {cloudinaryStage === 'downloading' ? (
                 <>
                   <Loader2 className="mr-2.5 h-5 w-5 animate-spin" />
-                  <span>Downloading rendered video...</span>
-                </>
-              ) : cloudinaryStage === 'uploading' ? (
-                <>
-                  <Loader2 className="mr-2.5 h-5 w-5 animate-spin" />
-                  <span>Uploading video to Cloudinary...</span>
+                  <span>Preparing public video URL...</span>
                 </>
               ) : isUploadingToYouTube ? (
                 <>
