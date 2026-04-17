@@ -2833,39 +2833,6 @@ function SentenceEditorCardComponent({
                     </p>
                   </div>
                 </div>
-
-                <div className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-                  <div className="flex flex-col justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-950">Overlay asset</p>
-                      <p className="text-xs text-emerald-900/75">
-                        Upload or replace the overlay sticker, badge, or animated asset for this scene.
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => document.getElementById(`sentence-overlay-asset-${item.id}`)?.click()}
-                        className="h-9 rounded-xl border-emerald-200 text-emerald-800 hover:bg-emerald-100"
-                      >
-                        <Upload className="mr-2 h-4 w-4" />
-                        {overlayPreviewUrl ? 'Replace' : 'Upload'}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openImageEffectsModal('overlay')}
-                        className="h-9 rounded-xl border-emerald-200 text-emerald-800 hover:bg-emerald-100"
-                      >
-                        <SlidersHorizontal className="mr-2 h-4 w-4" />
-                        Edit
-                      </Button>
-                    </div>
-                  </div>
-                </div>
               </div>
             ) : isTextSceneTab ? (
               <div className="space-y-4">

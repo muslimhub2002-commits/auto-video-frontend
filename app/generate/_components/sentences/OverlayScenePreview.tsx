@@ -33,6 +33,33 @@ const clamp = (value: number, min: number, max: number) => {
   return Math.min(max, Math.max(min, value));
 };
 
+const LEGACY_OVERLAY_WIDTH_PERCENT = 26;
+const LEGACY_OVERLAY_HEIGHT_PERCENT = 22;
+const LEGACY_OVERLAY_OFFSET_X = 0;
+const LEGACY_OVERLAY_OFFSET_Y = -4;
+const LEGACY_OVERLAY_SCALE = 1;
+const LEGACY_OVERLAY_ROTATION_DEG = 0;
+
+const isApproximately = (value: number | undefined, expected: number) => {
+  return Math.abs((value ?? expected) - expected) < 0.001;
+};
+
+const usesImageTabSizedOverlay = (settings: OverlaySettings) => {
+  return (
+    isApproximately(settings.widthPercent, LEGACY_OVERLAY_WIDTH_PERCENT) &&
+    isApproximately(settings.heightPercent, LEGACY_OVERLAY_HEIGHT_PERCENT)
+  );
+};
+
+const usesLegacyOverlayTransformDefaults = (settings: OverlaySettings) => {
+  return (
+    isApproximately(settings.offsetX, LEGACY_OVERLAY_OFFSET_X) &&
+    isApproximately(settings.offsetY, LEGACY_OVERLAY_OFFSET_Y) &&
+    isApproximately(settings.scale, LEGACY_OVERLAY_SCALE) &&
+    isApproximately(settings.rotationDeg, LEGACY_OVERLAY_ROTATION_DEG)
+  );
+};
+
 const inferOverlayIsImage = (url: string | null, mimeType: string | null) => {
   const normalizedMimeType = String(mimeType ?? '').trim().toLowerCase();
   if (normalizedMimeType.startsWith('image/')) return true;
@@ -67,6 +94,9 @@ export function OverlayScenePreview({
   );
   const resolvedTextValue = resolveTextAnimationText(text, sentenceText);
   const showText = resolvedOverlay.includeText === true && resolvedTextValue.length > 0;
+  const shouldUseImageTabSizing = usesImageTabSizedOverlay(resolvedOverlay);
+  const shouldUseLegacyCenteredTransform =
+    shouldUseImageTabSizing && usesLegacyOverlayTransformDefaults(resolvedOverlay);
   const overlayTextAnimationSettings: TextAnimationSettings = {
     ...(textAnimationSettings &&
     typeof textAnimationSettings === 'object' &&
@@ -91,18 +121,30 @@ export function OverlayScenePreview({
     (backgroundMode === 'video' && !sceneVideoUrl);
   const overlayFrameStyle: CSSProperties = {
     position: 'absolute',
-    left: `calc(50% + ${resolvedOverlay.offsetX ?? 0}%)`,
-    top: `calc(50% + ${resolvedOverlay.offsetY ?? 0}%)`,
-    width: `${resolvedOverlay.widthPercent ?? 26}%`,
-    height: `${resolvedOverlay.heightPercent ?? 22}%`,
-    transform: `translate(-50%, -50%) scale(${resolvedOverlay.scale ?? 1}) rotate(${resolvedOverlay.rotationDeg ?? 0}deg)`,
+    ...(shouldUseImageTabSizing
+      ? {
+          inset: 0,
+          transform: shouldUseLegacyCenteredTransform
+            ? undefined
+            : `translate(${resolvedOverlay.offsetX ?? 0}%, ${resolvedOverlay.offsetY ?? 0}%) scale(${resolvedOverlay.scale ?? 1}) rotate(${resolvedOverlay.rotationDeg ?? 0}deg)`,
+        }
+      : {
+          left: `calc(50% + ${resolvedOverlay.offsetX ?? 0}%)`,
+          top: `calc(50% + ${resolvedOverlay.offsetY ?? 0}%)`,
+          width: `${resolvedOverlay.widthPercent ?? 26}%`,
+          height: `${resolvedOverlay.heightPercent ?? 22}%`,
+          transform: `translate(-50%, -50%) scale(${resolvedOverlay.scale ?? 1}) rotate(${resolvedOverlay.rotationDeg ?? 0}deg)`,
+        }),
     transformOrigin: 'center center',
     opacity: resolvedOverlay.opacity ?? 1,
     zIndex: 20,
-    animation: overlayAssetUrl
+    animation: !shouldUseImageTabSizing && overlayAssetUrl
       ? `av-overlay-float ${overlayAnimationDurationSeconds}s ease-in-out infinite alternate`
       : undefined,
   };
+  const overlayAssetClassName = shouldUseImageTabSizing
+    ? 'block h-full w-full object-cover'
+    : 'block h-full w-full object-contain';
 
   return (
     <div
@@ -188,12 +230,12 @@ export function OverlayScenePreview({
             <img
               src={overlayAssetUrl}
               alt="Overlay asset"
-              className="block h-full w-full object-contain"
+              className={overlayAssetClassName}
             />
           ) : (
             <video
               src={overlayAssetUrl}
-              className="block h-full w-full object-contain"
+              className={overlayAssetClassName}
               autoPlay
               muted
               loop
@@ -201,7 +243,7 @@ export function OverlayScenePreview({
             />
           )
         ) : (
-          <div className="flex h-full w-full items-center justify-center rounded-[1.2rem] border-2 border-dashed border-white/20 bg-slate-950/35 px-4 text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/70">
+          <div className={`flex h-full w-full items-center justify-center border-2 border-dashed border-white/20 bg-slate-950/35 px-4 text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/70 ${shouldUseImageTabSizing ? '' : 'rounded-[1.2rem]'}`}>
             Upload or choose an overlay asset
           </div>
         )}
