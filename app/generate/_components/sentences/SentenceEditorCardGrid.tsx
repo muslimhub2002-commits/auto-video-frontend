@@ -73,6 +73,7 @@ import {
   getVisualEffectLabel,
   ImageEffectPreview,
   IMAGE_MOTION_EFFECT_SELECT_VALUES,
+  normalizeOverlaySettings,
   normalizeImageFilterSettings,
   isImageMotionEffectSelectValue,
   normalizeImageMotionSettings,
@@ -83,6 +84,8 @@ import {
   type ImageFilterSettings,
   type ImageMotionSettings,
   type MotionEffectPresetDto,
+  type OverlayPresetDto,
+  type OverlaySettings,
 } from './ImageEffectPreview';
 import {
   getDefaultTextAnimationSettings,
@@ -97,6 +100,7 @@ import {
 } from './TextAnimationPreview';
 import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
+import { OverlayScenePreview } from './OverlayScenePreview';
 import { TextPreviewOverlay } from './TextPreviewOverlay';
 import {
   DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
@@ -414,9 +418,11 @@ type SentenceEditorCardProps = {
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   textAnimationPresets: TextAnimationPresetDto[];
+  overlayPresets: OverlayPresetDto[];
   isLoadingImageFilterPresets: boolean;
   isLoadingMotionEffectPresets: boolean;
   isLoadingTextAnimationPresets: boolean;
+  isLoadingOverlayPresets: boolean;
   onSentencePatch: (patch: Partial<SentenceItem>) => void;
   onSaveImageFilterPreset: (
     title: string,
@@ -445,6 +451,14 @@ type SentenceEditorCardProps = {
     settings: TextAnimationSettings,
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
+  onSaveOverlayPreset: (params: {
+    title: string;
+    settings: OverlaySettings;
+    file?: File | null;
+    sourceUrl?: string | null;
+    overlayId?: string | null;
+  }) => Promise<OverlayPresetDto | null> | OverlayPresetDto | null;
+  onDeleteOverlayPreset: (overlayId: string) => Promise<boolean> | boolean;
   onGenerateSingleImageLookWithAi: (
     sentenceId: string,
     params: {
@@ -568,9 +582,11 @@ function SentenceEditorCardComponent({
   imageFilterPresets,
   motionEffectPresets,
   textAnimationPresets,
+  overlayPresets,
   isLoadingImageFilterPresets,
   isLoadingMotionEffectPresets,
   isLoadingTextAnimationPresets,
+  isLoadingOverlayPresets,
   onSentencePatch,
   onSaveImageFilterPreset,
   onUpdateImageFilterPreset,
@@ -581,6 +597,8 @@ function SentenceEditorCardComponent({
   onSaveTextAnimationPreset,
   onUpdateTextAnimationPreset,
   onDeleteTextAnimationPreset,
+  onSaveOverlayPreset,
+  onDeleteOverlayPreset,
   onGenerateSingleImageLookWithAi,
   onGenerateSingleImageMotionWithAi,
 
@@ -646,6 +664,7 @@ function SentenceEditorCardComponent({
   const isImageSceneTab = sceneTab === 'image';
   const isVideoSceneTab = sceneTab === 'video';
   const isTextSceneTab = sceneTab === 'text';
+  const isOverlaySceneTab = sceneTab === 'overlay';
   const mediaMode: 'single' | 'frames' = isVideoSceneTab ? 'frames' : 'single';
 
   const soundEffects = useMemo(
@@ -1051,7 +1070,7 @@ function SentenceEditorCardComponent({
 
   const [isForcedCharactersOpen, setIsForcedCharactersOpen] = useState(false);
   const [isForcedLocationOpen, setIsForcedLocationOpen] = useState(false);
-  const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion' | 'text'>('visual');
+  const [imageEffectsTab, setImageEffectsTab] = useState<'visual' | 'motion' | 'text' | 'overlay'>('visual');
   const [isImageEffectsDetailModalOpen, setIsImageEffectsDetailModalOpen] = useState(false);
   const [isTextPreviewOverlayOpen, setIsTextPreviewOverlayOpen] = useState(false);
   const [isTextPreviewOverlayClosing, setIsTextPreviewOverlayClosing] = useState(false);
@@ -1060,8 +1079,15 @@ function SentenceEditorCardComponent({
   const shouldAnimateImagePreview = isImageSceneTab;
 
   useEffect(() => {
+    if (isOverlaySceneTab) {
+      if (imageEffectsTab !== 'overlay') {
+        setImageEffectsTab('overlay');
+      }
+      return;
+    }
+
     if (isTextSceneTab) {
-      if (imageEffectsTab === 'motion') {
+      if (imageEffectsTab === 'motion' || imageEffectsTab === 'overlay') {
         setImageEffectsTab('text');
       }
       return;
@@ -1070,7 +1096,7 @@ function SentenceEditorCardComponent({
     if (!isImageSceneTab && imageEffectsTab === 'motion') {
       setImageEffectsTab('visual');
     }
-  }, [imageEffectsTab, isImageSceneTab, isTextSceneTab]);
+  }, [imageEffectsTab, isImageSceneTab, isOverlaySceneTab, isTextSceneTab]);
 
   const handleSoundEffectsDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -1252,6 +1278,31 @@ function SentenceEditorCardComponent({
     () => getTextAnimationEffectLabel(resolvedTextAnimationEffect),
     [resolvedTextAnimationEffect],
   );
+  const resolvedOverlaySettings = useMemo(
+    () => normalizeOverlaySettings(item.overlaySettings, 'image'),
+    [item.overlaySettings],
+  );
+  const selectedOverlayPreset = useMemo(
+    () => overlayPresets.find((preset) => preset.id === item.customOverlayId) ?? null,
+    [item.customOverlayId, overlayPresets],
+  );
+  const selectedOverlayPresetSettings = useMemo(
+    () =>
+      selectedOverlayPreset
+        ? normalizeOverlaySettings(
+            selectedOverlayPreset.settings,
+            resolvedOverlaySettings.backgroundMode ?? 'image',
+          )
+        : null,
+    [resolvedOverlaySettings.backgroundMode, selectedOverlayPreset],
+  );
+  const isOverlayDirtyFromSelectedPreset = Boolean(
+    selectedOverlayPreset &&
+      (Boolean(item.overlayFile) ||
+        String(selectedOverlayPreset.url ?? '').trim() !== String(item.overlayUrl ?? '').trim() ||
+        String(selectedOverlayPreset.mimeType ?? '').trim() !== String(item.overlayMimeType ?? '').trim() ||
+        JSON.stringify(selectedOverlayPresetSettings) !== JSON.stringify(resolvedOverlaySettings)),
+  );
   const quickTextAnimationSelectValue = useMemo(
     () =>
       item.customTextAnimationId
@@ -1260,6 +1311,15 @@ function SentenceEditorCardComponent({
           ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
           : `builtin:${resolvedTextAnimationEffect}`,
     [item.customTextAnimationId, item.textAnimationSettings?.presetKey, resolvedTextAnimationEffect],
+  );
+  const quickOverlaySelectValue = useMemo(
+    () =>
+      item.customOverlayId && !isOverlayDirtyFromSelectedPreset
+        ? `custom:${item.customOverlayId}`
+        : item.overlayFile || item.overlayUrl
+          ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
+          : '__none__',
+    [isOverlayDirtyFromSelectedPreset, item.customOverlayId, item.overlayFile, item.overlayUrl],
   );
 
   const imagePreviewObjectUrl = useManagedObjectUrl(item.image);
@@ -1270,6 +1330,7 @@ function SentenceEditorCardComponent({
   const referencePreviewObjectUrl = useManagedObjectUrl(item.referenceImage);
   const textBackgroundPreviewObjectUrl = useManagedObjectUrl(item.textBackgroundImage);
   const textBackgroundVideoPreviewObjectUrl = useManagedObjectUrl(item.textBackgroundVideo);
+  const overlayPreviewObjectUrl = useManagedObjectUrl(item.overlayFile);
 
   const imagePreviewUrl = imagePreviewObjectUrl ?? item.imageUrl ?? null;
   const videoPreviewUrl = videoPreviewObjectUrl ?? item.videoUrl ?? null;
@@ -1281,6 +1342,7 @@ function SentenceEditorCardComponent({
     textBackgroundPreviewObjectUrl ?? item.textBackgroundImageUrl ?? null;
   const textBackgroundVideoPreviewUrl =
     textBackgroundVideoPreviewObjectUrl ?? item.textBackgroundVideoUrl ?? null;
+  const overlayPreviewUrl = overlayPreviewObjectUrl ?? item.overlayUrl ?? null;
   const textPreviewBackgroundUrl =
     resolvedTextAnimationSettings.backgroundMode === 'image'
       ? textBackgroundPreviewUrl
@@ -1449,6 +1511,43 @@ function SentenceEditorCardComponent({
     });
   };
 
+  const handleOverlayPresetSelect = (value: string) => {
+    if (value === '__none__') {
+      onSentencePatch({
+        customOverlayId: null,
+        overlayFile: null,
+        overlayUrl: null,
+        overlayMimeType: null,
+        overlaySettings: {
+          ...resolvedOverlaySettings,
+          presetKey: 'custom',
+        },
+      });
+      return;
+    }
+
+    if (!value.startsWith('custom:')) return;
+
+    const presetId = value.slice('custom:'.length);
+    if (presetId === TEMPORARY_CUSTOM_PRESET_ID) return;
+
+    const preset = overlayPresets.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+
+    const nextSettings = normalizeOverlaySettings(
+      preset.settings,
+      resolvedOverlaySettings.backgroundMode ?? 'image',
+    );
+
+    onSentencePatch({
+      customOverlayId: preset.id,
+      overlayFile: null,
+      overlayUrl: preset.url,
+      overlayMimeType: preset.mimeType ?? null,
+      overlaySettings: { ...nextSettings, presetKey: 'custom' },
+    });
+  };
+
   const updateTextAnimationSettings = (patch: Partial<TextAnimationSettings>) => {
     onSentencePatch({
       customTextAnimationId: null,
@@ -1458,6 +1557,25 @@ function SentenceEditorCardComponent({
         presetKey: 'custom',
       },
     });
+  };
+
+  const handleOverlayUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) return;
+
+    onSentencePatch({
+      customOverlayId: null,
+      overlayFile: file,
+      overlayUrl: null,
+      overlayMimeType: file.type || null,
+      overlaySettings: {
+        ...resolvedOverlaySettings,
+        presetKey: 'custom',
+      },
+    });
+
+    event.target.value = '';
   };
 
   const handleTextBackgroundUpload = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1498,7 +1616,7 @@ function SentenceEditorCardComponent({
     event.target.value = '';
   };
 
-  const openImageEffectsModal = (tab: 'visual' | 'motion' | 'text') => {
+  const openImageEffectsModal = (tab: 'visual' | 'motion' | 'text' | 'overlay') => {
     setImageEffectsTab(tab);
     setIsImageEffectsDetailModalOpen(true);
   };
@@ -1560,6 +1678,13 @@ function SentenceEditorCardComponent({
     setIsVideoModeMenuMounted(false);
   }, [item.videoUrl]);
 
+  const detailEnabledTabs = useMemo<Array<'visual' | 'motion' | 'text' | 'overlay'>>(() => {
+    if (isOverlaySceneTab) return ['overlay'];
+    if (isTextSceneTab) return ['text'];
+    if (isImageSceneTab) return ['visual', 'motion'];
+    return ['visual'];
+  }, [isImageSceneTab, isOverlaySceneTab, isTextSceneTab]);
+
   return (
     <div
       className="group relative bg-white rounded-2xl border border-gray-200 hover:border-indigo-200 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden"
@@ -1567,7 +1692,6 @@ function SentenceEditorCardComponent({
       <div className="p-4">
         {/* Centered media mode tabs (applies to whole scene) */}
         <div className="flex items-center justify-between pb-4 gap-3">
-          <div className="w-12" />
           <div className="inline-flex items-center gap-1 p-1 bg-linear-to-br from-gray-50 to-gray-100 rounded-2xl shadow-sm border border-gray-200">
             <Button
               type="button"
@@ -1581,7 +1705,7 @@ function SentenceEditorCardComponent({
               }
             >
               <ImageIcon className="h-4 w-4 mr-2" />
-              Image
+              {isImageSceneTab && <span>Image</span>}
             </Button>
             <Button
               type="button"
@@ -1595,7 +1719,7 @@ function SentenceEditorCardComponent({
               }
             >
               <VideoIcon className="h-4 w-4 mr-2" />
-              Video
+              {isVideoSceneTab && <span>Video</span>}
             </Button>
             <Button
               type="button"
@@ -1609,7 +1733,21 @@ function SentenceEditorCardComponent({
               }
             >
               <FileText className="h-4 w-4 mr-2" />
-              Text
+              {isTextSceneTab && <span>Text</span>}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => onSentencePatch({ sceneTab: 'overlay', mediaMode: 'single' })}
+              className={
+                isOverlaySceneTab
+                  ? 'h-9 px-4 text-sm font-bold rounded-xl bg-white text-indigo-600 shadow-md hover:bg-white hover:text-indigo-600'
+                  : 'h-9 px-4 text-sm font-semibold rounded-xl text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              {isOverlaySceneTab && <span>Overlay</span>}
             </Button>
           </div>
 
@@ -1657,6 +1795,48 @@ function SentenceEditorCardComponent({
               >
                 <SlidersHorizontal className="mr-2 h-4 w-4" />
                 Edit animation
+              </Button>
+            </div>
+          ) : isOverlaySceneTab ? (
+            <div className="shrink-0 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-1.5 shadow-sm">
+              <Select
+                value={quickOverlaySelectValue}
+                onValueChange={handleOverlayPresetSelect}
+                disabled={isLoadingOverlayPresets}
+              >
+                <SelectTrigger
+                  className="h-9 min-w-72 border-emerald-200 bg-white text-gray-700 shadow-sm"
+                  title={selectedOverlayPreset ? `Overlay preset: ${selectedOverlayPreset.title}` : 'Overlay preset'}
+                >
+                  <div className="flex items-center gap-2">
+                    <Upload className="h-4 w-4" />
+                    <SelectValue placeholder="Overlay preset" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  <SelectItem value="__none__">No saved preset</SelectItem>
+                  {overlayPreviewUrl ? (
+                    <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                      Custom draft
+                    </SelectItem>
+                  ) : null}
+                  {overlayPresets.map((preset) => (
+                    <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                      {preset.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => openImageEffectsModal('overlay')}
+                className="h-9 rounded-xl border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100"
+              >
+                <SlidersHorizontal className="mr-2 h-4 w-4" />
+                Edit overlay
               </Button>
             </div>
           ) : (
@@ -2612,7 +2792,82 @@ function SentenceEditorCardComponent({
 
           {/* Media Section */}
           <div className="space-y-4 lg:col-span-2 lg:pl-4">
-            {isTextSceneTab ? (
+            {isOverlaySceneTab ? (
+              <div className="space-y-4">
+                <input
+                  type="file"
+                  id={`sentence-overlay-asset-${item.id}`}
+                  accept="image/*,video/*"
+                  onChange={handleOverlayUpload}
+                  className="hidden"
+                />
+
+                <div
+                  className="group/overlay-preview relative overflow-hidden rounded-2xl border-2 border-emerald-200 bg-slate-950 shadow-lg transition-all duration-200 hover:border-emerald-300 hover:shadow-xl cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openImageEffectsModal('overlay')}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    openImageEffectsModal('overlay');
+                  }}
+                  aria-label="Open overlay scene editor"
+                >
+                  <OverlayScenePreview
+                    isShortVideo={isShortVideo}
+                    sceneImageUrl={imagePreviewUrl}
+                    sceneVideoUrl={videoPreviewUrl}
+                    overlayAssetUrl={overlayPreviewUrl}
+                    overlayMimeType={item.overlayMimeType ?? null}
+                    overlaySettings={resolvedOverlaySettings}
+                    sentenceText={item.text}
+                    text={item.textAnimationText}
+                    textAnimationEffect={resolvedTextAnimationEffect}
+                    textAnimationSettings={item.textAnimationSettings ?? null}
+                    className={`w-full ${videoAspectClass}`}
+                  />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/70 via-black/15 to-transparent px-4 py-3 opacity-0 transition-opacity duration-200 group-hover/overlay-preview:opacity-100 group-focus-within/overlay-preview:opacity-100">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">
+                      Open overlay editor
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                  <div className="flex flex-col justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-950">Overlay asset</p>
+                      <p className="text-xs text-emerald-900/75">
+                        Upload or replace the overlay sticker, badge, or animated asset for this scene.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => document.getElementById(`sentence-overlay-asset-${item.id}`)?.click()}
+                        className="h-9 rounded-xl border-emerald-200 text-emerald-800 hover:bg-emerald-100"
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        {overlayPreviewUrl ? 'Replace' : 'Upload'}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openImageEffectsModal('overlay')}
+                        className="h-9 rounded-xl border-emerald-200 text-emerald-800 hover:bg-emerald-100"
+                      >
+                        <SlidersHorizontal className="mr-2 h-4 w-4" />
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : isTextSceneTab ? (
               <div className="space-y-4">
                 <div
                   className="group/text-preview relative overflow-hidden rounded-2xl border-2 border-amber-200 bg-slate-950 shadow-lg transition-all duration-200 hover:border-amber-300 hover:shadow-xl cursor-zoom-in"
@@ -4104,9 +4359,12 @@ function SentenceEditorCardComponent({
           isOpen={isImageEffectsDetailModalOpen}
           isShortVideo={isShortVideo}
           activeTab={imageEffectsTab}
+          enabledTabs={detailEnabledTabs}
           previewImageUrl={detailPreviewUrl}
           previewTextInheritedImageUrl={imagePreviewUrl}
           previewTextInheritedVideoUrl={videoPreviewUrl}
+          previewOverlayInheritedImageUrl={imagePreviewUrl}
+          previewOverlayInheritedVideoUrl={videoPreviewUrl}
           sentenceText={item.text}
           visualEffect={item.visualEffect}
           imageMotionEffect={item.imageMotionEffect}
@@ -4119,17 +4377,23 @@ function SentenceEditorCardComponent({
           textBackgroundVideo={item.textBackgroundVideo ?? null}
           textBackgroundVideoUrl={item.textBackgroundVideoUrl ?? null}
           textBackgroundSavedVideoId={item.textBackgroundSavedVideoId ?? null}
+          overlayFile={item.overlayFile ?? null}
+          overlayUrl={item.overlayUrl ?? null}
+          overlayMimeType={item.overlayMimeType ?? null}
           customImageFilterId={item.customImageFilterId ?? null}
           customMotionEffectId={item.customMotionEffectId ?? null}
           customTextAnimationId={item.customTextAnimationId ?? null}
+          customOverlayId={item.customOverlayId ?? null}
           imageFilterSettings={item.imageFilterSettings ?? null}
           imageMotionSettings={item.imageMotionSettings ?? null}
           textAnimationSettings={item.textAnimationSettings ?? null}
+          overlaySettings={item.overlaySettings ?? null}
           retainedTemporaryLook={retainedTemporaryLook}
           retainedTemporaryMotion={retainedTemporaryMotion}
           imageFilterPresets={imageFilterPresets}
           motionEffectPresets={motionEffectPresets}
           textAnimationPresets={textAnimationPresets}
+          overlayPresets={overlayPresets}
           onClose={() => setIsImageEffectsDetailModalOpen(false)}
           onApply={({
             visualEffect,
@@ -4149,14 +4413,24 @@ function SentenceEditorCardComponent({
             textBackgroundVideo,
             textBackgroundVideoUrl,
             textBackgroundSavedVideoId,
+            customOverlayId,
+            overlayFile,
+            overlayUrl,
+            overlayMimeType,
+            overlaySettings,
           }) => {
             onSentencePatch({
               ...(imageEffectsTab === 'text'
                 ? {
-                  sceneTab: 'text' as const,
-                  mediaMode: 'single' as const,
-                }
-                : {}),
+                    sceneTab: 'text' as const,
+                    mediaMode: 'single' as const,
+                  }
+                : imageEffectsTab === 'overlay'
+                  ? {
+                      sceneTab: 'overlay' as const,
+                      mediaMode: 'single' as const,
+                    }
+                  : {}),
               visualEffect,
               customImageFilterId,
               imageFilterSettings,
@@ -4174,6 +4448,11 @@ function SentenceEditorCardComponent({
               textBackgroundVideo,
               textBackgroundVideoUrl,
               textBackgroundSavedVideoId,
+              customOverlayId,
+              overlayFile,
+              overlayUrl,
+              overlayMimeType,
+              overlaySettings,
             });
           }}
           onSaveImageFilterPreset={onSaveImageFilterPreset}
@@ -4185,6 +4464,8 @@ function SentenceEditorCardComponent({
           onSaveTextAnimationPreset={onSaveTextAnimationPreset}
           onUpdateTextAnimationPreset={onUpdateTextAnimationPreset}
           onDeleteTextAnimationPreset={onDeleteTextAnimationPreset}
+          onSaveOverlayPreset={onSaveOverlayPreset}
+          onDeleteOverlayPreset={onDeleteOverlayPreset}
           onGenerateLookWithAi={(params) => onGenerateSingleImageLookWithAi(item.id, params)}
           onGenerateMotionWithAi={(params) => onGenerateSingleImageMotionWithAi(item.id, params)}
         />
@@ -4226,9 +4507,11 @@ function areSentenceEditorCardPropsEqual(
     prev.imageFilterPresets === next.imageFilterPresets &&
     prev.motionEffectPresets === next.motionEffectPresets &&
     prev.textAnimationPresets === next.textAnimationPresets &&
+    prev.overlayPresets === next.overlayPresets &&
     prev.isLoadingImageFilterPresets === next.isLoadingImageFilterPresets &&
     prev.isLoadingMotionEffectPresets === next.isLoadingMotionEffectPresets &&
     prev.isLoadingTextAnimationPresets === next.isLoadingTextAnimationPresets &&
+    prev.isLoadingOverlayPresets === next.isLoadingOverlayPresets &&
     prev.enhanceError === next.enhanceError &&
     prev.isEnhancing === next.isEnhancing &&
     prev.isApplyingPrompt === next.isApplyingPrompt &&

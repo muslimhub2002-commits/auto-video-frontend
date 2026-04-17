@@ -70,8 +70,10 @@ import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
   getDefaultImageMotionSpeed,
+  getDefaultOverlaySettings,
   normalizeImageFilterSettings,
   normalizeImageMotionSettings,
+  normalizeOverlaySettings,
   resolveImageMotionSpeed,
 } from './_components/sentences/ImageEffectPreview';
 import type {
@@ -79,6 +81,8 @@ import type {
   ImageFilterSettings,
   ImageMotionSettings,
   MotionEffectPresetDto,
+  OverlayPresetDto,
+  OverlaySettings,
 } from './_components/sentences/ImageEffectPreview';
 import {
   getDefaultTextAnimationSettings,
@@ -149,6 +153,18 @@ type BackendSentenceDto = {
   textAnimationId?: string | null;
   text_animation_settings?: Record<string, unknown> | null;
   textAnimationSettings?: Record<string, unknown> | null;
+  overlay_id?: string | null;
+  overlayId?: string | null;
+  overlay_settings?: Record<string, unknown> | null;
+  overlaySettings?: Record<string, unknown> | null;
+  overlay?: {
+    id: string;
+    title: string;
+    url: string;
+    mime_type?: string | null;
+    mimeType?: string | null;
+    settings?: Record<string, unknown> | null;
+  } | null;
   image?: { id: string; image: string; prompt?: string | null } | null;
   secondaryImage?: { id: string; image: string; prompt?: string | null } | null;
   startFrameImage?: { id: string; image: string; prompt?: string | null } | null;
@@ -206,6 +222,26 @@ type PresetLibraryResponse<TPreset> = {
   total?: number;
   page?: number;
   limit?: number;
+};
+
+const normalizeOverlayPresetItem = (
+  item:
+    | (Partial<OverlayPresetDto> & { mime_type?: string | null })
+    | null
+    | undefined,
+): OverlayPresetDto | null => {
+  const id = String(item?.id ?? '').trim();
+  const url = String(item?.url ?? '').trim();
+  if (!id || !url) return null;
+
+  return {
+    id,
+    title: String(item?.title ?? '').trim() || 'Untitled overlay',
+    url,
+    mimeType:
+      String(item?.mimeType ?? item?.mime_type ?? '').trim() || null,
+    settings: normalizeSettingsObject(item?.settings) ?? getDefaultOverlaySettings('image'),
+  };
 };
 
 type BulkLookEffectResponse = {
@@ -576,7 +612,8 @@ function resolveSentenceSceneTab(
   if (
     sentence.sceneTab === 'image' ||
     sentence.sceneTab === 'video' ||
-    sentence.sceneTab === 'text'
+    sentence.sceneTab === 'text' ||
+    sentence.sceneTab === 'overlay'
   ) {
     return sentence.sceneTab;
   }
@@ -597,11 +634,30 @@ function resolveTextSceneBackgroundMode(
   );
 }
 
+function resolveOverlaySceneBackgroundMode(
+  sentence: Pick<SentenceItem, 'overlaySettings'>,
+): NonNullable<OverlaySettings['backgroundMode']> {
+  return normalizeOverlaySettings(sentence.overlaySettings, 'image').backgroundMode ?? 'image';
+}
+
 type TextSceneRenderBackgroundAsset = {
   backgroundMode: NonNullable<TextAnimationSettings['backgroundMode']>;
   transport: 'image' | 'video' | 'none';
   file: File | null;
   url: string | null;
+};
+
+type OverlaySceneRenderBackgroundAsset = {
+  backgroundMode: NonNullable<OverlaySettings['backgroundMode']>;
+  transport: 'image' | 'video' | 'none';
+  file: File | null;
+  url: string | null;
+};
+
+type OverlaySceneRenderAsset = {
+  file: File | null;
+  url: string | null;
+  mimeType: string | null;
 };
 
 function resolveTextSceneRenderBackgroundAsset(
@@ -663,6 +719,63 @@ function resolveTextSceneRenderBackgroundAsset(
     file: null,
     url: null,
   };
+}
+
+function resolveOverlaySceneRenderBackgroundAsset(
+  sentence: Pick<
+    SentenceItem,
+    'image' | 'imageUrl' | 'videoUrl' | 'overlaySettings'
+  >,
+): OverlaySceneRenderBackgroundAsset {
+  const backgroundMode = resolveOverlaySceneBackgroundMode(sentence);
+
+  if (backgroundMode === 'image') {
+    return {
+      backgroundMode,
+      transport: 'image',
+      file: sentence.image ?? null,
+      url: String(sentence.imageUrl ?? '').trim() || null,
+    };
+  }
+
+  if (backgroundMode === 'video') {
+    return {
+      backgroundMode,
+      transport: 'video',
+      file: null,
+      url: String(sentence.videoUrl ?? '').trim() || null,
+    };
+  }
+
+  return {
+    backgroundMode,
+    transport: 'none',
+    file: null,
+    url: null,
+  };
+}
+
+function resolveOverlaySceneRenderAsset(
+  sentence: Pick<SentenceItem, 'overlayFile' | 'overlayUrl' | 'overlayMimeType'>,
+): OverlaySceneRenderAsset {
+  return {
+    file: sentence.overlayFile ?? null,
+    url: String(sentence.overlayUrl ?? '').trim() || null,
+    mimeType: String(sentence.overlayMimeType ?? '').trim() || null,
+  };
+}
+
+function inferOverlayResourceType(
+  asset: Pick<OverlaySceneRenderAsset, 'url' | 'mimeType'>,
+): 'image' | 'video' {
+  const mimeType = String(asset.mimeType ?? '').trim().toLowerCase();
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('image/')) return 'image';
+
+  const url = String(asset.url ?? '').trim().toLowerCase();
+  return /\.(mp4|mov|m4v|webm|avi|mkv|ogv|ogg)(?:\?|#|$)/u.test(url)
+    ? 'video'
+    : 'image';
 }
 
 function serializeTextAnimationSettingsForRender(
@@ -1539,9 +1652,11 @@ export function GeneratePageInner() {
   const [imageFilterPresets, setImageFilterPresets] = useState<ImageFilterPresetDto[]>([]);
   const [motionEffectPresets, setMotionEffectPresets] = useState<MotionEffectPresetDto[]>([]);
   const [textAnimationPresets, setTextAnimationPresets] = useState<TextAnimationPresetDto[]>([]);
+  const [overlayPresets, setOverlayPresets] = useState<OverlayPresetDto[]>([]);
   const [isLoadingImageFilterPresets, setIsLoadingImageFilterPresets] = useState(false);
   const [isLoadingMotionEffectPresets, setIsLoadingMotionEffectPresets] = useState(false);
   const [isLoadingTextAnimationPresets, setIsLoadingTextAnimationPresets] = useState(false);
+  const [isLoadingOverlayPresets, setIsLoadingOverlayPresets] = useState(false);
   const [oneOffBackgroundSoundtrackUrl, setOneOffBackgroundSoundtrackUrl] = useState<string | null>(null);
   const [isUploadingBackgroundSoundtrack, setIsUploadingBackgroundSoundtrack] = useState(false);
   const [isSettingFavoriteBackgroundSoundtrack, setIsSettingFavoriteBackgroundSoundtrack] = useState(false);
@@ -2751,7 +2866,16 @@ export function GeneratePageInner() {
 
   const buildRenderSentencePayload = (
     sourceSentences: SentenceItem[],
-    options?: { clearLastTransition?: boolean },
+    options?: {
+      clearLastTransition?: boolean;
+      overlayTransportByIndex?: Array<
+        | {
+          url: string | null;
+          mimeType: string | null;
+        }
+        | null
+      >;
+    },
   ) => {
     return sourceSentences.map((s, index) => {
       const text = String(s.text ?? '');
@@ -2867,6 +2991,46 @@ export function GeneratePageInner() {
         };
       }
 
+      if (tab === 'overlay') {
+        const textAnimationEffect = resolveTextAnimationEffectFromSettings(
+          s.textAnimationSettings,
+          s.textAnimationEffect,
+        );
+        const overlayTransport = options?.overlayTransportByIndex?.[index] ?? null;
+        const overlayAsset = resolveOverlaySceneRenderAsset(s);
+        const overlayUrl = String(
+          overlayTransport?.url ?? overlayAsset.url ?? '',
+        ).trim();
+        const overlayMimeType = String(
+          overlayTransport?.mimeType ?? overlayAsset.mimeType ?? '',
+        ).trim();
+        const overlaySettings = normalizeOverlaySettings(s.overlaySettings, 'image');
+        const backgroundAsset = resolveOverlaySceneRenderBackgroundAsset(s);
+        const backgroundVideoUrl =
+          backgroundAsset.transport === 'video' ? backgroundAsset.url : null;
+
+        return {
+          text,
+          isSuspense: Boolean(s.isSuspense),
+          mediaType: 'overlay' as const,
+          overlaySettings,
+          ...(overlayUrl ? { overlayUrl } : {}),
+          ...(overlayMimeType ? { overlayMimeType } : {}),
+          ...(backgroundVideoUrl ? { videoUrl: backgroundVideoUrl } : {}),
+          textAnimationEffect,
+          textAnimationText: resolveTextAnimationText(s.textAnimationText, text),
+          textAnimationSettings: serializeTextAnimationSettingsForRender(
+            s,
+            textAnimationEffect,
+            effectiveIsShort,
+          ),
+          ...(transitionToNext ? { transitionToNext } : {}),
+          ...soundEffectsPatch,
+          ...soundEffectsAlignPatch,
+          ...transitionSoundEffectsPatch,
+        };
+      }
+
       const visualEffect = s.visualEffect ?? null;
 
       return {
@@ -2908,6 +3072,57 @@ export function GeneratePageInner() {
 
       const tab = resolveSentenceSceneTab(s);
       if (tab === 'video') continue;
+
+      if (tab === 'overlay') {
+        const backgroundAsset = resolveOverlaySceneRenderBackgroundAsset(s);
+
+        if (backgroundAsset.backgroundMode !== 'image') {
+          continue;
+        }
+
+        if (!backgroundAsset.file && !backgroundAsset.url) {
+          throw new Error(
+            `Failed to prepare the Image tab background for overlay scene ${index + 1}. Please provide an image or switch the overlay background mode.`,
+          );
+        }
+
+        if (backgroundAsset.file) {
+          imageUploads.push(backgroundAsset.file);
+          continue;
+        }
+
+        if (backgroundAsset.url?.startsWith('data:')) {
+          imageUploads.push(
+            dataUrlToFile(
+              backgroundAsset.url,
+              `sentence-${index + 1}-overlay-background.png`,
+            ),
+          );
+          continue;
+        }
+
+        if (backgroundAsset.url) {
+          try {
+            const res = await fetch(backgroundAsset.url);
+            if (!res.ok) {
+              throw new Error('Failed to fetch image URL');
+            }
+            const blob = await res.blob();
+            imageUploads.push(
+              new File([blob], `sentence-${index + 1}-overlay-background.png`, {
+                type: blob.type || 'image/png',
+              }),
+            );
+            continue;
+          } catch {
+            throw new Error(
+              `Failed to prepare the Image tab background for overlay scene ${index + 1}. Please re-select the image and try again.`,
+            );
+          }
+        }
+
+        continue;
+      }
 
       if (tab === 'text') {
         const backgroundAsset = resolveTextSceneRenderBackgroundAsset(s, effectiveIsShort);
@@ -3062,7 +3277,7 @@ export function GeneratePageInner() {
 
   const stageRenderAssetLocally = async (
     file: File,
-    kind: 'audio' | 'image',
+    kind: 'audio' | 'image' | 'video',
   ): Promise<string> => {
     const form = new FormData();
     form.append('file', file, file.name);
@@ -3152,6 +3367,57 @@ export function GeneratePageInner() {
       const tab = resolveSentenceSceneTab(sentence);
       if (tab === 'video') {
         return null;
+      }
+
+      if (tab === 'overlay') {
+        const backgroundAsset = resolveOverlaySceneRenderBackgroundAsset(sentence);
+
+        if (backgroundAsset.backgroundMode !== 'image') {
+          return null;
+        }
+
+        if (!backgroundAsset.url && !backgroundAsset.file) {
+          throw new Error(
+            `Missing an image background for overlay scene ${index + 1}. Please provide an image on the Image tab or switch the overlay background mode.`,
+          );
+        }
+
+        const currentUrl = String(backgroundAsset.url ?? '').trim();
+        if (currentUrl && !currentUrl.startsWith('data:') && !preferLocalTransport) {
+          return currentUrl;
+        }
+
+        if (preferLocalTransport && currentUrl && isBackendStaticUrl(currentUrl)) {
+          return currentUrl;
+        }
+
+        let fileToUpload = backgroundAsset.file ?? null;
+        if (!fileToUpload && currentUrl.startsWith('data:')) {
+          fileToUpload = dataUrlToFile(
+            currentUrl,
+            `sentence-${index + 1}-overlay-background.png`,
+          );
+        } else if (!fileToUpload && currentUrl) {
+          fileToUpload = await downloadUrlAsFile(
+            currentUrl,
+            `sentence-${index + 1}-overlay-background.png`,
+          );
+        }
+
+        if (!fileToUpload) {
+          throw new Error(
+            `Missing an image background for overlay scene ${index + 1}. Please provide an image on the Image tab or switch the overlay background mode.`,
+          );
+        }
+
+        if (preferLocalTransport) {
+          return stageRenderAssetLocally(fileToUpload, 'image');
+        }
+
+        return uploadManagedFile(fileToUpload, {
+          resourceType: 'image',
+          folder: 'auto-video-generator/render-images',
+        });
       }
 
       if (tab === 'text') {
@@ -3300,6 +3566,88 @@ export function GeneratePageInner() {
     });
   };
 
+  const buildRenderOverlayTransportAssets = async (
+    sourceSentences: SentenceItem[],
+    preferLocalTransport = false,
+  ) => {
+    return await mapWithConcurrency(sourceSentences, 4, async (sentence, index) => {
+      const text = String(sentence?.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return null;
+      if (resolveSentenceSceneTab(sentence) !== 'overlay') return null;
+
+      const overlayAsset = resolveOverlaySceneRenderAsset(sentence);
+      if (!overlayAsset.file && !overlayAsset.url) {
+        throw new Error(
+          `Missing an overlay asset for scene ${index + 1}. Please upload or choose an overlay before rendering.`,
+        );
+      }
+
+      const resourceType = inferOverlayResourceType({
+        url: overlayAsset.url,
+        mimeType: overlayAsset.file?.type ?? overlayAsset.mimeType,
+      });
+      const currentUrl = String(overlayAsset.url ?? '').trim();
+      const currentMimeType = String(overlayAsset.mimeType ?? '').trim() || null;
+
+      if (currentUrl && !currentUrl.startsWith('data:') && !preferLocalTransport) {
+        return {
+          url: currentUrl,
+          mimeType: currentMimeType,
+        };
+      }
+
+      if (preferLocalTransport && currentUrl && isBackendStaticUrl(currentUrl)) {
+        return {
+          url: currentUrl,
+          mimeType: currentMimeType,
+        };
+      }
+
+      let fileToUpload = overlayAsset.file ?? null;
+      if (!fileToUpload && currentUrl.startsWith('data:')) {
+        fileToUpload = dataUrlToFile(
+          currentUrl,
+          resourceType === 'video'
+            ? `sentence-${index + 1}-overlay.mp4`
+            : `sentence-${index + 1}-overlay.png`,
+        );
+      } else if (!fileToUpload && currentUrl) {
+        fileToUpload = await downloadUrlAsFile(
+          currentUrl,
+          resourceType === 'video'
+            ? `sentence-${index + 1}-overlay.mp4`
+            : `sentence-${index + 1}-overlay.png`,
+        );
+      }
+
+      if (!fileToUpload) {
+        throw new Error(
+          `Missing an overlay asset for scene ${index + 1}. Please upload or choose an overlay before rendering.`,
+        );
+      }
+
+      const mimeType = String(fileToUpload.type || currentMimeType || '').trim() || null;
+
+      if (preferLocalTransport) {
+        return {
+          url: await stageRenderAssetLocally(fileToUpload, resourceType),
+          mimeType,
+        };
+      }
+
+      return {
+        url: await uploadManagedFile(fileToUpload, {
+          resourceType,
+          folder:
+            resourceType === 'video'
+              ? 'auto-video-generator/render-overlays/video'
+              : 'auto-video-generator/render-overlays/image',
+        }),
+        mimeType,
+      };
+    });
+  };
+
   const generateVoiceFileForSentences = async (sentenceTexts: string[], voiceId: string) => {
     const normalizedSentences = sentenceTexts
       .map((sentence) => String(sentence ?? '').trim())
@@ -3404,6 +3752,46 @@ export function GeneratePageInner() {
       return;
     }
 
+    const missingOverlayAsset = selectedSentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(s) !== 'overlay') return false;
+
+      const overlayAsset = resolveOverlaySceneRenderAsset(s);
+      return !overlayAsset.file && !overlayAsset.url;
+    });
+
+    if (missingOverlayAsset) {
+      showAlert('Please provide an overlay asset for each selected overlay scene.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    const missingOverlayBackground = selectedSentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(s) !== 'overlay') return false;
+
+      const backgroundAsset = resolveOverlaySceneRenderBackgroundAsset(s);
+      if (
+        backgroundAsset.backgroundMode === 'solid' ||
+        backgroundAsset.backgroundMode === 'gradient'
+      ) {
+        return false;
+      }
+
+      return !backgroundAsset.file && !backgroundAsset.url;
+    });
+
+    if (missingOverlayBackground) {
+      showAlert(
+        'Please provide the required Image or Video tab background for each selected overlay scene, or switch that overlay background to solid or gradient.',
+        { type: 'warning' },
+      );
+      return;
+    }
+
     resetTestVideoJob();
 
     try {
@@ -3458,9 +3846,20 @@ export function GeneratePageInner() {
         }
       }
 
+      const useLocalRenderTransport = shouldUseLocalRenderTransport();
+      const overlayTransportAssets = await buildRenderOverlayTransportAssets(
+        selectedSentences,
+        useLocalRenderTransport,
+      );
+
       form.append(
         'sentences',
-        JSON.stringify(buildRenderSentencePayload(selectedSentences, { clearLastTransition: true })),
+        JSON.stringify(
+          buildRenderSentencePayload(selectedSentences, {
+            clearLastTransition: true,
+            overlayTransportByIndex: overlayTransportAssets,
+          }),
+        ),
       );
       form.append('scriptLength', scriptLength);
       form.append('language', scriptLanguage);
@@ -3775,6 +4174,33 @@ export function GeneratePageInner() {
       showToast('Failed to load text animation presets.', 'error');
     } finally {
       setIsLoadingTextAnimationPresets(false);
+    }
+  };
+
+  const fetchOverlayPresets = async () => {
+    if (!user) {
+      setOverlayPresets([]);
+      return;
+    }
+
+    setIsLoadingOverlayPresets(true);
+    try {
+      const res = await api.get<PresetLibraryResponse<OverlayPresetDto>>('/overlays', {
+        params: { page: 1, limit: 100 },
+      });
+
+      const items = Array.isArray(res.data?.items)
+        ? res.data.items
+            .map((item) => normalizeOverlayPresetItem(item))
+            .filter((item): item is OverlayPresetDto => Boolean(item))
+        : [];
+
+      setOverlayPresets(items);
+    } catch (error) {
+      console.error('Failed to load overlay presets', error);
+      showToast('Failed to load overlay presets.', 'error');
+    } finally {
+      setIsLoadingOverlayPresets(false);
     }
   };
 
@@ -4117,6 +4543,86 @@ export function GeneratePageInner() {
     } catch (error) {
       console.error('Failed to delete text animation preset', error);
       showToast(getRequestErrorMessage(error, 'Failed to delete text animation preset.'), 'error');
+      return false;
+    }
+  };
+
+  const saveOverlayPresetRequest = async (params: {
+    title: string;
+    settings: OverlaySettings;
+    file?: File | null;
+    sourceUrl?: string | null;
+    overlayId?: string | null;
+  }): Promise<OverlayPresetDto | null> => {
+    const trimmedTitle = String(params.title ?? '').trim();
+    const trimmedSourceUrl = String(params.sourceUrl ?? '').trim();
+    if (!trimmedTitle) return null;
+    if (!params.file && !trimmedSourceUrl) return null;
+
+    const formData = new FormData();
+    formData.append('title', trimmedTitle);
+    formData.append('settings', JSON.stringify(normalizeOverlaySettings(params.settings)));
+    if (trimmedSourceUrl) {
+      formData.append('sourceUrl', trimmedSourceUrl);
+    }
+    if (params.file) {
+      formData.append('file', params.file);
+    }
+
+    try {
+      const res = params.overlayId
+        ? await api.patch<OverlayPresetDto>(`/overlays/${encodeURIComponent(params.overlayId)}`, formData)
+        : await api.post<OverlayPresetDto>('/overlays', formData);
+
+      const saved = normalizeOverlayPresetItem(res.data);
+      if (!saved) {
+        showToast('Overlay preset could not be saved.', 'error');
+        return null;
+      }
+
+      setOverlayPresets((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      return saved;
+    } catch (error) {
+      console.error('Failed to save overlay preset', error);
+      showToast(
+        getRequestErrorMessage(error, 'Failed to save overlay preset.'),
+        'error',
+      );
+      return null;
+    }
+  };
+
+  const handleDeleteOverlayPreset = async (overlayId: string): Promise<boolean> => {
+    if (!user) {
+      showAlert('You must be logged in to delete an overlay preset.', { type: 'warning' });
+      return false;
+    }
+
+    const trimmedId = String(overlayId ?? '').trim();
+    if (!trimmedId) return false;
+
+    try {
+      await api.delete(`/overlays/${trimmedId}`);
+      setOverlayPresets((prev) => prev.filter((item) => item.id !== trimmedId));
+      setSentences((prev) =>
+        prev.map((sentence) =>
+          sentence.customOverlayId === trimmedId
+            ? {
+                ...sentence,
+                customOverlayId: null,
+                overlayFile: null,
+                overlayUrl: null,
+                overlayMimeType: null,
+                overlaySettings: null,
+              }
+            : sentence,
+        ),
+      );
+      showToast('Overlay preset deleted.', 'success');
+      return true;
+    } catch (error) {
+      console.error('Failed to delete overlay preset', error);
+      showToast(getRequestErrorMessage(error, 'Failed to delete overlay preset.'), 'error');
       return false;
     }
   };
@@ -4537,6 +5043,7 @@ export function GeneratePageInner() {
       setImageFilterPresets([]);
       setMotionEffectPresets([]);
       setTextAnimationPresets([]);
+      setOverlayPresets([]);
       return;
     }
 
@@ -4544,6 +5051,7 @@ export function GeneratePageInner() {
       fetchImageFilterPresets(),
       fetchMotionEffectPresets(),
       fetchTextAnimationPresets(),
+      fetchOverlayPresets(),
     ]);
   }, [user]);
 
@@ -5942,6 +6450,46 @@ export function GeneratePageInner() {
       return;
     }
 
+    const missingOverlayAsset = sentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(s) !== 'overlay') return false;
+
+      const overlayAsset = resolveOverlaySceneRenderAsset(s);
+      return !overlayAsset.file && !overlayAsset.url;
+    });
+
+    if (missingOverlayAsset) {
+      showAlert('Please provide an overlay asset for each overlay scene before rendering.', {
+        type: 'warning',
+      });
+      return;
+    }
+
+    const missingOverlayBackground = sentences.some((s) => {
+      const text = String(s.text ?? '').trim();
+      if (isSubscribeLikeSentence(text)) return false;
+      if (resolveSentenceSceneTab(s) !== 'overlay') return false;
+
+      const backgroundAsset = resolveOverlaySceneRenderBackgroundAsset(s);
+      if (
+        backgroundAsset.backgroundMode === 'solid' ||
+        backgroundAsset.backgroundMode === 'gradient'
+      ) {
+        return false;
+      }
+
+      return !backgroundAsset.file && !backgroundAsset.url;
+    });
+
+    if (missingOverlayBackground) {
+      showAlert(
+        'Please provide the required Image or Video tab background for each overlay scene, or switch that overlay background to solid or gradient.',
+        { type: 'warning' },
+      );
+      return;
+    }
+
     resetJob();
 
     setIsGenerating(true);
@@ -5979,7 +6527,6 @@ export function GeneratePageInner() {
       const shouldIncludeBackgroundMusicVolume =
         addBackgroundSoundtrack && normalizedBackgroundMusicVolume !== 1;
 
-      const sentencePayload = buildRenderSentencePayload(sentences);
       const useLocalRenderTransport = shouldUseLocalRenderTransport();
       const audioUrl = voiceOver
         ? null
@@ -5989,6 +6536,13 @@ export function GeneratePageInner() {
         sentences,
         useLocalRenderTransport,
       );
+      const overlayTransportAssets = await buildRenderOverlayTransportAssets(
+        sentences,
+        useLocalRenderTransport,
+      );
+      const sentencePayload = buildRenderSentencePayload(sentences, {
+        overlayTransportByIndex: overlayTransportAssets,
+      });
       const requiresMultipartTextBackgroundVideos =
         hasTextBackgroundVideoUploadsForRender(sentences);
       const requiresMultipartVoiceOver = Boolean(voiceOver);
@@ -6645,6 +7199,10 @@ export function GeneratePageInner() {
       const textAnimationId = s.text_animation_id ?? s.textAnimationId ?? null;
       const textAnimationSettingsValue =
         s.text_animation_settings ?? s.textAnimationSettings ?? null;
+      const overlayId = s.overlay_id ?? s.overlayId ?? s.overlay?.id ?? null;
+      const overlaySettingsValue = s.overlay_settings ?? s.overlaySettings ?? s.overlay?.settings ?? null;
+      const overlayUrl = s.overlay?.url ?? null;
+      const overlayMimeType = s.overlay?.mime_type ?? s.overlay?.mimeType ?? null;
       const videoPromptValue = s.video_prompt ?? s.videoPrompt ?? null;
       const transitionToNext = s.transition_to_next ?? s.transitionToNext ?? null;
       const visualEffect = s.visual_effect ?? s.visualEffect ?? null;
@@ -6674,10 +7232,18 @@ export function GeneratePageInner() {
         s.textBackgroundImage ||
         s.textBackgroundVideo,
       );
+      const hasOverlaySceneData = Boolean(
+        overlayId || overlaySettingsValue || overlayUrl,
+      );
       const resolvedSceneTab = subscribeLike
         ? 'video'
-        : sceneTabValue === 'image' || sceneTabValue === 'video' || sceneTabValue === 'text'
+        : sceneTabValue === 'image' ||
+            sceneTabValue === 'video' ||
+            sceneTabValue === 'text' ||
+            sceneTabValue === 'overlay'
           ? sceneTabValue
+          : hasOverlaySceneData
+            ? 'overlay'
           : hasTextSceneData
             ? 'text'
             : s.video
@@ -6732,6 +7298,13 @@ export function GeneratePageInner() {
         textAnimationText: resolveTextAnimationText(textAnimationTextValue, s.text),
         customTextAnimationId: textAnimationId,
         textAnimationSettings: normalizedTextAnimationSettings,
+        customOverlayId: String(overlayId ?? '').trim() || null,
+        overlayFile: null,
+        overlayUrl: String(overlayUrl ?? '').trim() || null,
+        overlayMimeType: String(overlayMimeType ?? '').trim() || null,
+        overlaySettings: overlaySettingsValue
+          ? normalizeOverlaySettings(overlaySettingsValue)
+          : null,
         imageMotionEffect,
         customMotionEffectId: motionEffectId,
         imageMotionSettings: normalizeSettingsObject(imageMotionSettings),
@@ -9398,6 +9971,8 @@ export function GeneratePageInner() {
           text_animation_effect?: SentenceItem['textAnimationEffect'] | null;
           text_animation_id?: string | null;
           text_animation_settings?: Record<string, unknown> | null;
+          overlay_id?: string | null;
+          overlay_settings?: Record<string, unknown> | null;
           image_effects_mode?: 'quick' | 'detailed' | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
           image_filter_id?: string | null;
@@ -9463,6 +10038,33 @@ export function GeneratePageInner() {
             prompt: null,
           });
 
+          const normalizedOverlaySettings = s.overlaySettings
+            ? normalizeOverlaySettings(s.overlaySettings)
+            : null;
+          const currentOverlayPreset = s.customOverlayId
+            ? overlayPresets.find((item) => item.id === s.customOverlayId)
+            : null;
+          const overlaySourceUrl = String(s.overlayUrl ?? '').trim() || null;
+          const overlayPresetNeedsCreate = Boolean(
+            (s.overlayFile || overlaySourceUrl) &&
+              (!currentOverlayPreset ||
+                currentOverlayPreset.url !== overlaySourceUrl ||
+                JSON.stringify(
+                  normalizeOverlaySettings(currentOverlayPreset.settings ?? null),
+                ) !== JSON.stringify(normalizedOverlaySettings)),
+          );
+          const savedOverlayPreset = overlayPresetNeedsCreate
+            ? await saveOverlayPresetRequest({
+                title:
+                  String(s.text ?? '').trim().slice(0, 64) ||
+                  `Sentence ${index + 1} overlay`,
+                settings: normalizedOverlaySettings ?? getDefaultOverlaySettings('image'),
+                file: s.overlayFile ?? null,
+                sourceUrl: overlaySourceUrl,
+              })
+            : currentOverlayPreset;
+          const overlayId = savedOverlayPreset?.id ?? s.customOverlayId ?? null;
+
           const sceneTab = isSubscribeLikeSentence(String(s.text ?? '').trim())
             ? 'video'
             : resolveSentenceSceneTab(s);
@@ -9527,6 +10129,8 @@ export function GeneratePageInner() {
               s.textAnimationEffect,
               effectiveIsShort,
             ),
+            overlay_id: overlayId,
+            overlay_settings: normalizedOverlaySettings,
             image_effects_mode: s.imageEffectsMode ?? 'quick',
             visual_effect:
               s.visualEffect === 'colorGrading' ||
@@ -10848,9 +11452,11 @@ export function GeneratePageInner() {
                   imageFilterPresets={imageFilterPresets}
                   motionEffectPresets={motionEffectPresets}
                   textAnimationPresets={textAnimationPresets}
+                  overlayPresets={overlayPresets}
                   isLoadingImageFilterPresets={isLoadingImageFilterPresets}
                   isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
                   isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
+                  isLoadingOverlayPresets={isLoadingOverlayPresets}
                   onSentencePatch={handleSentencePatch}
                   onSaveImageFilterPreset={handleSaveImageFilterPreset}
                   onUpdateImageFilterPreset={handleUpdateImageFilterPreset}
@@ -10861,6 +11467,8 @@ export function GeneratePageInner() {
                   onSaveTextAnimationPreset={handleSaveTextAnimationPreset}
                   onUpdateTextAnimationPreset={handleUpdateTextAnimationPreset}
                   onDeleteTextAnimationPreset={handleDeleteTextAnimationPreset}
+                  onSaveOverlayPreset={saveOverlayPresetRequest}
+                  onDeleteOverlayPreset={handleDeleteOverlayPreset}
                   onGenerateSingleImageLookWithAi={handleGenerateSingleImageLookWithAi}
                   onGenerateSingleImageMotionWithAi={handleGenerateSingleImageMotionWithAi}
                   onSentenceVisualEffectChange={handleSentenceVisualEffectChange}

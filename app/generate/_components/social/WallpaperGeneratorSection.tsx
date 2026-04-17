@@ -884,17 +884,23 @@ export function WallpaperGeneratorSection({
         textBackgroundVideo={null}
         textBackgroundVideoUrl={null}
         textBackgroundSavedVideoId={null}
+        overlayFile={null}
+        overlayUrl={null}
+        overlayMimeType={null}
         customImageFilterId={customImageFilterId}
         customMotionEffectId={null}
         customTextAnimationId={null}
+        customOverlayId={null}
         imageFilterSettings={imageFilterSettings}
         imageMotionSettings={null}
         textAnimationSettings={null}
+        overlaySettings={null}
         retainedTemporaryLook={null}
         retainedTemporaryMotion={null}
         imageFilterPresets={EMPTY_IMAGE_FILTER_PRESETS}
         motionEffectPresets={EMPTY_MOTION_PRESETS}
         textAnimationPresets={EMPTY_TEXT_PRESETS}
+        overlayPresets={[]}
         onClose={() => setIsLookEditorOpen(false)}
         onApply={handleLookApply}
         onDownload={handleLookDownload}
@@ -907,6 +913,8 @@ export function WallpaperGeneratorSection({
         onSaveTextAnimationPreset={async () => null}
         onUpdateTextAnimationPreset={async () => null}
         onDeleteTextAnimationPreset={async () => false}
+        onSaveOverlayPreset={async () => null}
+        onDeleteOverlayPreset={async () => false}
         onGenerateLookWithAi={async () => null}
         onGenerateMotionWithAi={async () => null}
       />

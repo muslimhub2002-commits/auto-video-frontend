@@ -21,7 +21,7 @@ export type SentenceItem = {
   voiceOverStyleInstructions?: string | null;
   elevenLabsSettings?: ElevenLabsVoiceSettings | null;
   mediaMode?: 'single' | 'frames';
-  sceneTab?: 'image' | 'video' | 'text';
+  sceneTab?: 'image' | 'video' | 'text' | 'overlay';
   imageEffectsMode?: 'quick' | 'detailed';
   alignSoundEffectsToSceneEnd?: boolean;
   textAnimationEffect?:
@@ -36,6 +36,11 @@ export type SentenceItem = {
   textBackgroundVideo?: File | null;
   textBackgroundVideoUrl?: string | null;
   textBackgroundSavedVideoId?: string | null;
+  customOverlayId?: string | null;
+  overlayFile?: File | null;
+  overlayUrl?: string | null;
+  overlayMimeType?: string | null;
+  overlaySettings?: Record<string, unknown> | null;
   imageMotionEffect?:
     | 'default'
     | 'slowZoomIn'

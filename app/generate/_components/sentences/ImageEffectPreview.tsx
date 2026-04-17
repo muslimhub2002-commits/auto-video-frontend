@@ -83,6 +83,45 @@ export type MotionEffectPresetDto = {
   settings?: Record<string, unknown> | null;
 };
 
+export const OVERLAY_BACKGROUND_MODE_VALUES = [
+  'image',
+  'video',
+  'solid',
+  'gradient',
+] as const;
+
+export const OVERLAY_TEXT_LAYER_VALUES = ['below', 'above'] as const;
+
+export type OverlayBackgroundMode = (typeof OVERLAY_BACKGROUND_MODE_VALUES)[number];
+export type OverlayTextLayer = (typeof OVERLAY_TEXT_LAYER_VALUES)[number];
+
+export type OverlaySettings = {
+  presetKey?: 'custom';
+  backgroundMode?: OverlayBackgroundMode;
+  widthPercent?: number;
+  heightPercent?: number;
+  offsetX?: number;
+  offsetY?: number;
+  opacity?: number;
+  speed?: number;
+  scale?: number;
+  rotationDeg?: number;
+  backgroundColor?: string;
+  gradientFrom?: string;
+  gradientTo?: string;
+  gradientAngleDeg?: number;
+  includeText?: boolean;
+  textLayer?: OverlayTextLayer;
+};
+
+export type OverlayPresetDto = {
+  id: string;
+  title: string;
+  url: string;
+  mimeType?: string | null;
+  settings?: Record<string, unknown> | null;
+};
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -101,6 +140,10 @@ function getNumeric(value: unknown, fallback: number, min?: number, max?: number
 function getBoolean(value: unknown, fallback = false) {
   if (typeof value === 'boolean') return value;
   return fallback;
+}
+
+function getString(value: unknown, fallback: string) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : fallback;
 }
 
 export function normalizeImageMotionSpeed(value: number | null | undefined) {
@@ -430,6 +473,66 @@ export function resolveMotionEffectFromSettings(
     return presetKey;
   }
   return fallbackEffect ?? 'default';
+}
+
+export function getDefaultOverlaySettings(
+  backgroundMode: OverlayBackgroundMode = 'image',
+): OverlaySettings {
+  return {
+    backgroundMode,
+    widthPercent: 26,
+    heightPercent: 22,
+    offsetX: 0,
+    offsetY: -4,
+    opacity: 1,
+    speed: 1,
+    scale: 1,
+    rotationDeg: 0,
+    backgroundColor: '#020617',
+    gradientFrom: '#020617',
+    gradientTo: '#1d4ed8',
+    gradientAngleDeg: 135,
+    includeText: false,
+    textLayer: 'above',
+  };
+}
+
+export function normalizeOverlaySettings(
+  settings: Record<string, unknown> | OverlaySettings | null | undefined,
+  fallbackBackgroundMode: OverlayBackgroundMode = 'image',
+): OverlaySettings {
+  const defaults = getDefaultOverlaySettings(fallbackBackgroundMode);
+  return {
+    presetKey: settings?.presetKey === 'custom' ? 'custom' : undefined,
+    backgroundMode: (OVERLAY_BACKGROUND_MODE_VALUES as readonly string[]).includes(
+      String(settings?.backgroundMode ?? ''),
+    )
+      ? (settings?.backgroundMode as OverlayBackgroundMode)
+      : defaults.backgroundMode,
+    widthPercent: getNumeric(settings?.widthPercent, defaults.widthPercent ?? 26, 5, 100),
+    heightPercent: getNumeric(settings?.heightPercent, defaults.heightPercent ?? 22, 5, 100),
+    offsetX: getNumeric(settings?.offsetX, defaults.offsetX ?? 0, -50, 50),
+    offsetY: getNumeric(settings?.offsetY, defaults.offsetY ?? 0, -50, 50),
+    opacity: getNumeric(settings?.opacity, defaults.opacity ?? 1, 0, 1),
+    speed: getNumeric(settings?.speed, defaults.speed ?? 1, 0.25, 3),
+    scale: getNumeric(settings?.scale, defaults.scale ?? 1, 0.25, 3),
+    rotationDeg: getNumeric(settings?.rotationDeg, defaults.rotationDeg ?? 0, -180, 180),
+    backgroundColor: getString(settings?.backgroundColor, defaults.backgroundColor ?? '#020617'),
+    gradientFrom: getString(settings?.gradientFrom, defaults.gradientFrom ?? '#020617'),
+    gradientTo: getString(settings?.gradientTo, defaults.gradientTo ?? '#1d4ed8'),
+    gradientAngleDeg: getNumeric(
+      settings?.gradientAngleDeg,
+      defaults.gradientAngleDeg ?? 135,
+      0,
+      360,
+    ),
+    includeText: getBoolean(settings?.includeText, defaults.includeText ?? false),
+    textLayer: (OVERLAY_TEXT_LAYER_VALUES as readonly string[]).includes(
+      String(settings?.textLayer ?? ''),
+    )
+      ? (settings?.textLayer as OverlayTextLayer)
+      : defaults.textLayer,
+  };
 }
 
 type ImageEffectPreviewProps = {

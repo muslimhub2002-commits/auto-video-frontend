@@ -30,6 +30,11 @@ import {
   type ImageFilterSettings,
   type ImageMotionSettings,
   type MotionEffectPresetDto,
+  normalizeOverlaySettings,
+  OVERLAY_BACKGROUND_MODE_VALUES,
+  OVERLAY_TEXT_LAYER_VALUES,
+  type OverlayPresetDto,
+  type OverlaySettings,
   normalizeImageFilterSettings,
   normalizeImageMotionSettings,
   resolveImageMotionSpeed,
@@ -51,6 +56,7 @@ import {
   type TextAnimationPresetDto,
   type TextAnimationSettings,
 } from './TextAnimationPreview';
+import { OverlayScenePreview } from './OverlayScenePreview';
 import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
 import { useManagedObjectUrl } from './useManagedObjectUrl';
 
@@ -63,7 +69,7 @@ const LOOK_EFFECT_VALUES = [
   'glassStrong',
 ] as const;
 
-type DetailTab = 'visual' | 'motion' | 'text';
+type DetailTab = 'visual' | 'motion' | 'text' | 'overlay';
 
 export type ImageEffectsDetailApplyParams = {
   visualEffect: SentenceItem['visualEffect'] | null;
@@ -83,6 +89,11 @@ export type ImageEffectsDetailApplyParams = {
   textBackgroundVideo: File | null;
   textBackgroundVideoUrl: string | null;
   textBackgroundSavedVideoId: string | null;
+  customOverlayId: string | null;
+  overlayFile: File | null;
+  overlayUrl: string | null;
+  overlayMimeType: string | null;
+  overlaySettings: OverlaySettings;
 };
 
 type DebouncedPreviewState = {
@@ -105,6 +116,8 @@ type ImageEffectsDetailModalProps = {
   previewImageUrl: string | null;
   previewTextInheritedImageUrl?: string | null;
   previewTextInheritedVideoUrl?: string | null;
+  previewOverlayInheritedImageUrl?: string | null;
+  previewOverlayInheritedVideoUrl?: string | null;
   sentenceText?: string;
   visualEffect: SentenceItem['visualEffect'] | null | undefined;
   imageMotionEffect: SentenceItem['imageMotionEffect'] | null | undefined;
@@ -117,12 +130,17 @@ type ImageEffectsDetailModalProps = {
   textBackgroundVideo?: File | null;
   textBackgroundVideoUrl?: string | null;
   textBackgroundSavedVideoId?: string | null;
+  overlayFile?: File | null;
+  overlayUrl?: string | null;
+  overlayMimeType?: string | null;
   customImageFilterId: string | null | undefined;
   customMotionEffectId: string | null | undefined;
   customTextAnimationId: string | null | undefined;
+  customOverlayId: string | null | undefined;
   imageFilterSettings: Record<string, unknown> | null | undefined;
   imageMotionSettings: Record<string, unknown> | null | undefined;
   textAnimationSettings: Record<string, unknown> | null | undefined;
+  overlaySettings: Record<string, unknown> | null | undefined;
   retainedTemporaryLook?: {
     visualEffect: SentenceItem['visualEffect'] | null;
     imageFilterSettings: ImageFilterSettings;
@@ -135,6 +153,7 @@ type ImageEffectsDetailModalProps = {
   imageFilterPresets: ImageFilterPresetDto[];
   motionEffectPresets: MotionEffectPresetDto[];
   textAnimationPresets: TextAnimationPresetDto[];
+  overlayPresets: OverlayPresetDto[];
   onClose: () => void;
   onApply: (params: ImageEffectsDetailApplyParams) => void;
   onDownload?: (params: ImageEffectsDetailApplyParams) => Promise<void> | void;
@@ -165,6 +184,14 @@ type ImageEffectsDetailModalProps = {
     settings: TextAnimationSettings,
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
+  onSaveOverlayPreset: (params: {
+    title: string;
+    settings: OverlaySettings;
+    file?: File | null;
+    sourceUrl?: string | null;
+    overlayId?: string | null;
+  }) => Promise<OverlayPresetDto | null> | OverlayPresetDto | null;
+  onDeleteOverlayPreset: (overlayId: string) => Promise<boolean> | boolean;
   onGenerateLookWithAi: (params: {
     visualEffect: SentenceItem['visualEffect'] | null;
     customImageFilterId: string | null;
@@ -288,6 +315,8 @@ export function ImageEffectsDetailModal({
   previewImageUrl,
   previewTextInheritedImageUrl = null,
   previewTextInheritedVideoUrl = null,
+  previewOverlayInheritedImageUrl = null,
+  previewOverlayInheritedVideoUrl = null,
   sentenceText,
   visualEffect,
   imageMotionEffect,
@@ -300,17 +329,23 @@ export function ImageEffectsDetailModal({
   textBackgroundVideo = null,
   textBackgroundVideoUrl = null,
   textBackgroundSavedVideoId = null,
+  overlayFile = null,
+  overlayUrl = null,
+  overlayMimeType = null,
   customImageFilterId,
   customMotionEffectId,
   customTextAnimationId,
+  customOverlayId,
   imageFilterSettings,
   imageMotionSettings,
   textAnimationSettings,
+  overlaySettings,
   retainedTemporaryLook,
   retainedTemporaryMotion,
   imageFilterPresets,
   motionEffectPresets,
   textAnimationPresets,
+  overlayPresets,
   onClose,
   onApply,
   onDownload,
@@ -323,17 +358,19 @@ export function ImageEffectsDetailModal({
   onSaveTextAnimationPreset,
   onUpdateTextAnimationPreset,
   onDeleteTextAnimationPreset,
+  onSaveOverlayPreset,
+  onDeleteOverlayPreset,
   onGenerateLookWithAi,
   onGenerateMotionWithAi,
 }: ImageEffectsDetailModalProps) {
   const availableTabs = useMemo<DetailTab[]>(() => {
     const rawTabs = Array.isArray(enabledTabs) && enabledTabs.length > 0
       ? enabledTabs
-      : ['visual', 'motion', 'text'];
+      : ['visual', 'motion', 'text', 'overlay'];
 
     return rawTabs.filter(
       (value, index, array): value is DetailTab =>
-        (value === 'visual' || value === 'motion' || value === 'text') &&
+        (value === 'visual' || value === 'motion' || value === 'text' || value === 'overlay') &&
         array.indexOf(value) === index,
     );
   }, [enabledTabs]);
@@ -346,24 +383,30 @@ export function ImageEffectsDetailModal({
   );
   const textBackgroundInputRef = useRef<HTMLInputElement | null>(null);
   const textBackgroundVideoInputRef = useRef<HTMLInputElement | null>(null);
+  const overlayInputRef = useRef<HTMLInputElement | null>(null);
   const [currentTab, setCurrentTab] = useState<DetailTab>(activeTab);
   const [lookSaveTitle, setLookSaveTitle] = useState('');
   const [motionSaveTitle, setMotionSaveTitle] = useState('');
   const [textSaveTitle, setTextSaveTitle] = useState('');
+  const [overlaySaveTitle, setOverlaySaveTitle] = useState('');
   const [isSavingLookPreset, setIsSavingLookPreset] = useState(false);
   const [isSavingMotionPreset, setIsSavingMotionPreset] = useState(false);
   const [isSavingTextPreset, setIsSavingTextPreset] = useState(false);
+  const [isSavingOverlayPreset, setIsSavingOverlayPreset] = useState(false);
   const [isOverridingLookPreset, setIsOverridingLookPreset] = useState(false);
   const [isOverridingMotionPreset, setIsOverridingMotionPreset] = useState(false);
   const [isOverridingTextPreset, setIsOverridingTextPreset] = useState(false);
+  const [isOverridingOverlayPreset, setIsOverridingOverlayPreset] = useState(false);
   const [isDeletingLookPreset, setIsDeletingLookPreset] = useState(false);
   const [isDeletingMotionPreset, setIsDeletingMotionPreset] = useState(false);
   const [isDeletingTextPreset, setIsDeletingTextPreset] = useState(false);
+  const [isDeletingOverlayPreset, setIsDeletingOverlayPreset] = useState(false);
   const [isGeneratingLookWithAi, setIsGeneratingLookWithAi] = useState(false);
   const [isGeneratingMotionWithAi, setIsGeneratingMotionWithAi] = useState(false);
   const [lookActionError, setLookActionError] = useState<string | null>(null);
   const [motionActionError, setMotionActionError] = useState<string | null>(null);
   const [textActionError, setTextActionError] = useState<string | null>(null);
+  const [overlayActionError, setOverlayActionError] = useState<string | null>(null);
   const [deletePresetKind, setDeletePresetKind] = useState<DetailTab | null>(null);
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isClosing, setIsClosing] = useState(false);
@@ -413,6 +456,14 @@ export function ImageEffectsDetailModal({
   const [draftCustomTextAnimationId, setDraftCustomTextAnimationId] = useState<string | null>(
     customTextAnimationId ?? null,
   );
+  const [draftCustomOverlayId, setDraftCustomOverlayId] = useState<string | null>(
+    customOverlayId ?? null,
+  );
+  const [draftOverlayFile, setDraftOverlayFile] = useState<File | null>(overlayFile ?? null);
+  const [draftOverlayUrl, setDraftOverlayUrl] = useState<string | null>(overlayUrl ?? null);
+  const [draftOverlayMimeType, setDraftOverlayMimeType] = useState<string | null>(
+    overlayMimeType ?? null,
+  );
   const [draftImageFilterSettings, setDraftImageFilterSettings] = useState<ImageFilterSettings>(
     () => normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
   );
@@ -432,6 +483,9 @@ export function ImageEffectsDetailModal({
         resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
         isShortVideo,
       ),
+  );
+  const [draftOverlaySettings, setDraftOverlaySettings] = useState<OverlaySettings>(
+    () => normalizeOverlaySettings(overlaySettings, 'image'),
   );
   const [retainedDraftTemporaryLook, setRetainedDraftTemporaryLook] = useState<{
     visualEffect: SentenceItem['visualEffect'] | null;
@@ -466,12 +520,22 @@ export function ImageEffectsDetailModal({
       ),
     [draftTextAnimationEffect, draftTextAnimationSettings, isShortVideo],
   );
+  const resolvedOverlay = useMemo(
+    () => normalizeOverlaySettings(draftOverlaySettings, 'image'),
+    [draftOverlaySettings],
+  );
   const draftTextBackgroundObjectUrl = useManagedObjectUrl(draftTextBackgroundImage);
   const draftTextBackgroundVideoObjectUrl = useManagedObjectUrl(draftTextBackgroundVideo);
+  const draftOverlayObjectUrl = useManagedObjectUrl(draftOverlayFile);
   const customTextBackgroundPreviewUrl =
     draftTextBackgroundObjectUrl ?? draftTextBackgroundImageUrl ?? null;
   const customTextBackgroundVideoPreviewUrl =
     draftTextBackgroundVideoObjectUrl ?? draftTextBackgroundVideoUrl ?? null;
+  const resolvedOverlayPreviewUrl = draftOverlayObjectUrl ?? draftOverlayUrl ?? null;
+  const resolvedOverlaySceneImageUrl =
+    previewOverlayInheritedImageUrl ?? previewTextInheritedImageUrl ?? null;
+  const resolvedOverlaySceneVideoUrl =
+    previewOverlayInheritedVideoUrl ?? previewTextInheritedVideoUrl ?? null;
   const resolvedTextPreviewBackgroundUrl =
     resolvedText.backgroundMode === 'image'
       ? customTextBackgroundPreviewUrl
@@ -498,6 +562,10 @@ export function ImageEffectsDetailModal({
   const selectedTextPreset = useMemo(
     () => textAnimationPresets.find((item) => item.id === draftCustomTextAnimationId) ?? null,
     [draftCustomTextAnimationId, textAnimationPresets],
+  );
+  const selectedOverlayPreset = useMemo(
+    () => overlayPresets.find((item) => item.id === draftCustomOverlayId) ?? null,
+    [draftCustomOverlayId, overlayPresets],
   );
   const selectedLookPresetEffect = useMemo(
     () =>
@@ -559,6 +627,16 @@ export function ImageEffectsDetailModal({
         : null,
     [isShortVideo, selectedTextPreset, selectedTextPresetEffect],
   );
+  const selectedOverlayPresetSettings = useMemo(
+    () =>
+      selectedOverlayPreset
+        ? normalizeOverlaySettings(
+            selectedOverlayPreset.settings,
+            resolvedOverlay.backgroundMode ?? 'image',
+          )
+        : null,
+    [resolvedOverlay.backgroundMode, selectedOverlayPreset],
+  );
   const isLookDirtyFromSelectedPreset = Boolean(
     selectedLookPreset &&
       ((selectedLookPresetEffect ?? null) !== (draftVisualEffect ?? null) ||
@@ -574,15 +652,25 @@ export function ImageEffectsDetailModal({
       (selectedTextPresetEffect !== draftTextAnimationEffect ||
         JSON.stringify(selectedTextPresetSettings) !== JSON.stringify(resolvedText)),
   );
+  const isOverlayDirtyFromSelectedPreset = Boolean(
+    selectedOverlayPreset &&
+      (Boolean(draftOverlayFile) ||
+        String(selectedOverlayPreset.url ?? '').trim() !== String(draftOverlayUrl ?? '').trim() ||
+        String(selectedOverlayPreset.mimeType ?? '').trim() !== String(draftOverlayMimeType ?? '').trim() ||
+        JSON.stringify(selectedOverlayPresetSettings) !== JSON.stringify(resolvedOverlay)),
+  );
   const canOverrideLookPreset = Boolean(selectedLookPreset && isLookDirtyFromSelectedPreset);
   const canOverrideMotionPreset = Boolean(selectedMotionPreset && isMotionDirtyFromSelectedPreset);
   const canOverrideTextPreset = Boolean(selectedTextPreset && isTextDirtyFromSelectedPreset);
+  const canOverrideOverlayPreset = Boolean(selectedOverlayPreset && isOverlayDirtyFromSelectedPreset);
   const trimmedLookSaveTitle = lookSaveTitle.trim();
   const trimmedMotionSaveTitle = motionSaveTitle.trim();
   const trimmedTextSaveTitle = textSaveTitle.trim();
+  const trimmedOverlaySaveTitle = overlaySaveTitle.trim();
   const canSaveLookAsNew = (draftVisualEffect ?? null) !== null;
   const canSaveMotionAsNew = true;
   const canSaveTextAsNew = Boolean(draftTextAnimationEffect);
+  const canSaveOverlayAsNew = Boolean(resolvedOverlayPreviewUrl);
   const isLookSaveTitleValid =
     trimmedLookSaveTitle.length > 0 &&
     (!selectedLookPreset || trimmedLookSaveTitle !== selectedLookPreset.title.trim());
@@ -592,6 +680,9 @@ export function ImageEffectsDetailModal({
   const isTextSaveTitleValid =
     trimmedTextSaveTitle.length > 0 &&
     (!selectedTextPreset || trimmedTextSaveTitle !== selectedTextPreset.title.trim());
+  const isOverlaySaveTitleValid =
+    trimmedOverlaySaveTitle.length > 0 &&
+    (!selectedOverlayPreset || trimmedOverlaySaveTitle !== selectedOverlayPreset.title.trim());
   const [debouncedPreview, setDebouncedPreview] = useState<DebouncedPreviewState>(() => ({
     visualEffect: visualEffect ?? null,
     imageMotionEffect: imageMotionEffect ?? 'default',
@@ -645,6 +736,10 @@ export function ImageEffectsDetailModal({
     setDraftTextBackgroundVideoUrl(textBackgroundVideoUrl ?? null);
     setDraftTextBackgroundSavedVideoId(textBackgroundSavedVideoId ?? null);
     setDraftCustomTextAnimationId(customTextAnimationId ?? null);
+    setDraftCustomOverlayId(customOverlayId ?? null);
+    setDraftOverlayFile(overlayFile ?? null);
+    setDraftOverlayUrl(overlayUrl ?? null);
+    setDraftOverlayMimeType(overlayMimeType ?? null);
     setDraftImageFilterSettings(
       normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
     );
@@ -663,14 +758,17 @@ export function ImageEffectsDetailModal({
         isShortVideo,
       ),
     );
+    setDraftOverlaySettings(normalizeOverlaySettings(overlaySettings, 'image'));
     setRetainedDraftTemporaryLook(retainedTemporaryLook ?? null);
     setRetainedDraftTemporaryMotion(retainedTemporaryMotion ?? null);
     setLookSaveTitle('');
     setMotionSaveTitle('');
     setTextSaveTitle('');
+    setOverlaySaveTitle('');
     setLookActionError(null);
     setMotionActionError(null);
     setTextActionError(null);
+    setOverlayActionError(null);
     setDeletePresetKind(null);
     setDebouncedPreview((prev) => ({
       visualEffect: visualEffect ?? null,
@@ -690,6 +788,7 @@ export function ImageEffectsDetailModal({
     customImageFilterId,
     customMotionEffectId,
     customTextAnimationId,
+    customOverlayId,
     imageFilterSettings,
     imageMotionEffect,
     imageMotionSettings,
@@ -704,6 +803,10 @@ export function ImageEffectsDetailModal({
     textBackgroundVideo,
     textBackgroundVideoUrl,
     textBackgroundSavedVideoId,
+    overlayFile,
+    overlayMimeType,
+    overlaySettings,
+    overlayUrl,
     textAnimationEffect,
     textAnimationSettings,
     textAnimationText,
@@ -803,6 +906,12 @@ export function ImageEffectsDetailModal({
     : draftTextAnimationSettings?.presetKey === 'custom'
       ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
       : `builtin:${resolveTextAnimationEffectFromSettings(draftTextAnimationSettings, draftTextAnimationEffect)}`;
+  const overlaySelectValue =
+    draftCustomOverlayId && !isOverlayDirtyFromSelectedPreset
+      ? `custom:${draftCustomOverlayId}`
+      : resolvedOverlayPreviewUrl
+        ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
+        : '__none__';
   const isBuiltinDefaultScaleMotion =
     !draftCustomMotionEffectId &&
     resolveMotionEffectFromSettings(
@@ -913,6 +1022,37 @@ export function ImageEffectsDetailModal({
     setTextActionError(null);
   };
 
+  const handleOverlayPresetChange = (value: string) => {
+    if (value === '__none__') {
+      setDraftCustomOverlayId(null);
+      setDraftOverlayFile(null);
+      setDraftOverlayUrl(null);
+      setDraftOverlayMimeType(null);
+      setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
+      setOverlayActionError(null);
+      return;
+    }
+
+    if (!value.startsWith('custom:')) return;
+
+    const presetId = value.slice('custom:'.length);
+    if (presetId === TEMPORARY_CUSTOM_PRESET_ID) return;
+
+    const preset = overlayPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+
+    const settings = normalizeOverlaySettings(
+      preset.settings,
+      resolvedOverlay.backgroundMode ?? 'image',
+    );
+    setDraftCustomOverlayId(preset.id);
+    setDraftOverlayFile(null);
+    setDraftOverlayUrl(preset.url);
+    setDraftOverlayMimeType(preset.mimeType ?? null);
+    setDraftOverlaySettings({ ...settings, presetKey: 'custom' });
+    setOverlayActionError(null);
+  };
+
   const updateLookSettings = (patch: Partial<ImageFilterSettings>) => {
     const nextSettings: ImageFilterSettings = {
       ...resolvedLook,
@@ -949,6 +1089,40 @@ export function ImageEffectsDetailModal({
     );
     setDraftTextAnimationSettings(nextSettings);
     setTextActionError(null);
+  };
+
+  const updateOverlaySettings = (patch: Partial<OverlaySettings>) => {
+    const nextSettings: OverlaySettings = {
+      ...resolvedOverlay,
+      ...patch,
+      presetKey: 'custom',
+    };
+    setDraftOverlaySettings(nextSettings);
+    setDraftCustomOverlayId(null);
+    setOverlayActionError(null);
+  };
+
+  const handleOverlayUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+    if (!file.type.startsWith('video/') && !file.type.startsWith('image/')) return;
+
+    setDraftOverlayFile(file);
+    setDraftOverlayUrl(null);
+    setDraftOverlayMimeType(file.type || null);
+    setDraftCustomOverlayId(null);
+    setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
+    setOverlayActionError(null);
+    event.target.value = '';
+  };
+
+  const handleRemoveOverlayAsset = () => {
+    setDraftOverlayFile(null);
+    setDraftOverlayUrl(null);
+    setDraftOverlayMimeType(null);
+    setDraftCustomOverlayId(null);
+    setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
+    setOverlayActionError(null);
   };
 
   const handleTextBackgroundUpload = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1072,6 +1246,36 @@ export function ImageEffectsDetailModal({
     setIsSavingTextPreset(false);
   };
 
+  const handleSaveOverlayPreset = async () => {
+    if (!isOverlaySaveTitleValid || !canSaveOverlayAsNew || isSavingOverlayPreset) return;
+    setIsSavingOverlayPreset(true);
+    setOverlayActionError(null);
+    try {
+      const saved = await onSaveOverlayPreset({
+        title: trimmedOverlaySaveTitle,
+        settings: resolvedOverlay,
+        file: draftOverlayFile ?? null,
+        sourceUrl: draftOverlayFile ? null : draftOverlayUrl,
+      });
+      if (saved) {
+        setDraftCustomOverlayId(saved.id);
+        setDraftOverlayFile(null);
+        setDraftOverlayUrl(saved.url);
+        setDraftOverlayMimeType(saved.mimeType ?? draftOverlayMimeType ?? null);
+        setDraftOverlaySettings({
+          ...normalizeOverlaySettings(saved.settings, resolvedOverlay.backgroundMode ?? 'image'),
+          presetKey: 'custom',
+        });
+        setOverlaySaveTitle('');
+      }
+    } catch (error) {
+      setOverlayActionError(
+        error instanceof Error ? error.message : 'Failed to save overlay preset.',
+      );
+    }
+    setIsSavingOverlayPreset(false);
+  };
+
   const handleOverrideLookPreset = async () => {
     if (!selectedLookPreset || !canOverrideLookPreset || isOverridingLookPreset) return;
     setIsOverridingLookPreset(true);
@@ -1120,6 +1324,36 @@ export function ImageEffectsDetailModal({
       setTextActionError(error instanceof Error ? error.message : 'Failed to override text preset.');
     }
     setIsOverridingTextPreset(false);
+  };
+
+  const handleOverrideOverlayPreset = async () => {
+    if (!selectedOverlayPreset || !canOverrideOverlayPreset || isOverridingOverlayPreset) return;
+    setIsOverridingOverlayPreset(true);
+    setOverlayActionError(null);
+    try {
+      const saved = await onSaveOverlayPreset({
+        title: selectedOverlayPreset.title,
+        settings: resolvedOverlay,
+        file: draftOverlayFile ?? null,
+        sourceUrl: draftOverlayFile ? null : draftOverlayUrl,
+        overlayId: selectedOverlayPreset.id,
+      });
+      if (saved) {
+        setDraftCustomOverlayId(saved.id);
+        setDraftOverlayFile(null);
+        setDraftOverlayUrl(saved.url);
+        setDraftOverlayMimeType(saved.mimeType ?? draftOverlayMimeType ?? null);
+        setDraftOverlaySettings({
+          ...normalizeOverlaySettings(saved.settings, resolvedOverlay.backgroundMode ?? 'image'),
+          presetKey: 'custom',
+        });
+      }
+    } catch (error) {
+      setOverlayActionError(
+        error instanceof Error ? error.message : 'Failed to override overlay preset.',
+      );
+    }
+    setIsOverridingOverlayPreset(false);
   };
 
   const handleDeleteLookPreset = async () => {
@@ -1190,6 +1424,29 @@ export function ImageEffectsDetailModal({
     setIsDeletingTextPreset(false);
   };
 
+  const handleDeleteOverlayPreset = async () => {
+    if (!selectedOverlayPreset || isDeletingOverlayPreset) return;
+    setIsDeletingOverlayPreset(true);
+    setOverlayActionError(null);
+    try {
+      const deleted = await onDeleteOverlayPreset(selectedOverlayPreset.id);
+      if (deleted) {
+        setDraftCustomOverlayId(null);
+        setDraftOverlayFile(null);
+        setDraftOverlayUrl(null);
+        setDraftOverlayMimeType(null);
+        setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
+        setOverlaySaveTitle('');
+        setDeletePresetKind(null);
+      }
+    } catch (error) {
+      setOverlayActionError(
+        error instanceof Error ? error.message : 'Failed to delete overlay preset.',
+      );
+    }
+    setIsDeletingOverlayPreset(false);
+  };
+
   const handleGenerateLookWithAi = async () => {
     if (isGeneratingLookWithAi) return;
     setIsGeneratingLookWithAi(true);
@@ -1249,6 +1506,8 @@ export function ImageEffectsDetailModal({
       draftCustomTextAnimationId && !isTextDirtyFromSelectedPreset
         ? draftCustomTextAnimationId
         : null;
+    const nextCustomOverlayId =
+      draftCustomOverlayId && !isOverlayDirtyFromSelectedPreset ? draftCustomOverlayId : null;
 
     return {
       visualEffect: draftVisualEffect,
@@ -1276,6 +1535,12 @@ export function ImageEffectsDetailModal({
       textBackgroundVideo: draftTextBackgroundVideo,
       textBackgroundVideoUrl: draftTextBackgroundVideoUrl,
       textBackgroundSavedVideoId: draftTextBackgroundSavedVideoId,
+      customOverlayId: nextCustomOverlayId,
+      overlayFile: draftOverlayFile,
+      overlayUrl: draftOverlayUrl,
+      overlayMimeType: draftOverlayMimeType,
+      overlaySettings:
+        nextCustomOverlayId ? resolvedOverlay : { ...resolvedOverlay, presetKey: 'custom' },
     };
   };
 
@@ -1315,12 +1580,18 @@ export function ImageEffectsDetailModal({
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-300">Detailed settings</p>
               <h3 className="mt-2 text-2xl font-semibold">
-                {currentTab === 'text' ? 'Text animation studio' : 'Image effects studio'}
+                {currentTab === 'text'
+                  ? 'Text animation studio'
+                  : currentTab === 'overlay'
+                    ? 'Overlay scene studio'
+                    : 'Image effects studio'}
               </h3>
               <p className="mt-1 text-sm text-slate-300">
                 {currentTab === 'text'
                   ? 'Tune flashy hook text, background modes, and reusable animation presets.'
-                  : 'Look edits preview as a still. Motion edits preview with your current look applied.'}
+                  : currentTab === 'overlay'
+                    ? 'Compose an overlay asset over the scene background and decide whether text sits above or below it.'
+                    : 'Look edits preview as a still. Motion edits preview with your current look applied.'}
               </p>
             </div>
             <button
@@ -1376,6 +1647,20 @@ export function ImageEffectsDetailModal({
                   Text
                 </Button>
               ) : null}
+              {availableTabs.includes('overlay') ? (
+                <Button
+                  type="button"
+                  onClick={() => setCurrentTab('overlay')}
+                  className={
+                    currentTab === 'overlay'
+                      ? 'h-11 flex-1 rounded-xl bg-white text-slate-900 hover:bg-white'
+                      : 'h-11 flex-1 rounded-xl bg-transparent text-slate-200 hover:bg-white/10'
+                  }
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  Overlay
+                </Button>
+              ) : null}
             </div>
           ) : null}
 
@@ -1395,6 +1680,20 @@ export function ImageEffectsDetailModal({
                 contentClassName="p-[7%]"
                 enableMotion
                 motionResetKey={`${currentTab}-${draftTextAnimationEffect}-${resolvedText.speed ?? 1}-${resolvedText.animationIntensity ?? 1}`}
+              />
+            ) : currentTab === 'overlay' ? (
+              <OverlayScenePreview
+                isShortVideo={isShortVideo}
+                sceneImageUrl={resolvedOverlaySceneImageUrl}
+                sceneVideoUrl={resolvedOverlaySceneVideoUrl}
+                overlayAssetUrl={resolvedOverlayPreviewUrl}
+                overlayMimeType={draftOverlayMimeType}
+                overlaySettings={resolvedOverlay}
+                sentenceText={sentenceText}
+                text={draftTextAnimationText}
+                textAnimationEffect={draftTextAnimationEffect}
+                textAnimationSettings={resolvedText}
+                className={`${textPreviewFrameClass} overflow-hidden rounded-[1.5rem]`}
               />
             ) : previewImageUrl ? (
               <ImageEffectPreview
@@ -1429,14 +1728,18 @@ export function ImageEffectsDetailModal({
                 ? 'Look controls'
                 : currentTab === 'motion'
                   ? 'Motion controls'
-                  : 'Text controls'}
+                  : currentTab === 'overlay'
+                    ? 'Overlay controls'
+                    : 'Text controls'}
             </h4>
             <p className="mt-1 text-sm text-slate-500">
               {currentTab === 'visual'
                 ? 'Blend preset selection with direct filter tuning.'
                 : currentTab === 'motion'
                   ? 'Tune transform values and save reusable motion presets.'
-                  : 'Edit hook text, layout, colors, and reusable animation presets.'}
+                  : currentTab === 'overlay'
+                    ? 'Pick an overlay preset, upload the asset, and tune placement against the active scene background.'
+                    : 'Edit hook text, layout, colors, and reusable animation presets.'}
             </p>
           </div>
 
@@ -1850,6 +2153,307 @@ export function ImageEffectsDetailModal({
                   </Button>
                 </div>
               </>
+            ) : currentTab === 'overlay' ? (
+              <>
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                    <div className="flex items-center gap-2">
+                      <Upload className="h-4 w-4 text-emerald-600" />
+                      Overlay preset
+                    </div>
+                    {selectedOverlayPreset ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                        onClick={() => setDeletePresetKind('overlay')}
+                        disabled={isDeletingOverlayPreset || isOverridingOverlayPreset || isSavingOverlayPreset}
+                      >
+                        {isDeletingOverlayPreset ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Select value={overlaySelectValue} onValueChange={handleOverlayPresetChange}>
+                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                      <SelectValue placeholder="Choose overlay preset" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      <SelectItem value="__none__">No saved preset</SelectItem>
+                      {resolvedOverlayPreviewUrl ? (
+                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                          Custom draft
+                        </SelectItem>
+                      ) : null}
+                      {overlayPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                          {preset.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <SlidersHorizontal className="h-4 w-4 text-emerald-600" />
+                    <span>Overlay Composition</span>
+                  </div>
+
+                  <input
+                    ref={overlayInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    onChange={handleOverlayUpload}
+                    className="hidden"
+                  />
+
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Overlay asset</p>
+                        <p className="text-xs text-slate-500">Upload a transparent video, animated sticker, or still asset for this scene.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => overlayInputRef.current?.click()}
+                          className="h-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          {resolvedOverlayPreviewUrl ? 'Replace' : 'Upload'}
+                        </Button>
+                        {resolvedOverlayPreviewUrl ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleRemoveOverlayAsset}
+                            className="h-9 rounded-xl border-red-200 bg-white text-red-600 hover:bg-red-50"
+                          >
+                            <X className="mr-2 h-4 w-4" />
+                            Remove
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {resolvedOverlayPreviewUrl ? (
+                      String(draftOverlayMimeType ?? '').startsWith('image/') ? (
+                        <img
+                          src={resolvedOverlayPreviewUrl}
+                          alt="Overlay asset"
+                          className="h-36 w-full rounded-xl object-contain bg-slate-950/90"
+                        />
+                      ) : (
+                        <video
+                          src={resolvedOverlayPreviewUrl}
+                          className="h-36 w-full rounded-xl object-contain bg-slate-950/90"
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                        />
+                      )
+                    ) : (
+                      <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-4 text-center text-sm text-slate-500">
+                        Upload an overlay asset to preview it over the current scene background.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Background mode</div>
+                    <Select
+                      value={resolvedOverlay.backgroundMode ?? 'image'}
+                      onValueChange={(value) => updateOverlaySettings({ backgroundMode: value as OverlaySettings['backgroundMode'] })}
+                    >
+                      <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                        <SelectValue placeholder="Background mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {OVERLAY_BACKGROUND_MODE_VALUES.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {value === 'image'
+                              ? 'Use image tab background'
+                              : value === 'video'
+                                ? 'Use video tab background'
+                                : value === 'solid'
+                                  ? 'Solid color'
+                                  : 'Gradient'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {resolvedOverlay.backgroundMode === 'image' ? (
+                    resolvedOverlaySceneImageUrl ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        This overlay scene is using the current image tab asset as its background.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        No image is available on the Image tab. Upload or generate one there, or switch this overlay scene to a solid or gradient background.
+                      </div>
+                    )
+                  ) : null}
+
+                  {resolvedOverlay.backgroundMode === 'video' ? (
+                    resolvedOverlaySceneVideoUrl ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        This overlay scene is using the current video tab asset as its background.
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        No video is available on the Video tab. Upload or generate one there, or switch this overlay scene to a solid or gradient background.
+                      </div>
+                    )
+                  ) : null}
+
+                  {resolvedOverlay.backgroundMode === 'solid' ? (
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Background color</span>
+                      <Input
+                        type="color"
+                        value={resolvedOverlay.backgroundColor ?? '#020617'}
+                        onChange={(e) => updateOverlaySettings({ backgroundColor: e.target.value })}
+                        className="h-11 rounded-xl border-slate-200 p-2"
+                      />
+                    </div>
+                  ) : null}
+
+                  {resolvedOverlay.backgroundMode === 'gradient' ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Gradient from</span>
+                        <Input
+                          type="color"
+                          value={resolvedOverlay.gradientFrom ?? '#020617'}
+                          onChange={(e) => updateOverlaySettings({ gradientFrom: e.target.value })}
+                          className="h-11 rounded-xl border-slate-200 p-2"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Gradient to</span>
+                        <Input
+                          type="color"
+                          value={resolvedOverlay.gradientTo ?? '#1d4ed8'}
+                          onChange={(e) => updateOverlaySettings({ gradientTo: e.target.value })}
+                          className="h-11 rounded-xl border-slate-200 p-2"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {resolvedOverlay.backgroundMode === 'gradient' ? (
+                    <RangeField
+                      label="Gradient angle"
+                      value={resolvedOverlay.gradientAngleDeg ?? 135}
+                      min={0}
+                      max={360}
+                      step={1}
+                      onChange={(value) => updateOverlaySettings({ gradientAngleDeg: value })}
+                    />
+                  ) : null}
+
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={resolvedOverlay.includeText === true}
+                      onChange={(e) => updateOverlaySettings({ includeText: e.target.checked })}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="space-y-1">
+                      <span className="block text-sm font-semibold text-slate-900">Include text-layer styling</span>
+                      <span className="block text-xs text-slate-500">
+                        Reuses the current Text tab copy and styling while letting you choose whether the overlay sits above or below it.
+                      </span>
+                    </span>
+                  </label>
+
+                  {resolvedOverlay.includeText === true ? (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text layer order</div>
+                      <Select
+                        value={resolvedOverlay.textLayer ?? 'above'}
+                        onValueChange={(value) => updateOverlaySettings({ textLayer: value as OverlaySettings['textLayer'] })}
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Text layer order" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {OVERLAY_TEXT_LAYER_VALUES.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value === 'below' ? 'Overlay above text' : 'Text above overlay'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                        Text content, font sizing, color, and alignment still come from the Text tab.
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <RangeField label="Width" value={resolvedOverlay.widthPercent ?? 26} min={5} max={100} step={1} onChange={(value) => updateOverlaySettings({ widthPercent: value })} />
+                  <RangeField label="Height" value={resolvedOverlay.heightPercent ?? 22} min={5} max={100} step={1} onChange={(value) => updateOverlaySettings({ heightPercent: value })} />
+                  <RangeField label="Offset X" value={resolvedOverlay.offsetX ?? 0} min={-50} max={50} step={1} onChange={(value) => updateOverlaySettings({ offsetX: value })} />
+                  <RangeField label="Offset Y" value={resolvedOverlay.offsetY ?? 0} min={-50} max={50} step={1} onChange={(value) => updateOverlaySettings({ offsetY: value })} />
+                  <RangeField label="Opacity" value={resolvedOverlay.opacity ?? 1} min={0} max={1} step={0.01} onChange={(value) => updateOverlaySettings({ opacity: value })} />
+                  <RangeField label="Speed" value={resolvedOverlay.speed ?? 1} min={0.25} max={3} step={0.05} onChange={(value) => updateOverlaySettings({ speed: value })} />
+                  <RangeField label="Scale" value={resolvedOverlay.scale ?? 1} min={0.25} max={3} step={0.05} onChange={(value) => updateOverlaySettings({ scale: value })} />
+                  <RangeField label="Rotation" value={resolvedOverlay.rotationDeg ?? 0} min={-180} max={180} step={1} onChange={(value) => updateOverlaySettings({ rotationDeg: value })} />
+                </div>
+
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <Save className="h-4 w-4 text-emerald-600" />
+                    Output actions
+                  </div>
+                  <div className="space-y-2 text-sm text-slate-600">
+                    <p>Apply updates only to this overlay scene in the editor.</p>
+                    <p>Save as new preset stores the asset and its placement settings in your overlay library.</p>
+                    {selectedOverlayPreset ? (
+                      <p>Override preset updates {selectedOverlayPreset.title} in your overlay library.</p>
+                    ) : null}
+                  </div>
+                  {overlayActionError ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {overlayActionError}
+                    </div>
+                  ) : null}
+                  {canSaveOverlayAsNew ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={overlaySaveTitle}
+                        onChange={(e) => setOverlaySaveTitle(e.target.value)}
+                        placeholder={selectedOverlayPreset ? 'New overlay title' : 'Overlay title'}
+                        className="h-11 rounded-xl border-slate-200"
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleSaveOverlayPreset}
+                        disabled={!isOverlaySaveTitleValid || isSavingOverlayPreset}
+                        className="h-11 rounded-xl bg-emerald-600 px-4 text-white hover:bg-emerald-700"
+                      >
+                        {isSavingOverlayPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        Save as new preset
+                      </Button>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleOverrideOverlayPreset}
+                    disabled={!canOverrideOverlayPreset || isOverridingOverlayPreset}
+                    className="h-11 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  >
+                    {isOverridingOverlayPreset ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Override preset
+                  </Button>
+                </div>
+              </>
             ) : currentTab === 'visual' ? (
               <>
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -2124,6 +2728,11 @@ export function ImageEffectsDetailModal({
 
           if (deletePresetKind === 'text') {
             void handleDeleteTextPreset();
+            return;
+          }
+
+          if (deletePresetKind === 'overlay') {
+            void handleDeleteOverlayPreset();
           }
         }}
         variant="danger"
@@ -2132,24 +2741,35 @@ export function ImageEffectsDetailModal({
             ? 'Delete look preset?'
             : deletePresetKind === 'motion'
               ? 'Delete motion preset?'
-              : 'Delete text preset?'
+              : deletePresetKind === 'overlay'
+                ? 'Delete overlay preset?'
+                : 'Delete text preset?'
         }
         description={
           deletePresetKind === 'visual'
             ? 'This deletes the selected look preset from your library and resets this image to the built-in none look.'
             : deletePresetKind === 'motion'
               ? 'This deletes the selected motion preset from your library and resets this image to the built-in default motion.'
-              : 'This deletes the selected text preset from your library and resets this scene to the built-in pop-in / bounce text animation.'
+              : deletePresetKind === 'overlay'
+                ? 'This deletes the selected overlay preset from your library and clears the overlay asset from this scene.'
+                : 'This deletes the selected text preset from your library and resets this scene to the built-in pop-in / bounce text animation.'
         }
         confirmText={
           deletePresetKind === 'visual'
             ? 'Delete look preset'
             : deletePresetKind === 'motion'
               ? 'Delete motion preset'
-              : 'Delete text preset'
+              : deletePresetKind === 'overlay'
+                ? 'Delete overlay preset'
+                : 'Delete text preset'
         }
         cancelText="Cancel"
-        isLoading={isDeletingLookPreset || isDeletingMotionPreset || isDeletingTextPreset}
+        isLoading={
+          isDeletingLookPreset ||
+          isDeletingMotionPreset ||
+          isDeletingTextPreset ||
+          isDeletingOverlayPreset
+        }
       />
     </div>,
     portalTarget,
