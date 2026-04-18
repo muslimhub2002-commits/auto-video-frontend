@@ -220,7 +220,9 @@ type ImageEffectsDetailModalProps = {
   activeTab: DetailTab;
   enabledTabs?: DetailTab[];
   variant?: 'default' | 'look-only-upload';
+  sceneKind?: 'image' | 'video' | 'text' | 'overlay';
   previewImageUrl: string | null;
+  previewVideoUrl?: string | null;
   previewTextInheritedImageUrl?: string | null;
   previewTextInheritedVideoUrl?: string | null;
   previewOverlayInheritedImageUrl?: string | null;
@@ -424,7 +426,9 @@ export function ImageEffectsDetailModal({
   activeTab,
   enabledTabs,
   variant = 'default',
+  sceneKind = 'image',
   previewImageUrl,
+  previewVideoUrl = null,
   previewTextInheritedImageUrl = null,
   previewTextInheritedVideoUrl = null,
   previewOverlayInheritedImageUrl = null,
@@ -1556,6 +1560,8 @@ export function ImageEffectsDetailModal({
 
   if (!isRendered || !portalTarget) return null;
 
+  const isVideoLookScene = sceneKind === 'video' && currentTab === 'visual';
+
   const handleRequestClose = () => {
     if (isClosing) return;
 
@@ -2613,14 +2619,18 @@ export function ImageEffectsDetailModal({
                   ? 'Text animation studio'
                   : currentTab === 'overlay'
                     ? 'Overlay scene studio'
-                    : 'Image effects studio'}
+                    : sceneKind === 'video'
+                      ? 'Video look studio'
+                      : 'Image effects studio'}
               </h3>
               <p className="mt-1 text-sm text-slate-300">
                 {currentTab === 'text'
                   ? 'Tune flashy hook text, background modes, and reusable animation presets.'
                   : currentTab === 'overlay'
                     ? 'Compose an overlay asset over the scene background and decide whether text sits above or below it.'
-                    : 'Look edits preview as a still. Motion edits preview with your current look applied.'}
+                    : sceneKind === 'video'
+                      ? 'Tune the video look while previewing the actual clip. Motion editing is intentionally disabled for video scenes.'
+                      : 'Look edits preview as a still. Motion edits preview with your current look applied.'}
               </p>
             </div>
             <button
@@ -2727,6 +2737,34 @@ export function ImageEffectsDetailModal({
                 textAnimationSettings={resolvedText}
                 className={`${textPreviewFrameClass} overflow-hidden rounded-[1.5rem]`}
               />
+            ) : isVideoLookScene ? (
+              previewVideoUrl ? (
+                <ImageEffectPreview
+                  visualEffect={debouncedPreview.visualEffect}
+                  imageMotionEffect={debouncedPreview.imageMotionEffect}
+                  imageMotionSpeed={debouncedPreview.imageMotionSpeed}
+                  isShortVideo={isShortVideo}
+                  imageFilterSettings={debouncedPreview.imageFilterSettings}
+                  imageMotionSettings={debouncedPreview.imageMotionSettings}
+                  enableMotion={false}
+                  className="flex max-h-full max-w-full items-center justify-center"
+                  motionResetKey={debouncedPreview.resetKey}
+                >
+                  <video
+                    src={previewVideoUrl}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    controls
+                    className="max-h-[66vh] w-auto max-w-full rounded-[1.5rem] object-contain"
+                  />
+                </ImageEffectPreview>
+              ) : (
+                <div className="flex h-full min-h-80 w-full items-center justify-center rounded-[1.5rem] border border-dashed border-white/15 bg-white/5 text-sm text-slate-300">
+                  Upload, generate, or pick a video to preview detailed look settings.
+                </div>
+              )
             ) : previewImageUrl ? (
               <ImageEffectPreview
                 visualEffect={debouncedPreview.visualEffect}
@@ -2757,7 +2795,9 @@ export function ImageEffectsDetailModal({
           <div className="border-b border-slate-200 px-6 py-5">
             <h4 className="text-lg font-semibold text-slate-900">
               {currentTab === 'visual'
-                ? 'Look controls'
+                ? sceneKind === 'video'
+                  ? 'Video look controls'
+                  : 'Look controls'
                 : currentTab === 'motion'
                   ? 'Motion controls'
                   : currentTab === 'overlay'
@@ -2766,7 +2806,9 @@ export function ImageEffectsDetailModal({
             </h4>
             <p className="mt-1 text-sm text-slate-500">
               {currentTab === 'visual'
-                ? 'Blend preset selection with direct filter tuning.'
+                ? sceneKind === 'video'
+                  ? 'Use the same look editor as image scenes, applied directly to the active video preview.'
+                  : 'Blend preset selection with direct filter tuning.'
                 : currentTab === 'motion'
                   ? 'Tune transform values and save reusable motion presets.'
                   : currentTab === 'overlay'

@@ -408,6 +408,8 @@ type SentenceEditorCardProps = {
   isSavingSoundEffectsMix: boolean;
 
   onSelectVideoFromLibrary?: () => void;
+  onSaveVideoToLibrary?: () => void | Promise<void>;
+  isSavingVideoToLibrary?: boolean;
 
   videoModel: 'gemini' | 'grok';
 
@@ -575,6 +577,8 @@ function SentenceEditorCardComponent({
   isSavingSoundEffectsMix,
 
   onSelectVideoFromLibrary,
+  onSaveVideoToLibrary,
+  isSavingVideoToLibrary = false,
 
   videoModel,
 
@@ -660,6 +664,10 @@ function SentenceEditorCardComponent({
     : 'block w-full aspect-video object-cover';
   const hasAnyVideo = Boolean(item.video || item.videoUrl);
   const isSubscribeClip = item.videoUrl === '/subscribe.mp4';
+  const canSaveCurrentVideoToLibrary = Boolean(
+    onSaveVideoToLibrary && !isSubscribeClip && hasAnyVideo,
+  );
+  const isCurrentVideoSaved = Boolean(item.savedVideoId) && !isSubscribeClip;
   const hasAnyImage = Boolean(
     item.image || item.imageUrl || item.secondaryImage || item.secondaryImageUrl,
   );
@@ -1428,6 +1436,13 @@ function SentenceEditorCardComponent({
       : resolvedTextAnimationSettings.backgroundMode === 'inheritVideo'
         ? videoPreviewUrl
         : null;
+  const detailSceneKind = isOverlaySceneTab
+    ? 'overlay'
+    : isTextSceneTab
+      ? 'text'
+      : isVideoSceneTab
+        ? 'video'
+        : 'image';
   const detailPreviewUrl =
     imagePreviewUrl ??
     secondaryImagePreviewUrl ??
@@ -1435,6 +1450,8 @@ function SentenceEditorCardComponent({
     referencePreviewUrl ??
     endPreviewUrl ??
     null;
+  const detailImagePreviewUrl = isVideoSceneTab ? null : detailPreviewUrl;
+  const detailVideoPreviewUrl = isVideoSceneTab ? videoPreviewUrl : null;
   const showSecondaryImageSlot =
     isImageSceneTab &&
     !hasAnyVideo &&
@@ -1755,8 +1772,9 @@ function SentenceEditorCardComponent({
     if (isOverlaySceneTab) return ['overlay'];
     if (isTextSceneTab) return ['text'];
     if (isImageSceneTab) return ['visual', 'motion'];
+    if (isVideoSceneTab) return ['visual'];
     return ['visual'];
-  }, [isImageSceneTab, isOverlaySceneTab, isTextSceneTab]);
+  }, [isImageSceneTab, isOverlaySceneTab, isTextSceneTab, isVideoSceneTab]);
 
   return (
     <div
@@ -1946,7 +1964,7 @@ function SentenceEditorCardComponent({
               </div>
 
               {imageEffectsMode === 'quick' ? (
-                <div className="grid min-w-88 grid-cols-1 gap-2 md:grid-cols-2">
+                <div className={isImageSceneTab ? 'grid min-w-88 grid-cols-1 gap-2 md:grid-cols-2' : 'min-w-44'}>
                   <Select value={quickLookSelectValue} onValueChange={handleLookPresetSelect}>
                     <SelectTrigger
                       className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
@@ -1977,42 +1995,39 @@ function SentenceEditorCardComponent({
                     </SelectContent>
                   </Select>
 
-                  <Select
-                    value={quickMotionSelectValue}
-                    onValueChange={handleMotionPresetSelect}
-                    disabled={!isImageSceneTab}
-                  >
-                    <SelectTrigger
-                      className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
-                      title={
-                        isImageSceneTab
-                          ? `Motion preset: ${imageMotionEffectLabel}`
-                          : 'Motion presets are available on image scenes only'
-                      }
+                  {isImageSceneTab ? (
+                    <Select
+                      value={quickMotionSelectValue}
+                      onValueChange={handleMotionPresetSelect}
                     >
-                      <div className="flex items-center gap-2">
-                        <Clapperboard className="h-4 w-4" />
-                        <SelectValue placeholder="Motion" />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent className="max-h-80">
-                      {IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => (
-                        <SelectItem key={value} value={`builtin:${value}`}>
-                          {getImageMotionEffectLabel(value)}
-                        </SelectItem>
-                      ))}
-                      {retainedTemporaryMotion ? (
-                        <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
-                          Custom
-                        </SelectItem>
-                      ) : null}
-                      {motionEffectPresets.map((preset) => (
-                        <SelectItem key={preset.id} value={`custom:${preset.id}`}>
-                          {preset.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                      <SelectTrigger
+                        className="h-9 w-full border-gray-200 bg-white text-gray-700 shadow-sm"
+                        title={`Motion preset: ${imageMotionEffectLabel}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Clapperboard className="h-4 w-4" />
+                          <SelectValue placeholder="Motion" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent className="max-h-80">
+                        {IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => (
+                          <SelectItem key={value} value={`builtin:${value}`}>
+                            {getImageMotionEffectLabel(value)}
+                          </SelectItem>
+                        ))}
+                        {retainedTemporaryMotion ? (
+                          <SelectItem value={`custom:${TEMPORARY_CUSTOM_PRESET_ID}`}>
+                            Custom
+                          </SelectItem>
+                        ) : null}
+                        {motionEffectPresets.map((preset) => (
+                          <SelectItem key={preset.id} value={`custom:${preset.id}`}>
+                            {preset.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
@@ -2026,17 +2041,18 @@ function SentenceEditorCardComponent({
                     <Sparkles className="mr-2 h-4 w-4" />
                     Edit look
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openImageEffectsModal('motion')}
-                    disabled={!isImageSceneTab}
-                    className="h-9 rounded-xl border-sky-200 bg-white text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Clapperboard className="mr-2 h-4 w-4" />
-                    Edit motion
-                  </Button>
+                  {isImageSceneTab ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openImageEffectsModal('motion')}
+                      className="h-9 rounded-xl border-sky-200 bg-white text-sky-700 hover:bg-sky-50"
+                    >
+                      <Clapperboard className="mr-2 h-4 w-4" />
+                      Edit motion
+                    </Button>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -3836,16 +3852,46 @@ function SentenceEditorCardComponent({
                         />
                       </ImageEffectPreview>
 
-                      {item.video || (item.videoUrl && item.videoUrl !== '/subscribe.mp4') ? (
-                        <button
-                          type="button"
-                          onClick={() => onRemoveGeneratedVideo?.()}
-                          className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
-                          title="Remove video"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      ) : null}
+                      <div className="absolute top-2 right-2 flex items-center gap-2">
+                        {canSaveCurrentVideoToLibrary ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void onSaveVideoToLibrary?.();
+                            }}
+                            disabled={isSavingVideoToLibrary || isCurrentVideoSaved}
+                            className={
+                              isCurrentVideoSaved
+                                ? 'p-2 rounded-xl bg-emerald-500 text-white shadow-lg'
+                                : 'p-2 rounded-xl bg-white/95 text-indigo-700 hover:bg-white shadow-lg transition-all hover:scale-110 disabled:cursor-not-allowed disabled:hover:scale-100'
+                            }
+                            title={
+                              isCurrentVideoSaved
+                                ? 'Saved to video library'
+                                : isSavingVideoToLibrary
+                                  ? 'Saving video to library'
+                                  : 'Save to video library'
+                            }
+                          >
+                            {isSavingVideoToLibrary ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4" />
+                            )}
+                          </button>
+                        ) : null}
+
+                        {item.video || (item.videoUrl && item.videoUrl !== '/subscribe.mp4') ? (
+                          <button
+                            type="button"
+                            onClick={() => onRemoveGeneratedVideo?.()}
+                            className="p-2 bg-red-500 text-white rounded-xl hover:bg-red-600 shadow-lg transition-all hover:scale-110"
+                            title="Remove video"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
 
                     {!isSubscribeClip ? (
@@ -4402,7 +4448,9 @@ function SentenceEditorCardComponent({
           isShortVideo={isShortVideo}
           activeTab={imageEffectsTab}
           enabledTabs={detailEnabledTabs}
-          previewImageUrl={detailPreviewUrl}
+          sceneKind={detailSceneKind}
+          previewImageUrl={detailImagePreviewUrl}
+          previewVideoUrl={detailVideoPreviewUrl}
           previewTextInheritedImageUrl={imagePreviewUrl}
           previewTextInheritedVideoUrl={videoPreviewUrl}
           previewOverlayInheritedImageUrl={imagePreviewUrl}

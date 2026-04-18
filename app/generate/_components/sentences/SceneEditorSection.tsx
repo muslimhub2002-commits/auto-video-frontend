@@ -52,6 +52,8 @@ type SceneEditorSectionProps = {
   onResetBulkMotionEffects?: () => void;
 
   onSelectVideoFromLibrary?: (index: number) => void;
+  onSaveSentenceVideoToLibrary?: (index: number) => void | Promise<void>;
+  isSavingSentenceVideoLibraryBySentenceId?: Record<string, boolean>;
 
   onOpenSentenceSoundEffectsLibrary: (index: number) => void;
   onSentenceSoundEffectsChange: (
@@ -277,6 +279,7 @@ type SentenceRowProps = {
   isSavingSoundEffectsMix: boolean;
   isGeneratingVideo: boolean;
   isGeneratingVideoPrompt: boolean;
+  isSavingVideoToLibrary: boolean;
   onOpenSentenceSoundEffectsLibrary: (index: number) => void;
   onSentenceSoundEffectsChange: (
     index: number,
@@ -286,6 +289,7 @@ type SentenceRowProps = {
   onUploadSentenceSoundEffect: (index: number, files: File[]) => void | Promise<void>;
   onSaveSentenceSoundEffectsMix: (index: number) => void | Promise<void>;
   onSelectVideoFromLibrary?: (index: number) => void;
+  onSaveSentenceVideoToLibrary?: (index: number) => void | Promise<void>;
   videoModel: 'gemini' | 'grok';
   scriptCharacters: ScriptCharacter[];
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
@@ -468,12 +472,14 @@ const SentenceRow = memo(function SentenceRow({
   isSavingSoundEffectsMix,
   isGeneratingVideo,
   isGeneratingVideoPrompt,
+  isSavingVideoToLibrary,
   onOpenSentenceSoundEffectsLibrary,
   onSentenceSoundEffectsChange,
   onSentenceAlignSoundEffectsToSceneEndChange,
   onUploadSentenceSoundEffect,
   onSaveSentenceSoundEffectsMix,
   onSelectVideoFromLibrary,
+  onSaveSentenceVideoToLibrary,
   videoModel,
   scriptCharacters,
   onSentenceForcedCharacterKeysChange,
@@ -567,6 +573,12 @@ const SentenceRow = memo(function SentenceRow({
               ? () => onSelectVideoFromLibrary(index)
               : undefined
           }
+          onSaveVideoToLibrary={
+            onSaveSentenceVideoToLibrary
+              ? () => onSaveSentenceVideoToLibrary(index)
+              : undefined
+          }
+          isSavingVideoToLibrary={isSavingVideoToLibrary}
           videoModel={videoModel}
           scriptCharacters={scriptCharacters}
           onForcedCharacterKeysChange={(next) =>
@@ -812,6 +824,7 @@ const SentenceRow = memo(function SentenceRow({
   prev.isSavingSoundEffectsMix === next.isSavingSoundEffectsMix &&
   prev.isGeneratingVideo === next.isGeneratingVideo &&
   prev.isGeneratingVideoPrompt === next.isGeneratingVideoPrompt &&
+  prev.isSavingVideoToLibrary === next.isSavingVideoToLibrary &&
   prev.videoModel === next.videoModel &&
   prev.scriptCharacters === next.scriptCharacters &&
   prev.scriptLocations === next.scriptLocations &&
@@ -839,6 +852,8 @@ export function SceneEditorSection({
   onResetBulkMotionEffects,
 
   onSelectVideoFromLibrary,
+  onSaveSentenceVideoToLibrary,
+  isSavingSentenceVideoLibraryBySentenceId = {},
 
   onOpenSentenceSoundEffectsLibrary,
   onSentenceSoundEffectsChange,
@@ -1191,12 +1206,16 @@ export function SceneEditorSection({
               isSavingSoundEffectsMix={Boolean(isSavingSentenceSfxMixBySentenceId[item.id])}
               isGeneratingVideo={Boolean(isGeneratingVideoBySentenceId[item.id])}
               isGeneratingVideoPrompt={Boolean(isGeneratingVideoPromptBySentenceId[item.id])}
+              isSavingVideoToLibrary={
+                Boolean(isSavingSentenceVideoLibraryBySentenceId[item.id])
+              }
               onOpenSentenceSoundEffectsLibrary={onOpenSentenceSoundEffectsLibrary}
               onSentenceSoundEffectsChange={onSentenceSoundEffectsChange}
               onSentenceAlignSoundEffectsToSceneEndChange={onSentenceAlignSoundEffectsToSceneEndChange}
               onUploadSentenceSoundEffect={onUploadSentenceSoundEffect}
               onSaveSentenceSoundEffectsMix={onSaveSentenceSoundEffectsMix}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
+              onSaveSentenceVideoToLibrary={onSaveSentenceVideoToLibrary}
               videoModel={videoModel}
               scriptCharacters={scriptCharacters}
               onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}

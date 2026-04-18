@@ -271,11 +271,13 @@ type SentencesImagesSectionProps = {
   ) => void;
   onRemoveSentenceReferenceImage: (index: number) => void;
   onSelectVideoFromLibrary?: (index: number) => void;
+  onSaveSentenceVideoToLibrary?: (index: number) => void | Promise<void>;
   onSelectFromLibrary: (
     index: number,
     which: 'single' | 'secondary' | 'start' | 'end' | 'reference',
   ) => void;
   isGeneratingVideoBySentenceId: Record<string, boolean>;
+  isSavingSentenceVideoLibraryBySentenceId?: Record<string, boolean>;
   setIsGeneratingVideoBySentenceId: Dispatch<SetStateAction<Record<string, boolean>>>;
   onSaveSentenceImage?: (index: number) => void | Promise<void>;
   onAddSentenceImageSlot?: (index: number) => void;
@@ -398,7 +400,9 @@ export function SentencesImagesSection({
   onSentenceReferenceImageUpload,
   onRemoveSentenceReferenceImage,
   onSelectVideoFromLibrary,
+  onSaveSentenceVideoToLibrary,
   isGeneratingVideoBySentenceId,
+  isSavingSentenceVideoLibraryBySentenceId = {},
   setIsGeneratingVideoBySentenceId,
   onSelectFromLibrary,
   onRemoveSentenceImage,
@@ -722,6 +726,8 @@ export function SentencesImagesSection({
               onGenerateBulkMotionEffects={onGenerateBulkMotionEffects}
               onResetBulkMotionEffects={onResetBulkMotionEffects}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
+              onSaveSentenceVideoToLibrary={onSaveSentenceVideoToLibrary}
+              isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryBySentenceId}
               videoModel={videoModel}
 
               onOpenSentenceSoundEffectsLibrary={onOpenSentenceSoundEffectsLibrary}

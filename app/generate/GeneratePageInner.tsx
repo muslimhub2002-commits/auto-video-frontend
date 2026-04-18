@@ -60,7 +60,11 @@ import { useAuthGuard } from './_hooks/useAuthGuard';
 import { useSentencesEditor } from './_hooks/useSentencesEditor';
 import { useVideoJob } from './_hooks/useVideoJob';
 import { api } from '@/lib/api';
-import { mapWithConcurrency, uploadManagedFile } from '@/lib/cloudinary';
+import {
+  ensureManagedPublicUrl,
+  mapWithConcurrency,
+  uploadManagedFile,
+} from '@/lib/cloudinary';
 import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -1632,6 +1636,135 @@ async function sha256HexForFile(file: File): Promise<string | null> {
   }
 }
 
+type SavedVideoLibraryRecord = {
+  id: string;
+  video: string;
+  video_size?: 'portrait' | 'landscape' | null;
+  width?: number | null;
+  height?: number | null;
+};
+
+const VIDEO_LIBRARY_MANAGED_FOLDER = 'auto-video-generator/videos-library';
+
+const getActiveSentenceVideoMode = (
+  sentence: SentenceItem,
+): NonNullable<SentenceItem['videoGenerationMode']> =>
+  (sentence.videoGenerationMode ?? 'referenceImage') as NonNullable<
+    SentenceItem['videoGenerationMode']
+  >;
+
+const applyVideoSelectionToSentence = (
+  sentence: SentenceItem,
+  params: {
+    videoUrl: string;
+    savedVideoId: string | null;
+    mode?: NonNullable<SentenceItem['videoGenerationMode']>;
+    clearLocalFile?: boolean;
+  },
+): SentenceItem => {
+  const mode = params.mode ?? getActiveSentenceVideoMode(sentence);
+  const next: SentenceItem = {
+    ...sentence,
+    mediaMode: 'frames',
+    sceneTab: 'video',
+    video: params.clearLocalFile ? null : (sentence.video ?? null),
+    videoUrl: params.videoUrl,
+    savedVideoId: params.savedVideoId,
+  };
+
+  if (mode === 'frames') {
+    next.framesVideoUrl = params.videoUrl;
+    next.framesSavedVideoId = params.savedVideoId;
+  } else if (mode === 'text') {
+    next.textVideoUrl = params.videoUrl;
+    next.textSavedVideoId = params.savedVideoId;
+  } else {
+    next.referenceVideoUrl = params.videoUrl;
+    next.referenceSavedVideoId = params.savedVideoId;
+  }
+
+  return next;
+};
+
+const inferVideoOrientationFromDimensions = (
+  width: number | null,
+  height: number | null,
+): 'portrait' | 'landscape' | null => {
+  if (!width || !height) return null;
+  return width >= height ? 'landscape' : 'portrait';
+};
+
+const getVideoMetadataFromSource = async (params: {
+  file?: File | null;
+  url?: string | null;
+}): Promise<{ width: number | null; height: number | null }> => {
+  const file = params.file ?? null;
+  const sourceUrl = String(params.url ?? '').trim();
+
+  if (!file && !sourceUrl) {
+    return { width: null, height: null };
+  }
+
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    const objectUrl = file ? URL.createObjectURL(file) : null;
+    let settled = false;
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      video.removeAttribute('src');
+      try {
+        video.load();
+      } catch {
+        // Ignore cleanup errors.
+      }
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+
+    const finalize = (next: { width: number | null; height: number | null }) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(next);
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      finalize({ width: null, height: null });
+    }, 10000);
+
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        finalize({
+          width: Number.isFinite(video.videoWidth) && video.videoWidth > 0
+            ? video.videoWidth
+            : null,
+          height: Number.isFinite(video.videoHeight) && video.videoHeight > 0
+            ? video.videoHeight
+            : null,
+        });
+      },
+      { once: true },
+    );
+    video.addEventListener(
+      'error',
+      () => {
+        finalize({ width: null, height: null });
+      },
+      { once: true },
+    );
+
+    video.src = objectUrl ?? sourceUrl;
+    video.load();
+  });
+};
+
 
 // SentenceItem type is shared in ./_types/sentences
 
@@ -1926,6 +2059,9 @@ export function GeneratePageInner() {
   >(null);
   const [isVideoLibraryOpen, setIsVideoLibraryOpen] = useState(false);
   const [videoLibraryTargetId, setVideoLibraryTargetId] = useState<string | null>(null);
+  const [isSavingSentenceVideoLibraryById, setIsSavingSentenceVideoLibraryById] = useState<
+    Record<string, boolean>
+  >({});
   const [isSoundEffectsLibraryOpen, setIsSoundEffectsLibraryOpen] = useState(false);
   const [soundEffectsLibraryTargetId, setSoundEffectsLibraryTargetId] = useState<string | null>(null);
   const [transitionSoundEditorTargetId, setTransitionSoundEditorTargetId] = useState<string | null>(null);
@@ -9447,34 +9583,116 @@ export function GeneratePageInner() {
     setIsVideoLibraryOpen(true);
   };
 
+  const handleSaveSentenceVideoToLibrary = useCallback(
+    async (index: number) => {
+      const sentence = sentences[index];
+      const sentenceId = sentence?.id;
+      if (!sentence || !sentenceId) return;
+
+      if (!user) {
+        showAlert('You must be logged in to save a video.', { type: 'warning' });
+        return;
+      }
+
+      if (isSavingSentenceVideoLibraryById[sentenceId]) return;
+
+      if (sentence.savedVideoId) {
+        showToast('This video is already saved to your library.', 'success');
+        return;
+      }
+
+      const localVideoFile = sentence.video ?? null;
+      const currentVideoUrl = String(sentence.videoUrl ?? '').trim();
+      const sourceVideoUrl =
+        currentVideoUrl && currentVideoUrl !== '/subscribe.mp4' ? currentVideoUrl : null;
+
+      if (!localVideoFile && !sourceVideoUrl) {
+        showAlert('Add or generate a video before saving it to your library.', {
+          type: 'warning',
+        });
+        return;
+      }
+
+      setIsSavingSentenceVideoLibraryById((prev) => ({
+        ...prev,
+        [sentenceId]: true,
+      }));
+
+      try {
+        const managedVideoUrl = localVideoFile
+          ? await uploadManagedFile(localVideoFile, {
+            resourceType: 'video',
+            folder: VIDEO_LIBRARY_MANAGED_FOLDER,
+          })
+          : await ensureManagedPublicUrl(sourceVideoUrl as string, {
+            resourceType: 'video',
+            folder: VIDEO_LIBRARY_MANAGED_FOLDER,
+          });
+
+        const { width, height } = await getVideoMetadataFromSource({
+          file: localVideoFile,
+          url: localVideoFile ? null : managedVideoUrl,
+        });
+        const video_size = inferVideoOrientationFromDimensions(width, height);
+
+        const response = await api.post<SavedVideoLibraryRecord>('/videos-library/url', {
+          video: managedVideoUrl,
+          ...(video_size ? { video_size } : {}),
+          ...(width ? { width } : {}),
+          ...(height ? { height } : {}),
+        });
+
+        const savedVideoId = String(response.data?.id ?? '').trim();
+        const persistedVideoUrl =
+          String(response.data?.video ?? managedVideoUrl).trim() || managedVideoUrl;
+
+        if (!savedVideoId) {
+          throw new Error('Saved video response is missing an id.');
+        }
+
+        updateSentenceById(sentenceId, (item) =>
+          applyVideoSelectionToSentence(item, {
+            videoUrl: persistedVideoUrl,
+            savedVideoId,
+            clearLocalFile: true,
+          }),
+        );
+
+        showToast('Video saved to your library.', 'success');
+      } catch (error) {
+        console.error('Save sentence video to library failed', error);
+        showToast(
+          getRequestErrorMessage(error, 'Failed to save video to library.'),
+          'error',
+        );
+      } finally {
+        setIsSavingSentenceVideoLibraryById((prev) => {
+          const next = { ...prev };
+          delete next[sentenceId];
+          return next;
+        });
+      }
+    },
+    [
+      isSavingSentenceVideoLibraryById,
+      sentences,
+      showAlert,
+      showToast,
+      updateSentenceById,
+      user,
+    ],
+  );
+
   const handleLibraryVideoSelect = (videoUrl: string, id: string | null) => {
     if (videoLibraryTargetId === null) return;
 
-    updateSentenceById(videoLibraryTargetId, (item) => {
-      const mode = (item.videoGenerationMode ?? 'referenceImage') as NonNullable<
-        SentenceItem['videoGenerationMode']
-      >;
-      const next: SentenceItem = {
-        ...item,
-        sceneTab: 'video',
-        video: null,
+    updateSentenceById(videoLibraryTargetId, (item) =>
+      applyVideoSelectionToSentence(item, {
         videoUrl,
         savedVideoId: id,
-      };
-
-      if (mode === 'frames') {
-        next.framesVideoUrl = videoUrl;
-        next.framesSavedVideoId = id;
-      } else if (mode === 'text') {
-        next.textVideoUrl = videoUrl;
-        next.textSavedVideoId = id;
-      } else {
-        next.referenceVideoUrl = videoUrl;
-        next.referenceSavedVideoId = id;
-      }
-
-      return next;
-    });
+        clearLocalFile: true,
+      }),
+    );
 
     setVideoLibraryTargetId(null);
   };
@@ -11766,6 +11984,8 @@ export function GeneratePageInner() {
                   onSaveSentenceImage={handleSaveSentenceImage}
                   onSelectFromLibrary={handleSelectFromLibrary}
                   onSelectVideoFromLibrary={handleSelectVideoFromLibrary}
+                  onSaveSentenceVideoToLibrary={handleSaveSentenceVideoToLibrary}
+                  isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryById}
                   onAddSuspenseScene={handleAddSuspenseScene}
                   onGenerateTestVideo={handleGenerateTestVideo}
                   canUseCurrentTestVoiceSettings={canUseCurrentTestVoiceSettings}
