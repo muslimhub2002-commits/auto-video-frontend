@@ -64,7 +64,11 @@ import { mapWithConcurrency, uploadManagedFile } from '@/lib/cloudinary';
 import { useAlertModal } from '@/components/ui/alert-modal';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/toast';
-import type { ElevenLabsVoiceSettings, SentenceItem } from './_types/sentences';
+import type {
+  ElevenLabsVoiceSettings,
+  SentenceItem,
+  SentenceSoundEffectItem,
+} from './_types/sentences';
 import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
 import {
   getDefaultImageFilterSettings,
@@ -111,6 +115,39 @@ type ScriptLocation = {
   description?: string;
 };
 
+type BackendDetachedSoundEffectDto = {
+  sound_effect_id?: string | null;
+  soundEffectId?: string | null;
+  title?: string | null;
+  url?: string | null;
+  delay_seconds?: number | null;
+  delaySeconds?: number | null;
+  volume_percent?: number | null;
+  volumePercent?: number | null;
+  timing_mode?: 'with_previous' | 'after_previous_ends' | null;
+  timingMode?:
+    | 'with_previous'
+    | 'after_previous_ends'
+    | 'withPrevious'
+    | 'afterPreviousEnds'
+    | null;
+  audio_settings_override?: Record<string, unknown> | null;
+  audioSettingsOverride?: Record<string, unknown> | null;
+  default_audio_settings?: Record<string, unknown> | null;
+  defaultAudioSettings?: Record<string, unknown> | null;
+  duration_seconds?: number | null;
+  durationSeconds?: number | null;
+};
+
+type BackendTextAnimationPresetDto = Partial<TextAnimationPresetDto> & {
+  sound_effects?: BackendDetachedSoundEffectDto[] | null;
+};
+
+type BackendOverlayPresetDto = Partial<OverlayPresetDto> & {
+  mime_type?: string | null;
+  sound_effects?: BackendDetachedSoundEffectDto[] | null;
+};
+
 type BackendSentenceDto = {
   id: string;
   text: string;
@@ -153,10 +190,14 @@ type BackendSentenceDto = {
   textAnimationId?: string | null;
   text_animation_settings?: Record<string, unknown> | null;
   textAnimationSettings?: Record<string, unknown> | null;
+  text_animation_sound_effects?: BackendDetachedSoundEffectDto[] | null;
+  textAnimationSoundEffects?: BackendDetachedSoundEffectDto[] | null;
   overlay_id?: string | null;
   overlayId?: string | null;
   overlay_settings?: Record<string, unknown> | null;
   overlaySettings?: Record<string, unknown> | null;
+  overlay_sound_effects?: BackendDetachedSoundEffectDto[] | null;
+  overlaySoundEffects?: BackendDetachedSoundEffectDto[] | null;
   overlay?: {
     id: string;
     title: string;
@@ -224,15 +265,123 @@ type PresetLibraryResponse<TPreset> = {
   limit?: number;
 };
 
+const normalizeDetachedSentenceSoundEffects = (
+  items: unknown,
+): SentenceSoundEffectItem[] => {
+  const list = Array.isArray(items) ? items : [];
+
+  return list.flatMap((entry) => {
+    const item = entry as BackendDetachedSoundEffectDto | null | undefined;
+    const id = String(item?.sound_effect_id ?? item?.soundEffectId ?? '').trim();
+    const url = String(item?.url ?? '').trim();
+    if (!id || !url) return [];
+
+    const rawTimingMode = item?.timing_mode ?? item?.timingMode ?? 'with_previous';
+    const durationSeconds = Number(item?.duration_seconds ?? item?.durationSeconds);
+
+    return [
+      {
+        id,
+        title: String(item?.title ?? '').trim() || 'Sound effect',
+        url,
+        delaySeconds: Math.max(
+          0,
+          Number(item?.delay_seconds ?? item?.delaySeconds ?? 0) || 0,
+        ),
+        volumePercent: Math.max(
+          0,
+          Math.min(300, Number(item?.volume_percent ?? item?.volumePercent ?? 100) || 100),
+        ),
+        timingMode:
+          rawTimingMode === 'after_previous_ends' ||
+          rawTimingMode === 'afterPreviousEnds'
+            ? 'afterPreviousEnds'
+            : 'withPrevious',
+        audioSettings: cloneSoundEffectAudioSettings(
+          item?.audio_settings_override ?? item?.audioSettingsOverride,
+        ),
+        defaultAudioSettings: cloneSoundEffectAudioSettings(
+          item?.default_audio_settings ?? item?.defaultAudioSettings,
+        ),
+        durationSeconds:
+          Number.isFinite(durationSeconds) && durationSeconds >= 0
+            ? Math.max(0, durationSeconds)
+            : null,
+      },
+    ];
+  });
+};
+
+const serializeDetachedSentenceSoundEffects = (
+  items: SentenceSoundEffectItem[] | null | undefined,
+): Array<{
+  sound_effect_id: string;
+  title?: string;
+  url?: string;
+  delay_seconds: number;
+  volume_percent: number;
+  audio_settings_override?: Record<string, unknown> | null;
+  timing_mode: 'with_previous' | 'after_previous_ends';
+  duration_seconds?: number | null;
+}> => {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  return items
+    .filter((item) => Boolean(item?.id))
+    .map((item) => ({
+      sound_effect_id: String(item.id),
+      title: String(item.title ?? '').trim() || undefined,
+      url: String(item.url ?? '').trim() || undefined,
+      delay_seconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
+      volume_percent: Math.max(
+        0,
+        Math.min(300, Number(item.volumePercent ?? 100) || 100),
+      ),
+      audio_settings_override: areSoundEffectAudioSettingsEqual(
+        item.audioSettings,
+        item.defaultAudioSettings,
+      )
+        ? null
+        : normalizeSoundEffectAudioSettings(item.audioSettings),
+      timing_mode:
+        item.timingMode === 'afterPreviousEnds'
+          ? 'after_previous_ends'
+          : 'with_previous',
+      duration_seconds:
+        typeof item.durationSeconds === 'number' && Number.isFinite(item.durationSeconds)
+          ? Math.max(0, item.durationSeconds)
+          : null,
+    }));
+};
+
+const normalizeTextAnimationPresetItem = (
+  item: BackendTextAnimationPresetDto | null | undefined,
+): TextAnimationPresetDto | null => {
+  const id = String(item?.id ?? '').trim();
+  if (!id) return null;
+
+  const soundEffects = normalizeDetachedSentenceSoundEffects(
+    item?.soundEffects ?? item?.sound_effects,
+  );
+
+  return {
+    id,
+    title: String(item?.title ?? '').trim() || 'Untitled text animation',
+    settings: normalizeSettingsObject(item?.settings) ?? null,
+    soundEffects: soundEffects.length > 0 ? soundEffects : null,
+  };
+};
+
 const normalizeOverlayPresetItem = (
-  item:
-    | (Partial<OverlayPresetDto> & { mime_type?: string | null })
-    | null
-    | undefined,
+  item: BackendOverlayPresetDto | null | undefined,
 ): OverlayPresetDto | null => {
   const id = String(item?.id ?? '').trim();
   const url = String(item?.url ?? '').trim();
   if (!id || !url) return null;
+
+  const soundEffects = normalizeDetachedSentenceSoundEffects(
+    item?.soundEffects ?? item?.sound_effects,
+  );
 
   return {
     id,
@@ -241,6 +390,7 @@ const normalizeOverlayPresetItem = (
     mimeType:
       String(item?.mimeType ?? item?.mime_type ?? '').trim() || null,
     settings: normalizeSettingsObject(item?.settings) ?? getDefaultOverlaySettings('image'),
+    soundEffects: soundEffects.length > 0 ? soundEffects : null,
   };
 };
 
@@ -462,7 +612,8 @@ const audioBufferToWav = (audioBuffer: AudioBuffer) => {
   return wavBuffer;
 };
 
-const stripFileExtension = (value: string) => value.replace(/\.[a-z0-9]+$/iu, '');
+const stripFileExtension = (value: string) =>
+  String(value ?? '').trim().replace(/\.[^.]+$/u, '').trim();
 
 const renderEditedAudioFile = async (params: {
   sourceFile?: File | null;
@@ -1031,6 +1182,24 @@ function filenameFromUrl(value: string, fallback: string): string {
     const candidate = trimmed.split('?')[0]?.split('/').pop();
     return candidate && candidate.trim() ? candidate.trim() : fallback;
   }
+}
+
+function resolveOverlayPresetTitle(params: {
+  preferredTitle?: string | null;
+  file?: File | null;
+  sourceUrl?: string | null;
+  fallback: string;
+}): string {
+  const preferredTitle = String(params.preferredTitle ?? '').trim();
+  if (preferredTitle) return preferredTitle;
+
+  const fileTitle = stripFileExtension(params.file?.name ?? '');
+  if (fileTitle) return fileTitle;
+
+  const sourceTitle = stripFileExtension(filenameFromUrl(params.sourceUrl ?? '', ''));
+  if (sourceTitle) return sourceTitle;
+
+  return params.fallback;
 }
 
 async function downloadUrlAsFile(url: string, fallbackName: string): Promise<File> {
@@ -2880,25 +3049,46 @@ export function GeneratePageInner() {
     return sourceSentences.map((s, index) => {
       const text = String(s.text ?? '');
       const trimmed = text.trim();
+      const tab = resolveSentenceSceneTab(s);
 
-      const soundEffects = Array.isArray(s.soundEffects)
-        ? computeSentenceSoundEffectTiming(s.soundEffects, {
-          ignoreOffsets: s.alignSoundEffectsToSceneEnd === true,
-        })
-          .filter((e) => Boolean(e?.url))
-          .map((e) => {
-            return {
-              src: String(e.url).trim(),
-              delaySeconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
-              durationSeconds:
-                typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
-                  ? Math.max(0, e.durationSeconds)
-                  : undefined,
-              trimStartSeconds: e.trimStartSeconds > 0 ? Math.max(0, e.trimStartSeconds) : undefined,
-              volumePercent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
-            };
-          })
-        : [];
+      const toRenderSoundEffects = (
+        items: SentenceSoundEffectItem[] | null | undefined,
+        ignoreOffsets = false,
+      ) => {
+        if (!Array.isArray(items) || items.length === 0) return [];
+
+        return computeSentenceSoundEffectTiming(items, { ignoreOffsets })
+          .filter((effect) => Boolean(effect?.url))
+          .map((effect) => ({
+            src: String(effect.url).trim(),
+            delaySeconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
+            durationSeconds:
+              typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
+                ? Math.max(0, effect.durationSeconds)
+                : undefined,
+            trimStartSeconds:
+              effect.trimStartSeconds > 0 ? Math.max(0, effect.trimStartSeconds) : undefined,
+            volumePercent: Math.max(
+              0,
+              Math.min(300, Number(effect.volumePercent ?? 100) || 100),
+            ),
+          }));
+      };
+
+      const activeDetachedSoundEffects =
+        tab === 'text'
+          ? s.textSoundEffects
+          : tab === 'overlay'
+            ? s.overlaySoundEffects
+            : [];
+
+      const soundEffects = [
+        ...toRenderSoundEffects(
+          s.soundEffects,
+          s.alignSoundEffectsToSceneEnd === true,
+        ),
+        ...toRenderSoundEffects(activeDetachedSoundEffects),
+      ];
 
       const transitionSoundEffects = Array.isArray(s.transitionSoundEffects)
         ? s.transitionSoundEffects
@@ -2934,8 +3124,6 @@ export function GeneratePageInner() {
           ...transitionSoundEffectsPatch,
         };
       }
-
-      const tab = resolveSentenceSceneTab(s);
       if (tab === 'video') {
         return {
           text,
@@ -4155,17 +4343,15 @@ export function GeneratePageInner() {
 
     setIsLoadingTextAnimationPresets(true);
     try {
-      const res = await api.get<PresetLibraryResponse<TextAnimationPresetDto>>(
+      const res = await api.get<PresetLibraryResponse<BackendTextAnimationPresetDto>>(
         '/text-animations',
         { params: { page: 1, limit: 100 } },
       );
 
       const items = Array.isArray(res.data?.items)
-        ? res.data.items.map((item) => ({
-          id: String(item.id ?? '').trim(),
-          title: String(item.title ?? '').trim() || 'Untitled text animation',
-          settings: normalizeSettingsObject(item.settings),
-        }))
+        ? res.data.items
+            .map((item) => normalizeTextAnimationPresetItem(item))
+            .filter((item): item is TextAnimationPresetDto => Boolean(item))
         : [];
 
       setTextAnimationPresets(items.filter((item) => item.id));
@@ -4185,7 +4371,7 @@ export function GeneratePageInner() {
 
     setIsLoadingOverlayPresets(true);
     try {
-      const res = await api.get<PresetLibraryResponse<OverlayPresetDto>>('/overlays', {
+      const res = await api.get<PresetLibraryResponse<BackendOverlayPresetDto>>('/overlays', {
         params: { page: 1, limit: 100 },
       });
 
@@ -4436,6 +4622,7 @@ export function GeneratePageInner() {
   const handleSaveTextAnimationPreset = async (
     title: string,
     settings: TextAnimationSettings,
+    soundEffects: SentenceSoundEffectItem[] | null | undefined,
   ): Promise<TextAnimationPresetDto | null> => {
     if (!user) {
       showAlert('You must be logged in to save a text animation preset.', { type: 'warning' });
@@ -4446,15 +4633,18 @@ export function GeneratePageInner() {
     if (!trimmedTitle) return null;
 
     try {
-      const res = await api.post<TextAnimationPresetDto>('/text-animations', {
+      const res = await api.post<BackendTextAnimationPresetDto>('/text-animations', {
         title: trimmedTitle,
         settings,
+        sound_effects: serializeDetachedSentenceSoundEffects(soundEffects),
       });
 
-      const saved: TextAnimationPresetDto = {
+      const saved = normalizeTextAnimationPresetItem(res.data) ?? {
         id: String(res.data?.id ?? '').trim(),
         title: String(res.data?.title ?? trimmedTitle).trim() || trimmedTitle,
         settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+        soundEffects:
+          soundEffects && soundEffects.length > 0 ? [...soundEffects] : null,
       };
 
       if (!saved.id) {
@@ -4475,6 +4665,7 @@ export function GeneratePageInner() {
   const handleUpdateTextAnimationPreset = async (
     textAnimationId: string,
     settings: TextAnimationSettings,
+    soundEffects: SentenceSoundEffectItem[] | null | undefined,
   ): Promise<TextAnimationPresetDto | null> => {
     if (!user) {
       showAlert('You must be logged in to update a text animation preset.', { type: 'warning' });
@@ -4485,17 +4676,20 @@ export function GeneratePageInner() {
     if (!trimmedId) return null;
 
     try {
-      const res = await api.patch<TextAnimationPresetDto>(`/text-animations/${trimmedId}`, {
+      const res = await api.patch<BackendTextAnimationPresetDto>(`/text-animations/${trimmedId}`, {
         settings,
+        sound_effects: serializeDetachedSentenceSoundEffects(soundEffects),
       });
 
       const currentPreset = textAnimationPresets.find((item) => item.id === trimmedId);
-      const saved: TextAnimationPresetDto = {
+      const saved = normalizeTextAnimationPresetItem(res.data) ?? {
         id: String(res.data?.id ?? trimmedId).trim(),
         title:
           String(res.data?.title ?? currentPreset?.title ?? 'Untitled text animation').trim() ||
           'Untitled text animation',
         settings: normalizeSettingsObject(res.data?.settings) ?? settings,
+        soundEffects:
+          soundEffects && soundEffects.length > 0 ? [...soundEffects] : currentPreset?.soundEffects ?? null,
       };
 
       setTextAnimationPresets((prev) => {
@@ -4553,15 +4747,25 @@ export function GeneratePageInner() {
     file?: File | null;
     sourceUrl?: string | null;
     overlayId?: string | null;
+    soundEffects?: SentenceSoundEffectItem[] | null;
   }): Promise<OverlayPresetDto | null> => {
-    const trimmedTitle = String(params.title ?? '').trim();
+    const resolvedTitle = resolveOverlayPresetTitle({
+      preferredTitle: params.title,
+      file: params.file ?? null,
+      sourceUrl: params.sourceUrl ?? null,
+      fallback: 'Overlay preset',
+    });
     const trimmedSourceUrl = String(params.sourceUrl ?? '').trim();
-    if (!trimmedTitle) return null;
+    if (!resolvedTitle) return null;
     if (!params.file && !trimmedSourceUrl) return null;
 
     const formData = new FormData();
-    formData.append('title', trimmedTitle);
+    formData.append('title', resolvedTitle);
     formData.append('settings', JSON.stringify(normalizeOverlaySettings(params.settings)));
+    formData.append(
+      'sound_effects',
+      JSON.stringify(serializeDetachedSentenceSoundEffects(params.soundEffects)),
+    );
     if (trimmedSourceUrl) {
       formData.append('sourceUrl', trimmedSourceUrl);
     }
@@ -4571,8 +4775,8 @@ export function GeneratePageInner() {
 
     try {
       const res = params.overlayId
-        ? await api.patch<OverlayPresetDto>(`/overlays/${encodeURIComponent(params.overlayId)}`, formData)
-        : await api.post<OverlayPresetDto>('/overlays', formData);
+        ? await api.patch<BackendOverlayPresetDto>(`/overlays/${encodeURIComponent(params.overlayId)}`, formData)
+        : await api.post<BackendOverlayPresetDto>('/overlays', formData);
 
       const saved = normalizeOverlayPresetItem(res.data);
       if (!saved) {
@@ -7175,6 +7379,12 @@ export function GeneratePageInner() {
                 : null,
           };
         });
+      const textSoundEffects = normalizeDetachedSentenceSoundEffects(
+        s.text_animation_sound_effects ?? s.textAnimationSoundEffects,
+      );
+      const overlaySoundEffects = normalizeDetachedSentenceSoundEffects(
+        s.overlay_sound_effects ?? s.overlaySoundEffects,
+      );
 
       const transitionSoundEffects = (s.transition_sound_effects ?? [])
         .map((row) => ({
@@ -7282,6 +7492,8 @@ export function GeneratePageInner() {
           normalizeOptionalElevenLabsVoiceSettings(elevenLabsSettings),
         alignSoundEffectsToSceneEnd: alignSoundEffectsToSceneEnd === true,
         soundEffects,
+        textSoundEffects,
+        overlaySoundEffects,
         transitionSoundEffects,
         characterKeys: inferredCharacterKeys,
         locationKey: inferredLocationKey,
@@ -9971,8 +10183,28 @@ export function GeneratePageInner() {
           text_animation_effect?: SentenceItem['textAnimationEffect'] | null;
           text_animation_id?: string | null;
           text_animation_settings?: Record<string, unknown> | null;
+          text_animation_sound_effects?: Array<{
+            sound_effect_id: string;
+            title?: string;
+            url?: string;
+            delay_seconds: number;
+            volume_percent: number;
+            audio_settings_override?: Record<string, unknown> | null;
+            timing_mode: 'with_previous' | 'after_previous_ends';
+            duration_seconds?: number | null;
+          }>;
           overlay_id?: string | null;
           overlay_settings?: Record<string, unknown> | null;
+          overlay_sound_effects?: Array<{
+            sound_effect_id: string;
+            title?: string;
+            url?: string;
+            delay_seconds: number;
+            volume_percent: number;
+            audio_settings_override?: Record<string, unknown> | null;
+            timing_mode: 'with_previous' | 'after_previous_ends';
+            duration_seconds?: number | null;
+          }>;
           image_effects_mode?: 'quick' | 'detailed' | null;
           visual_effect?: Exclude<SentenceItem['visualEffect'], 'none'> | null;
           image_filter_id?: string | null;
@@ -10055,9 +10287,7 @@ export function GeneratePageInner() {
           );
           const savedOverlayPreset = overlayPresetNeedsCreate
             ? await saveOverlayPresetRequest({
-                title:
-                  String(s.text ?? '').trim().slice(0, 64) ||
-                  `Sentence ${index + 1} overlay`,
+                title: currentOverlayPreset?.title ?? '',
                 settings: normalizedOverlaySettings ?? getDefaultOverlaySettings('image'),
                 file: s.overlayFile ?? null,
                 sourceUrl: overlaySourceUrl,
@@ -10129,8 +10359,12 @@ export function GeneratePageInner() {
               s.textAnimationEffect,
               effectiveIsShort,
             ),
+            text_animation_sound_effects:
+              serializeDetachedSentenceSoundEffects(s.textSoundEffects),
             overlay_id: overlayId,
             overlay_settings: normalizedOverlaySettings,
+            overlay_sound_effects:
+              serializeDetachedSentenceSoundEffects(s.overlaySoundEffects),
             image_effects_mode: s.imageEffectsMode ?? 'quick',
             visual_effect:
               s.visualEffect === 'colorGrading' ||

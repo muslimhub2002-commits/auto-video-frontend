@@ -1,5 +1,30 @@
 import type { SoundEffectAudioSettings } from './sound-effect-audio';
 
+export type SentenceSoundEffectTimingMode = 'withPrevious' | 'afterPreviousEnds';
+
+export type SentenceSoundEffectItem = {
+  id: string;
+  title: string;
+  url: string;
+  delaySeconds: number;
+  volumePercent: number;
+  timingMode?: SentenceSoundEffectTimingMode;
+  durationSeconds?: number | null;
+  audioSettings?: SoundEffectAudioSettings | null;
+  defaultAudioSettings?: SoundEffectAudioSettings | null;
+};
+
+export type TransitionSoundEffectItem = {
+  id: string;
+  title: string;
+  url: string;
+  delaySeconds: number;
+  volumePercent: number;
+  isTransitionSound?: boolean;
+  fromFavorites?: boolean;
+  audioSettings?: SoundEffectAudioSettings | null;
+};
+
 export type ElevenLabsVoiceSettings = {
   stability: number;
   similarityBoost: number;
@@ -30,6 +55,7 @@ export type SentenceItem = {
   textAnimationText?: string | null;
   customTextAnimationId?: string | null;
   textAnimationSettings?: Record<string, unknown> | null;
+  textSoundEffects?: SentenceSoundEffectItem[];
   textBackgroundImage?: File | null;
   textBackgroundImageUrl?: string | null;
   textBackgroundSavedImageId?: string | null;
@@ -41,6 +67,7 @@ export type SentenceItem = {
   overlayUrl?: string | null;
   overlayMimeType?: string | null;
   overlaySettings?: Record<string, unknown> | null;
+  overlaySoundEffects?: SentenceSoundEffectItem[];
   imageMotionEffect?:
     | 'default'
     | 'slowZoomIn'
@@ -59,28 +86,9 @@ export type SentenceItem = {
   imageMotionSettings?: Record<string, unknown> | null;
   imageMotionSpeed?: number | null;
 
-  soundEffects?: Array<{
-    id: string;
-    title: string;
-    url: string;
-    delaySeconds: number;
-    volumePercent: number;
-    timingMode?: 'withPrevious' | 'afterPreviousEnds';
-    durationSeconds?: number | null;
-    audioSettings?: SoundEffectAudioSettings | null;
-    defaultAudioSettings?: SoundEffectAudioSettings | null;
-  }>;
+  soundEffects?: SentenceSoundEffectItem[];
 
-  transitionSoundEffects?: Array<{
-    id: string;
-    title: string;
-    url: string;
-    delaySeconds: number;
-    volumePercent: number;
-    isTransitionSound?: boolean;
-    fromFavorites?: boolean;
-    audioSettings?: SoundEffectAudioSettings | null;
-  }>;
+  transitionSoundEffects?: TransitionSoundEffectItem[];
 
   // Non-forced mappings inferred during split (used for draft round-tripping).
   characterKeys?: string[] | null;

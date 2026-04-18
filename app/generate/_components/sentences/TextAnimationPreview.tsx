@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 
 import type { SentenceItem } from '../../_types/sentences';
+import type { SentenceSoundEffectItem } from '../../_types/sentences';
 import {
   getDefaultImageMotionSettings,
   getDefaultImageMotionSpeed,
@@ -99,6 +100,7 @@ export type TextAnimationPresetDto = {
   id: string;
   title: string;
   settings?: Record<string, unknown> | null;
+  soundEffects?: SentenceSoundEffectItem[] | null;
 };
 
 type TextAnimationPreviewProps = {

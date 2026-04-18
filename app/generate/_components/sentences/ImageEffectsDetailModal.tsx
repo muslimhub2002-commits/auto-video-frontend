@@ -12,9 +12,43 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Clapperboard, Clock3, Loader2, Save, SlidersHorizontal, Sparkles, Timer, Trash2, Upload, Wand2, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Clapperboard,
+  Clock3,
+  Library,
+  Loader2,
+  Music2,
+  Pause,
+  Pencil,
+  Play,
+  Save,
+  SlidersHorizontal,
+  Sparkles,
+  Timer,
+  Trash2,
+  Upload,
+  Wand2,
+  X,
+} from 'lucide-react';
+import { api } from '@/lib/api';
 
-import type { SentenceItem } from '../../_types/sentences';
+import type { SentenceItem, SentenceSoundEffectItem } from '../../_types/sentences';
+import { SoundEffectEditModal, type SoundEffectEditValues } from '../SoundEffectEditModal';
+import {
+  SoundEffectsLibraryModal,
+  type SoundEffectDto,
+} from '../SoundEffectsLibraryModal';
+import { computeSentenceSoundEffectTiming } from '../../_utils/soundEffectsTiming';
+import {
+  DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+  cloneSoundEffectAudioSettings,
+  getSoundEffectPlaybackDurationSeconds,
+  normalizeSoundEffectAudioSettings,
+  resolveSoundEffectTrimWindow,
+  type SoundEffectAudioSettings,
+} from '../../_types/sound-effect-audio';
 import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
@@ -58,6 +92,7 @@ import {
 } from './TextAnimationPreview';
 import { OverlayScenePreview } from './OverlayScenePreview';
 import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
+import { createSoundEffectPreviewGraph } from '../../_utils/soundEffectPreviewGraph';
 import { useManagedObjectUrl } from './useManagedObjectUrl';
 
 const LOOK_EFFECT_VALUES = [
@@ -83,6 +118,7 @@ export type ImageEffectsDetailApplyParams = {
   customTextAnimationId: string | null;
   textAnimationSettings: TextAnimationSettings;
   textAnimationText: string | null;
+  textSoundEffects: SentenceSoundEffectItem[];
   textBackgroundImage: File | null;
   textBackgroundImageUrl: string | null;
   textBackgroundSavedImageId: string | null;
@@ -94,6 +130,7 @@ export type ImageEffectsDetailApplyParams = {
   overlayUrl: string | null;
   overlayMimeType: string | null;
   overlaySettings: OverlaySettings;
+  overlaySoundEffects: SentenceSoundEffectItem[];
 };
 
 type DebouncedPreviewState = {
@@ -106,6 +143,76 @@ type DebouncedPreviewState = {
 };
 
 const PREVIEW_RESTART_DEBOUNCE_MS = 140;
+
+const cloneSentenceSoundEffects = (
+  items: SentenceSoundEffectItem[] | null | undefined,
+): SentenceSoundEffectItem[] => {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .filter((item) => Boolean(item?.id) && Boolean(item?.url))
+    .map((item) => ({
+      id: String(item.id),
+      title: String(item.title ?? '').trim() || 'Sound effect',
+      url: String(item.url ?? '').trim(),
+      delaySeconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
+      volumePercent: Math.max(
+        0,
+        Math.min(300, Number(item.volumePercent ?? 100) || 100),
+      ),
+      timingMode:
+        item.timingMode === 'afterPreviousEnds' ? 'afterPreviousEnds' : 'withPrevious',
+      audioSettings: cloneSoundEffectAudioSettings(item.audioSettings),
+      defaultAudioSettings: cloneSoundEffectAudioSettings(item.defaultAudioSettings),
+      durationSeconds:
+        typeof item.durationSeconds === 'number' && Number.isFinite(item.durationSeconds)
+          ? Math.max(0, item.durationSeconds)
+          : null,
+    }));
+};
+
+const normalizeSentenceSoundEffects = (
+  items: SentenceSoundEffectItem[] | null | undefined,
+): SentenceSoundEffectItem[] => {
+  return cloneSentenceSoundEffects(items);
+};
+
+const areSentenceSoundEffectsEqual = (
+  left: SentenceSoundEffectItem[] | null | undefined,
+  right: SentenceSoundEffectItem[] | null | undefined,
+) => {
+  const serialize = (items: SentenceSoundEffectItem[] | null | undefined) =>
+    JSON.stringify(
+      cloneSentenceSoundEffects(items).map((item) => ({
+        id: item.id,
+        title: item.title,
+        url: item.url,
+        delaySeconds: item.delaySeconds,
+        volumePercent: item.volumePercent,
+        timingMode: item.timingMode ?? 'withPrevious',
+        audioSettings: normalizeSoundEffectAudioSettings(item.audioSettings),
+        defaultAudioSettings: normalizeSoundEffectAudioSettings(item.defaultAudioSettings),
+        durationSeconds:
+          typeof item.durationSeconds === 'number' && Number.isFinite(item.durationSeconds)
+            ? Math.max(0, item.durationSeconds)
+            : null,
+      })),
+    );
+
+  return serialize(left) === serialize(right);
+};
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+  if (Array.isArray(message)) {
+    const firstMessage = message.find((item) => typeof item === 'string' && item.trim().length > 0);
+    if (typeof firstMessage === 'string') return firstMessage.trim();
+  }
+  if (typeof message === 'string' && message.trim().length > 0) {
+    return message.trim();
+  }
+  return fallback;
+};
 
 type ImageEffectsDetailModalProps = {
   isOpen: boolean;
@@ -124,6 +231,7 @@ type ImageEffectsDetailModalProps = {
   imageMotionSpeed: number | null | undefined;
   textAnimationEffect: SentenceItem['textAnimationEffect'] | null | undefined;
   textAnimationText: string | null | undefined;
+  textSoundEffects?: SentenceSoundEffectItem[];
   textBackgroundImage?: File | null;
   textBackgroundImageUrl?: string | null;
   textBackgroundSavedImageId?: string | null;
@@ -133,6 +241,7 @@ type ImageEffectsDetailModalProps = {
   overlayFile?: File | null;
   overlayUrl?: string | null;
   overlayMimeType?: string | null;
+  overlaySoundEffects?: SentenceSoundEffectItem[];
   customImageFilterId: string | null | undefined;
   customMotionEffectId: string | null | undefined;
   customTextAnimationId: string | null | undefined;
@@ -178,10 +287,12 @@ type ImageEffectsDetailModalProps = {
   onSaveTextAnimationPreset: (
     title: string,
     settings: TextAnimationSettings,
+    soundEffects: SentenceSoundEffectItem[],
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onUpdateTextAnimationPreset: (
     presetId: string,
     settings: TextAnimationSettings,
+    soundEffects: SentenceSoundEffectItem[],
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveOverlayPreset: (params: {
@@ -190,6 +301,7 @@ type ImageEffectsDetailModalProps = {
     file?: File | null;
     sourceUrl?: string | null;
     overlayId?: string | null;
+    soundEffects?: SentenceSoundEffectItem[];
   }) => Promise<OverlayPresetDto | null> | OverlayPresetDto | null;
   onDeleteOverlayPreset: (overlayId: string) => Promise<boolean> | boolean;
   onGenerateLookWithAi: (params: {
@@ -323,6 +435,7 @@ export function ImageEffectsDetailModal({
   imageMotionSpeed,
   textAnimationEffect,
   textAnimationText,
+  textSoundEffects = [],
   textBackgroundImage = null,
   textBackgroundImageUrl = null,
   textBackgroundSavedImageId = null,
@@ -332,6 +445,7 @@ export function ImageEffectsDetailModal({
   overlayFile = null,
   overlayUrl = null,
   overlayMimeType = null,
+  overlaySoundEffects = [],
   customImageFilterId,
   customMotionEffectId,
   customTextAnimationId,
@@ -381,6 +495,8 @@ export function ImageEffectsDetailModal({
     imageMotionSettings,
     isShortVideo,
   );
+  const textSoundEffectsInputRef = useRef<HTMLInputElement | null>(null);
+  const overlaySoundEffectsInputRef = useRef<HTMLInputElement | null>(null);
   const textBackgroundInputRef = useRef<HTMLInputElement | null>(null);
   const textBackgroundVideoInputRef = useRef<HTMLInputElement | null>(null);
   const overlayInputRef = useRef<HTMLInputElement | null>(null);
@@ -403,6 +519,39 @@ export function ImageEffectsDetailModal({
   const [isDeletingOverlayPreset, setIsDeletingOverlayPreset] = useState(false);
   const [isGeneratingLookWithAi, setIsGeneratingLookWithAi] = useState(false);
   const [isGeneratingMotionWithAi, setIsGeneratingMotionWithAi] = useState(false);
+  const [isSoundEffectsLibraryOpen, setIsSoundEffectsLibraryOpen] = useState(false);
+  const [soundEffectsLibraryTarget, setSoundEffectsLibraryTarget] = useState<'text' | 'overlay' | null>(null);
+  const [editingSoundEffectTarget, setEditingSoundEffectTarget] = useState<{
+    kind: 'text' | 'overlay';
+    index: number;
+  } | null>(null);
+  const [mixEditTarget, setMixEditTarget] = useState<'text' | 'overlay' | null>(null);
+  const [mixEditDraft, setMixEditDraft] = useState<{
+    audioUrl: string | null;
+    name: string;
+    volumePercent: number;
+    audioSettings: SoundEffectAudioSettings;
+  } | null>(null);
+  const [isLoadingMixEditor, setIsLoadingMixEditor] = useState(false);
+  const [isApplyingSingleSoundEffectEdit, setIsApplyingSingleSoundEffectEdit] = useState(false);
+  const [isApplyingMixEdit, setIsApplyingMixEdit] = useState(false);
+  const [soundEffectEditError, setSoundEffectEditError] = useState<string | null>(null);
+  const [soundEffectMixError, setSoundEffectMixError] = useState<string | null>(null);
+  const [textSoundEffectsError, setTextSoundEffectsError] = useState<string | null>(null);
+  const [overlaySoundEffectsError, setOverlaySoundEffectsError] = useState<string | null>(null);
+  const [isUploadingSoundEffect, setIsUploadingSoundEffect] = useState(false);
+  const [previewRestartNonce, setPreviewRestartNonce] = useState(0);
+  const [stackStatusByKind, setStackStatusByKind] = useState<{
+    text: 'idle' | 'loading' | 'playing';
+    overlay: 'idle' | 'loading' | 'playing';
+  }>({ text: 'idle', overlay: 'idle' });
+  const [singleStatusByKey, setSingleStatusByKey] = useState<Record<string, 'idle' | 'loading' | 'playing'>>({});
+  const soundEffectsPreviewRef = useRef<{
+    timeouts: number[];
+    audios: HTMLAudioElement[];
+    cleanups: Array<() => void | Promise<void>>;
+  }>({ timeouts: [], audios: [], cleanups: [] });
+  const soundEffectsEverStartedRef = useRef<Set<string>>(new Set());
   const [lookActionError, setLookActionError] = useState<string | null>(null);
   const [motionActionError, setMotionActionError] = useState<string | null>(null);
   const [textActionError, setTextActionError] = useState<string | null>(null);
@@ -435,6 +584,9 @@ export function ImageEffectsDetailModal({
   const [draftTextAnimationText, setDraftTextAnimationText] = useState<string>(
     resolveTextAnimationText(textAnimationText, sentenceText),
   );
+  const [draftTextSoundEffects, setDraftTextSoundEffects] = useState<SentenceSoundEffectItem[]>(
+    () => cloneSentenceSoundEffects(textSoundEffects),
+  );
   const [draftTextBackgroundImage, setDraftTextBackgroundImage] = useState<File | null>(
     textBackgroundImage ?? null,
   );
@@ -463,6 +615,9 @@ export function ImageEffectsDetailModal({
   const [draftOverlayUrl, setDraftOverlayUrl] = useState<string | null>(overlayUrl ?? null);
   const [draftOverlayMimeType, setDraftOverlayMimeType] = useState<string | null>(
     overlayMimeType ?? null,
+  );
+  const [draftOverlaySoundEffects, setDraftOverlaySoundEffects] = useState<SentenceSoundEffectItem[]>(
+    () => cloneSentenceSoundEffects(overlaySoundEffects),
   );
   const [draftImageFilterSettings, setDraftImageFilterSettings] = useState<ImageFilterSettings>(
     () => normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
@@ -524,6 +679,504 @@ export function ImageEffectsDetailModal({
     () => normalizeOverlaySettings(draftOverlaySettings, 'image'),
     [draftOverlaySettings],
   );
+  const canManageTextSoundEffects = Boolean(draftTextAnimationEffect);
+  const canManageOverlaySoundEffects = Boolean(
+    draftOverlayFile || String(draftOverlayUrl ?? '').trim(),
+  );
+
+  const getDraftSoundEffects = (kind: 'text' | 'overlay') =>
+    kind === 'text' ? draftTextSoundEffects : draftOverlaySoundEffects;
+
+  const commitDraftSoundEffects = (
+    kind: 'text' | 'overlay',
+    next: SentenceSoundEffectItem[] | null | undefined,
+  ) => {
+    const normalized = normalizeSentenceSoundEffects(next);
+    if (kind === 'text') {
+      setDraftTextSoundEffects(normalized);
+      return;
+    }
+    setDraftOverlaySoundEffects(normalized);
+  };
+
+  const setSoundEffectsPanelError = (kind: 'text' | 'overlay', message: string | null) => {
+    if (kind === 'text') {
+      setTextSoundEffectsError(message);
+      return;
+    }
+    setOverlaySoundEffectsError(message);
+  };
+
+  const getSoundEffectPreviewKey = (kind: 'text' | 'overlay', index: number, url: string) => {
+    return `${kind}:${index}:${String(url ?? '').trim()}`;
+  };
+
+  const getSharedSoundEffectVolume = (kind: 'text' | 'overlay') => {
+    const items = getDraftSoundEffects(kind);
+    if (items.length === 0) return 100;
+    const normalizedVolumes = items.map((effect) =>
+      Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
+    );
+    const firstVolume = normalizedVolumes[0] ?? 100;
+    return normalizedVolumes.every((volume) => Math.abs(volume - firstVolume) < 0.0001)
+      ? firstVolume
+      : 100;
+  };
+
+  const getSharedSoundEffectAudioSettings = (kind: 'text' | 'overlay') => {
+    const items = getDraftSoundEffects(kind);
+    if (items.length === 0) {
+      return cloneSoundEffectAudioSettings(DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS);
+    }
+
+    const normalized = items.map((effect) =>
+      normalizeSoundEffectAudioSettings(
+        effect.audioSettings ?? effect.defaultAudioSettings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+      ),
+    );
+    const baseline = JSON.stringify(normalized[0] ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS);
+
+    return cloneSoundEffectAudioSettings(
+      normalized.every((settings) => JSON.stringify(settings) === baseline)
+        ? normalized[0] ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS
+        : DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+    );
+  };
+
+  const mergeSoundEffectSettingsPreservingTrim = (
+    baseSettings: SoundEffectAudioSettings,
+    currentSettings: unknown,
+  ): SoundEffectAudioSettings => {
+    const currentNormalized = normalizeSoundEffectAudioSettings(
+      currentSettings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+    );
+
+    return {
+      ...baseSettings,
+      trim: {
+        startSeconds: currentNormalized.trim.startSeconds,
+        durationSeconds: currentNormalized.trim.durationSeconds,
+      },
+    };
+  };
+
+  const stopAllScheduledAudio = () => {
+    for (const timeoutId of soundEffectsPreviewRef.current.timeouts) {
+      window.clearTimeout(timeoutId);
+    }
+    soundEffectsPreviewRef.current.timeouts = [];
+
+    for (const audio of soundEffectsPreviewRef.current.audios) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    soundEffectsPreviewRef.current.audios = [];
+
+    for (const cleanup of soundEffectsPreviewRef.current.cleanups) {
+      try {
+        void cleanup();
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    soundEffectsPreviewRef.current.cleanups = [];
+
+    setStackStatusByKind({ text: 'idle', overlay: 'idle' });
+    setSingleStatusByKey({});
+  };
+
+  const scheduleAudio = (params: {
+    url: string;
+    delaySeconds: number;
+    volumePercent: number;
+    audioSettings?: SoundEffectAudioSettings | null;
+    trimStartSeconds?: number;
+    trimDurationSeconds?: number | null;
+    onPlaying?: () => void;
+    onEnded?: () => void;
+    onError?: () => void;
+  }) => {
+    const audio = new Audio(params.url);
+    audio.preload = 'auto';
+    audio.crossOrigin = 'anonymous';
+
+    let previewCleanup: (() => Promise<void>) | null = null;
+    let previewTailTimeoutId: number | null = null;
+    let previewTailDelayMs = 0;
+    let isPreviewCleanedUp = false;
+
+    const cleanupPreview = () => {
+      if (previewTailTimeoutId !== null) {
+        window.clearTimeout(previewTailTimeoutId);
+        previewTailTimeoutId = null;
+      }
+      if (isPreviewCleanedUp) return;
+      isPreviewCleanedUp = true;
+
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // ignore seek errors during cleanup
+      }
+
+      if (previewCleanup) {
+        void previewCleanup();
+        previewCleanup = null;
+      }
+    };
+
+    let isFinalized = false;
+    const finalizeEnded = () => {
+      if (isFinalized) return;
+      isFinalized = true;
+      cleanupPreview();
+      params.onEnded?.();
+    };
+    const finalizeError = () => {
+      if (isFinalized) return;
+      isFinalized = true;
+      cleanupPreview();
+      params.onError?.();
+    };
+
+    const finalizeEndedWithTail = () => {
+      if (isFinalized) return;
+      if (previewTailDelayMs <= 0) {
+        finalizeEnded();
+        return;
+      }
+
+      previewTailTimeoutId = window.setTimeout(() => {
+        previewTailTimeoutId = null;
+        finalizeEnded();
+      }, previewTailDelayMs);
+      soundEffectsPreviewRef.current.timeouts.push(previewTailTimeoutId);
+    };
+
+    audio.onended = finalizeEndedWithTail;
+    audio.onerror = finalizeError;
+    soundEffectsPreviewRef.current.audios.push(audio);
+
+    const delayMs = Math.max(0, Number(params.delaySeconds) || 0) * 1000;
+    const timeoutId = window.setTimeout(() => {
+      const startPlayback = async () => {
+        const trimStartSeconds = Math.max(0, Number(params.trimStartSeconds ?? 0) || 0);
+        const trimDurationSeconds =
+          typeof params.trimDurationSeconds === 'number' && Number.isFinite(params.trimDurationSeconds)
+            ? Math.max(0, params.trimDurationSeconds)
+            : null;
+
+        const previewGraph = createSoundEffectPreviewGraph({
+          audioElement: audio,
+          volumePercent: params.volumePercent,
+          audioSettings: params.audioSettings,
+        });
+
+        if (previewGraph) {
+          previewCleanup = previewGraph.cleanup;
+          previewTailDelayMs = Math.max(0, previewGraph.tailDurationSeconds) * 1000;
+          soundEffectsPreviewRef.current.cleanups.push(previewGraph.cleanup);
+          await previewGraph.audioContext.resume().catch(() => undefined);
+        } else {
+          audio.volume = Math.max(0, Math.min(1, (Number(params.volumePercent) || 0) / 100));
+        }
+
+        if (trimStartSeconds > 0) {
+          try {
+            audio.currentTime = trimStartSeconds;
+          } catch {
+            // ignore seek errors before playback
+          }
+        }
+
+        const playPromise = audio.play();
+        if (!playPromise || typeof (playPromise as Promise<void>).then !== 'function') {
+          params.onPlaying?.();
+        } else {
+          void (playPromise as Promise<void>)
+            .then(() => {
+              params.onPlaying?.();
+            })
+            .catch(() => {
+              finalizeError();
+            });
+        }
+
+        if (trimDurationSeconds && trimDurationSeconds > 0) {
+          const stopTimeoutId = window.setTimeout(() => {
+            try {
+              audio.pause();
+            } catch {
+              // ignore
+            }
+            finalizeEndedWithTail();
+          }, trimDurationSeconds * 1000);
+          soundEffectsPreviewRef.current.timeouts.push(stopTimeoutId);
+        }
+      };
+
+      if (audio.readyState >= 1) {
+        void startPlayback();
+        return;
+      }
+
+      const handleLoadedMetadata = () => {
+        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        void startPlayback();
+      };
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+      audio.load();
+    }, delayMs);
+
+    soundEffectsPreviewRef.current.timeouts.push(timeoutId);
+  };
+
+  const playSoundEffectsStack = (kind: 'text' | 'overlay', items?: SentenceSoundEffectItem[]) => {
+    const effects = normalizeSentenceSoundEffects(items ?? getDraftSoundEffects(kind));
+    if (effects.length === 0) return;
+
+    stopAllScheduledAudio();
+
+    const timedSoundEffects = computeSentenceSoundEffectTiming(effects);
+    const shouldShowLoading = timedSoundEffects.some((effect, index) => {
+      const key = getSoundEffectPreviewKey(kind, index, effect.url);
+      return !soundEffectsEverStartedRef.current.has(key);
+    });
+
+    setStackStatusByKind((prev) => ({
+      ...prev,
+      [kind]: shouldShowLoading ? 'loading' : 'playing',
+    }));
+
+    let ended = 0;
+    const total = timedSoundEffects.length;
+
+    for (const [index, effect] of timedSoundEffects.entries()) {
+      const key = getSoundEffectPreviewKey(kind, index, effect.url);
+      scheduleAudio({
+        url: effect.url,
+        delaySeconds: effect.absoluteDelaySeconds,
+        volumePercent: effect.volumePercent,
+        audioSettings: effect.audioSettings,
+        trimStartSeconds: effect.trimStartSeconds,
+        trimDurationSeconds: effect.durationSeconds,
+        onPlaying: () => {
+          soundEffectsEverStartedRef.current.add(key);
+          setStackStatusByKind((prev) => ({ ...prev, [kind]: 'playing' }));
+        },
+        onEnded: () => {
+          ended += 1;
+          if (ended >= total) {
+            setStackStatusByKind((prev) => ({ ...prev, [kind]: 'idle' }));
+          }
+        },
+        onError: () => {
+          setStackStatusByKind((prev) => ({ ...prev, [kind]: 'idle' }));
+        },
+      });
+    }
+  };
+
+  const playSingleSoundEffect = (kind: 'text' | 'overlay', index: number) => {
+    const effect = getDraftSoundEffects(kind)[index];
+    if (!effect) return;
+
+    const key = getSoundEffectPreviewKey(kind, index, effect.url);
+    const shouldShowLoading = !soundEffectsEverStartedRef.current.has(key);
+    const trimWindow = resolveSoundEffectTrimWindow(
+      effect.audioSettings,
+      effect.durationSeconds ?? null,
+    );
+
+    stopAllScheduledAudio();
+    setSingleStatusByKey({ [key]: shouldShowLoading ? 'loading' : 'playing' });
+
+    scheduleAudio({
+      url: effect.url,
+      delaySeconds: Math.max(0, Number(effect.delaySeconds ?? 0) || 0),
+      volumePercent: effect.volumePercent,
+      audioSettings: effect.audioSettings,
+      trimStartSeconds: trimWindow.startSeconds,
+      trimDurationSeconds: trimWindow.effectiveDurationSeconds,
+      onPlaying: () => {
+        soundEffectsEverStartedRef.current.add(key);
+        setSingleStatusByKey({ [key]: 'playing' });
+      },
+      onEnded: () => setSingleStatusByKey({}),
+      onError: () => setSingleStatusByKey({}),
+    });
+  };
+
+  const buildSoundEffectMergeItems = (items: SentenceSoundEffectItem[]) => {
+    return computeSentenceSoundEffectTiming(items).map((effect) => ({
+      sound_effect_id: effect.id,
+      delay_seconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
+      volume_percent: Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
+      trim_start_seconds: Math.max(0, Number(effect.trimStartSeconds ?? 0) || 0),
+      duration_seconds:
+        typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
+          ? Math.max(0, effect.durationSeconds)
+          : null,
+    }));
+  };
+
+  const handleApplySoundEffectsFromLibrary = (items: SoundEffectDto[]) => {
+    if (!soundEffectsLibraryTarget) return;
+
+    const current = getDraftSoundEffects(soundEffectsLibraryTarget);
+    const additions = (items ?? []).map((item) => ({
+      id: item.id,
+      title: String(item.name ?? item.title ?? 'Sound effect').trim() || 'Sound effect',
+      url: String(item.url ?? '').trim(),
+      delaySeconds: 0,
+      volumePercent: Math.max(0, Math.min(300, Number(item.volume_percent ?? 100) || 100)),
+      audioSettings: cloneSoundEffectAudioSettings(item.audio_settings),
+      defaultAudioSettings: cloneSoundEffectAudioSettings(item.audio_settings),
+      timingMode: 'withPrevious' as const,
+      durationSeconds:
+        typeof item.duration_seconds === 'number' && Number.isFinite(item.duration_seconds)
+          ? Math.max(0, item.duration_seconds)
+          : null,
+    }));
+
+    commitDraftSoundEffects(soundEffectsLibraryTarget, [...current, ...additions]);
+    setSoundEffectsPanelError(soundEffectsLibraryTarget, null);
+    setIsSoundEffectsLibraryOpen(false);
+    setSoundEffectsLibraryTarget(null);
+  };
+
+  const handleUploadSoundEffects = async (kind: 'text' | 'overlay', files: File[]) => {
+    const list = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (list.length === 0) return;
+
+    setIsUploadingSoundEffect(true);
+    setSoundEffectsPanelError(kind, null);
+
+    try {
+      const createdItems: Array<{
+        id: string;
+        title: string;
+        name?: string;
+        url: string;
+        volume_percent?: number;
+        audio_settings?: Record<string, unknown> | null;
+        duration_seconds?: number | null;
+      }> = [];
+
+      if (list.length === 1) {
+        const file = list[0];
+        const title = String(file.name ?? '').replace(/\.[^.]+$/u, '').trim() || 'Sound effect';
+        const form = new FormData();
+        form.append('soundEffect', file);
+        form.append('title', title);
+
+        const response = await api.post<typeof createdItems[number]>('/sound-effects', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        createdItems.push(response.data);
+      } else {
+        const form = new FormData();
+        for (const file of list) {
+          form.append('soundEffects', file);
+        }
+
+        const response = await api.post<{ items: typeof createdItems }>('/sound-effects/batch', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        createdItems.push(...(Array.isArray(response.data?.items) ? response.data.items : []));
+      }
+
+      const current = getDraftSoundEffects(kind);
+      commitDraftSoundEffects(kind, [
+        ...current,
+        ...createdItems.map((created, index) => ({
+          id: created.id,
+          title:
+            String(created.name ?? created.title ?? list[index]?.name ?? 'Sound effect')
+              .replace(/\.[^.]+$/u, '')
+              .trim() || 'Sound effect',
+          url: created.url,
+          delaySeconds: 0,
+          volumePercent: Math.max(
+            0,
+            Math.min(300, Number(created.volume_percent ?? 100) || 100),
+          ),
+          audioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+          defaultAudioSettings: cloneSoundEffectAudioSettings(created.audio_settings),
+          timingMode: 'withPrevious' as const,
+          durationSeconds:
+            typeof created.duration_seconds === 'number' && Number.isFinite(created.duration_seconds)
+              ? Math.max(0, created.duration_seconds)
+              : null,
+        })),
+      ]);
+    } catch (error) {
+      setSoundEffectsPanelError(
+        kind,
+        getApiErrorMessage(error, 'Failed to upload sound effect. Try again.'),
+      );
+    } finally {
+      setIsUploadingSoundEffect(false);
+    }
+  };
+
+  const handleOpenMixEditor = async (kind: 'text' | 'overlay') => {
+    const items = getDraftSoundEffects(kind);
+    if (items.length === 0) return;
+
+    stopAllScheduledAudio();
+    setMixEditTarget(kind);
+    setSoundEffectMixError(null);
+
+    if (items.length === 1) {
+      setMixEditDraft({
+        audioUrl: items[0]?.url ?? null,
+        name: kind === 'text' ? 'Text sound stack' : 'Overlay sound stack',
+        volumePercent: getSharedSoundEffectVolume(kind),
+        audioSettings: getSharedSoundEffectAudioSettings(kind),
+      });
+      return;
+    }
+
+    setIsLoadingMixEditor(true);
+    try {
+      const response = await api.post<{ title?: string; url: string }>('/sound-effects/merge-preview', {
+        title: kind === 'text' ? 'Text sound stack' : 'Overlay sound stack',
+        items: buildSoundEffectMergeItems(items),
+      });
+
+      setMixEditDraft({
+        audioUrl: response.data.url,
+        name:
+          String(
+            response.data.title ?? (kind === 'text' ? 'Text sound stack' : 'Overlay sound stack'),
+          ).trim() || (kind === 'text' ? 'Text sound stack' : 'Overlay sound stack'),
+        volumePercent: getSharedSoundEffectVolume(kind),
+        audioSettings: getSharedSoundEffectAudioSettings(kind),
+      });
+    } catch (error) {
+      setMixEditTarget(null);
+      setSoundEffectMixError(
+        getApiErrorMessage(error, 'Failed to open the sound stack editor. Try again.'),
+      );
+    } finally {
+      setIsLoadingMixEditor(false);
+    }
+  };
+
+  const handleStartFromBeginning = (kind: 'text' | 'overlay') => {
+    setPreviewRestartNonce((prev) => prev + 1);
+    const items = getDraftSoundEffects(kind);
+    if (items.length > 0) {
+      playSoundEffectsStack(kind, items);
+      return;
+    }
+    stopAllScheduledAudio();
+  };
   const draftTextBackgroundObjectUrl = useManagedObjectUrl(draftTextBackgroundImage);
   const draftTextBackgroundVideoObjectUrl = useManagedObjectUrl(draftTextBackgroundVideo);
   const draftOverlayObjectUrl = useManagedObjectUrl(draftOverlayFile);
@@ -650,14 +1303,16 @@ export function ImageEffectsDetailModal({
   const isTextDirtyFromSelectedPreset = Boolean(
     selectedTextPreset &&
       (selectedTextPresetEffect !== draftTextAnimationEffect ||
-        JSON.stringify(selectedTextPresetSettings) !== JSON.stringify(resolvedText)),
+        JSON.stringify(selectedTextPresetSettings) !== JSON.stringify(resolvedText) ||
+        !areSentenceSoundEffectsEqual(selectedTextPreset.soundEffects, draftTextSoundEffects)),
   );
   const isOverlayDirtyFromSelectedPreset = Boolean(
     selectedOverlayPreset &&
       (Boolean(draftOverlayFile) ||
         String(selectedOverlayPreset.url ?? '').trim() !== String(draftOverlayUrl ?? '').trim() ||
         String(selectedOverlayPreset.mimeType ?? '').trim() !== String(draftOverlayMimeType ?? '').trim() ||
-        JSON.stringify(selectedOverlayPresetSettings) !== JSON.stringify(resolvedOverlay)),
+        JSON.stringify(selectedOverlayPresetSettings) !== JSON.stringify(resolvedOverlay) ||
+        !areSentenceSoundEffectsEqual(selectedOverlayPreset.soundEffects, draftOverlaySoundEffects)),
   );
   const canOverrideLookPreset = Boolean(selectedLookPreset && isLookDirtyFromSelectedPreset);
   const canOverrideMotionPreset = Boolean(selectedMotionPreset && isMotionDirtyFromSelectedPreset);
@@ -729,6 +1384,7 @@ export function ImageEffectsDetailModal({
       resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
     );
     setDraftTextAnimationText(resolveTextAnimationText(textAnimationText, sentenceText));
+    setDraftTextSoundEffects(cloneSentenceSoundEffects(textSoundEffects));
     setDraftTextBackgroundImage(textBackgroundImage ?? null);
     setDraftTextBackgroundImageUrl(textBackgroundImageUrl ?? null);
     setDraftTextBackgroundSavedImageId(textBackgroundSavedImageId ?? null);
@@ -740,6 +1396,7 @@ export function ImageEffectsDetailModal({
     setDraftOverlayFile(overlayFile ?? null);
     setDraftOverlayUrl(overlayUrl ?? null);
     setDraftOverlayMimeType(overlayMimeType ?? null);
+    setDraftOverlaySoundEffects(cloneSentenceSoundEffects(overlaySoundEffects));
     setDraftImageFilterSettings(
       normalizeImageFilterSettings(imageFilterSettings, visualEffect ?? null),
     );
@@ -769,7 +1426,18 @@ export function ImageEffectsDetailModal({
     setMotionActionError(null);
     setTextActionError(null);
     setOverlayActionError(null);
+    setTextSoundEffectsError(null);
+    setOverlaySoundEffectsError(null);
+    setIsSoundEffectsLibraryOpen(false);
+    setSoundEffectsLibraryTarget(null);
+    setEditingSoundEffectTarget(null);
+    setMixEditTarget(null);
+    setMixEditDraft(null);
+    setSoundEffectEditError(null);
+    setSoundEffectMixError(null);
+    stopAllScheduledAudio();
     setDeletePresetKind(null);
+    setPreviewRestartNonce(0);
     setDebouncedPreview((prev) => ({
       visualEffect: visualEffect ?? null,
       imageMotionEffect: imageMotionEffect ?? 'default',
@@ -810,9 +1478,11 @@ export function ImageEffectsDetailModal({
     textAnimationEffect,
     textAnimationSettings,
     textAnimationText,
+    textSoundEffects,
     sentenceText,
     visualEffect,
     availableTabs,
+    overlaySoundEffects,
   ]);
 
   useEffect(() => {
@@ -877,11 +1547,19 @@ export function ImageEffectsDetailModal({
     resolvedMotion,
   ]);
 
+  useEffect(() => {
+    return () => {
+      stopAllScheduledAudio();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (!isRendered || !portalTarget) return null;
 
   const handleRequestClose = () => {
     if (isClosing) return;
 
+    stopAllScheduledAudio();
     setIsClosing(true);
     window.setTimeout(() => {
       setIsRendered(false);
@@ -1011,6 +1689,7 @@ export function ImageEffectsDetailModal({
       setDraftTextAnimationEffect(effect);
       setDraftCustomTextAnimationId(preset.id);
       setDraftTextAnimationSettings({ ...settings, presetKey: 'custom' });
+      setDraftTextSoundEffects(cloneSentenceSoundEffects(preset.soundEffects));
       setTextActionError(null);
       return;
     }
@@ -1028,6 +1707,7 @@ export function ImageEffectsDetailModal({
       setDraftOverlayFile(null);
       setDraftOverlayUrl(null);
       setDraftOverlayMimeType(null);
+      setDraftOverlaySoundEffects([]);
       setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
       setOverlayActionError(null);
       return;
@@ -1049,6 +1729,7 @@ export function ImageEffectsDetailModal({
     setDraftOverlayFile(null);
     setDraftOverlayUrl(preset.url);
     setDraftOverlayMimeType(preset.mimeType ?? null);
+    setDraftOverlaySoundEffects(cloneSentenceSoundEffects(preset.soundEffects));
     setDraftOverlaySettings({ ...settings, presetKey: 'custom' });
     setOverlayActionError(null);
   };
@@ -1121,6 +1802,7 @@ export function ImageEffectsDetailModal({
     setDraftOverlayUrl(null);
     setDraftOverlayMimeType(null);
     setDraftCustomOverlayId(null);
+    setDraftOverlaySoundEffects([]);
     setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
     setOverlayActionError(null);
   };
@@ -1234,10 +1916,15 @@ export function ImageEffectsDetailModal({
     setIsSavingTextPreset(true);
     setTextActionError(null);
     try {
-      const saved = await onSaveTextAnimationPreset(trimmedTextSaveTitle, resolvedText);
+      const saved = await onSaveTextAnimationPreset(
+        trimmedTextSaveTitle,
+        resolvedText,
+        draftTextSoundEffects,
+      );
       if (saved) {
         setDraftCustomTextAnimationId(saved.id);
         setDraftTextAnimationSettings({ ...resolvedText, presetKey: 'custom' });
+        setDraftTextSoundEffects(cloneSentenceSoundEffects(saved.soundEffects ?? draftTextSoundEffects));
         setTextSaveTitle('');
       }
     } catch (error) {
@@ -1256,12 +1943,16 @@ export function ImageEffectsDetailModal({
         settings: resolvedOverlay,
         file: draftOverlayFile ?? null,
         sourceUrl: draftOverlayFile ? null : draftOverlayUrl,
+        soundEffects: draftOverlaySoundEffects,
       });
       if (saved) {
         setDraftCustomOverlayId(saved.id);
         setDraftOverlayFile(null);
         setDraftOverlayUrl(saved.url);
         setDraftOverlayMimeType(saved.mimeType ?? draftOverlayMimeType ?? null);
+        setDraftOverlaySoundEffects(
+          cloneSentenceSoundEffects(saved.soundEffects ?? draftOverlaySoundEffects),
+        );
         setDraftOverlaySettings({
           ...normalizeOverlaySettings(saved.settings, resolvedOverlay.backgroundMode ?? 'image'),
           presetKey: 'custom',
@@ -1315,10 +2006,15 @@ export function ImageEffectsDetailModal({
     setIsOverridingTextPreset(true);
     setTextActionError(null);
     try {
-      const saved = await onUpdateTextAnimationPreset(selectedTextPreset.id, resolvedText);
+      const saved = await onUpdateTextAnimationPreset(
+        selectedTextPreset.id,
+        resolvedText,
+        draftTextSoundEffects,
+      );
       if (saved) {
         setDraftCustomTextAnimationId(saved.id);
         setDraftTextAnimationSettings({ ...resolvedText, presetKey: 'custom' });
+        setDraftTextSoundEffects(cloneSentenceSoundEffects(saved.soundEffects ?? draftTextSoundEffects));
       }
     } catch (error) {
       setTextActionError(error instanceof Error ? error.message : 'Failed to override text preset.');
@@ -1337,12 +2033,16 @@ export function ImageEffectsDetailModal({
         file: draftOverlayFile ?? null,
         sourceUrl: draftOverlayFile ? null : draftOverlayUrl,
         overlayId: selectedOverlayPreset.id,
+        soundEffects: draftOverlaySoundEffects,
       });
       if (saved) {
         setDraftCustomOverlayId(saved.id);
         setDraftOverlayFile(null);
         setDraftOverlayUrl(saved.url);
         setDraftOverlayMimeType(saved.mimeType ?? draftOverlayMimeType ?? null);
+        setDraftOverlaySoundEffects(
+          cloneSentenceSoundEffects(saved.soundEffects ?? draftOverlaySoundEffects),
+        );
         setDraftOverlaySettings({
           ...normalizeOverlaySettings(saved.settings, resolvedOverlay.backgroundMode ?? 'image'),
           presetKey: 'custom',
@@ -1435,6 +2135,7 @@ export function ImageEffectsDetailModal({
         setDraftOverlayFile(null);
         setDraftOverlayUrl(null);
         setDraftOverlayMimeType(null);
+        setDraftOverlaySoundEffects([]);
         setDraftOverlaySettings({ ...resolvedOverlay, presetKey: 'custom' });
         setOverlaySaveTitle('');
         setDeletePresetKind(null);
@@ -1529,6 +2230,7 @@ export function ImageEffectsDetailModal({
           ? resolvedText
           : { ...resolvedText, presetKey: 'custom' },
       textAnimationText: String(draftTextAnimationText ?? '').trim() || null,
+      textSoundEffects: cloneSentenceSoundEffects(draftTextSoundEffects),
       textBackgroundImage: draftTextBackgroundImage,
       textBackgroundImageUrl: draftTextBackgroundImageUrl,
       textBackgroundSavedImageId: draftTextBackgroundSavedImageId,
@@ -1541,6 +2243,7 @@ export function ImageEffectsDetailModal({
       overlayMimeType: draftOverlayMimeType,
       overlaySettings:
         nextCustomOverlayId ? resolvedOverlay : { ...resolvedOverlay, presetKey: 'custom' },
+      overlaySoundEffects: cloneSentenceSoundEffects(draftOverlaySoundEffects),
     };
   };
 
@@ -1559,6 +2262,332 @@ export function ImageEffectsDetailModal({
       setIsDownloading(false);
     }
   };
+
+  const renderSoundEffectsSection = (kind: 'text' | 'overlay') => {
+    const items = getDraftSoundEffects(kind);
+    const canManage = kind === 'text' ? canManageTextSoundEffects : canManageOverlaySoundEffects;
+    const errorMessage = kind === 'text' ? textSoundEffectsError : overlaySoundEffectsError;
+    const stackStatus = stackStatusByKind[kind];
+    const inputRef = kind === 'text' ? textSoundEffectsInputRef : overlaySoundEffectsInputRef;
+    const gateMessage = kind === 'text'
+      ? 'Choose a text animation preset or effect first, then add sound effects for this text scene.'
+      : 'Upload or choose an overlay asset first, then add sound effects for this overlay scene.';
+
+    return (
+      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="audio/*"
+          multiple
+          className="hidden"
+          onChange={async (event) => {
+            const files = Array.from(event.target.files ?? []);
+            if (files.length === 0) return;
+            await handleUploadSoundEffects(kind, files);
+            event.currentTarget.value = '';
+          }}
+        />
+
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Music2 className="h-4 w-4 text-sky-600" />
+              {kind === 'text' ? 'Text sound effects' : 'Overlay sound effects'}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              {kind === 'text'
+                ? 'These sound effects play when this text animation starts.'
+                : 'These sound effects play when this overlay scene starts.'}
+            </p>
+          </div>
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">
+            {items.length} selected
+          </span>
+        </div>
+
+        {!canManage ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {gateMessage}
+          </div>
+        ) : null}
+
+        {errorMessage ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (stackStatus === 'loading' || stackStatus === 'playing') {
+                stopAllScheduledAudio();
+                return;
+              }
+              handleStartFromBeginning(kind);
+            }}
+            disabled={!canManage}
+            className="h-10 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+          >
+            {stackStatus === 'loading' ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : stackStatus === 'playing' ? (
+              <Pause className="mr-2 h-4 w-4" />
+            ) : (
+              <Play className="mr-2 h-4 w-4" />
+            )}
+            Start from beginning
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handleOpenMixEditor(kind)}
+            disabled={!canManage || items.length === 0 || isLoadingMixEditor}
+            className="h-10 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+          >
+            {isLoadingMixEditor && mixEditTarget === kind ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <SlidersHorizontal className="mr-2 h-4 w-4" />
+            )}
+            Edit whole group
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => inputRef.current?.click()}
+            disabled={!canManage || isUploadingSoundEffect}
+            className="h-10 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+          >
+            {isUploadingSoundEffect ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
+            Upload
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setSoundEffectsLibraryTarget(kind);
+              setIsSoundEffectsLibraryOpen(true);
+            }}
+            disabled={!canManage}
+            className="h-10 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+          >
+            <Library className="mr-2 h-4 w-4" />
+            From library
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              stopAllScheduledAudio();
+              commitDraftSoundEffects(kind, []);
+            }}
+            disabled={items.length === 0}
+            className="h-10 rounded-xl border-red-200 bg-white text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Remove all
+          </Button>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+            No sound effects added yet.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {items.map((effect, index) => {
+              const playbackDurationSeconds = getSoundEffectPlaybackDurationSeconds({
+                durationSeconds: effect.durationSeconds,
+                audioSettings: effect.audioSettings,
+              });
+              const key = getSoundEffectPreviewKey(kind, index, effect.url);
+              const singleStatus = singleStatusByKey[key] ?? 'idle';
+
+              return (
+                <div key={`${key}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">{effect.title}</p>
+                      <p className="truncate text-xs text-slate-500">{effect.url}</p>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-medium text-slate-600">
+                        <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">
+                          Vol {Math.round(effect.volumePercent ?? 100)}%
+                        </span>
+                        {typeof playbackDurationSeconds === 'number' ? (
+                          <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-200">
+                            {playbackDurationSeconds.toFixed(2)}s
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => {
+                          if (singleStatus === 'loading' || singleStatus === 'playing') {
+                            stopAllScheduledAudio();
+                            return;
+                          }
+                          playSingleSoundEffect(kind, index);
+                        }}
+                        className="h-9 w-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                      >
+                        {singleStatus === 'loading' ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : singleStatus === 'playing' ? (
+                          <Pause className="h-4 w-4" />
+                        ) : (
+                          <Play className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => {
+                          setSoundEffectEditError(null);
+                          setEditingSoundEffectTarget({ kind, index });
+                        }}
+                        className="h-9 w-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        disabled={index === 0}
+                        onClick={() => {
+                          const next = [...items];
+                          const [moved] = next.splice(index, 1);
+                          next.splice(index - 1, 0, moved);
+                          commitDraftSoundEffects(kind, next);
+                        }}
+                        className="h-9 w-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        disabled={index === items.length - 1}
+                        onClick={() => {
+                          const next = [...items];
+                          const [moved] = next.splice(index, 1);
+                          next.splice(index + 1, 0, moved);
+                          commitDraftSoundEffects(kind, next);
+                        }}
+                        className="h-9 w-9 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        onClick={() => {
+                          commitDraftSoundEffects(
+                            kind,
+                            items.filter((_, itemIndex) => itemIndex !== index),
+                          );
+                        }}
+                        className="h-9 w-9 rounded-xl border-red-200 bg-white text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        Delay
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={Number(effect.delaySeconds ?? 0) || 0}
+                        onChange={(event) => {
+                          const value = Math.max(0, Number(event.target.value) || 0);
+                          commitDraftSoundEffects(
+                            kind,
+                            items.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, delaySeconds: value } : item,
+                            ),
+                          );
+                        }}
+                        className="h-10 rounded-xl border-slate-200 bg-white"
+                      />
+                    </label>
+
+                    {index < items.length - 1 ? (
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          Next sound timing
+                        </span>
+                        <Select
+                          value={items[index + 1]?.timingMode === 'afterPreviousEnds' ? 'afterPreviousEnds' : 'withPrevious'}
+                          onValueChange={(value) => {
+                            commitDraftSoundEffects(
+                              kind,
+                              items.map((item, itemIndex) =>
+                                itemIndex === index + 1
+                                  ? {
+                                      ...item,
+                                      timingMode:
+                                        value === 'afterPreviousEnds'
+                                          ? 'afterPreviousEnds'
+                                          : 'withPrevious',
+                                    }
+                                  : item,
+                              ),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white">
+                            <SelectValue placeholder="Choose timing" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="withPrevious">Start with previous timing</SelectItem>
+                            <SelectItem value="afterPreviousEnds">Start after previous ends</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs text-slate-500">
+                        Last sound effect in this stack.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const editingSoundEffect = editingSoundEffectTarget
+    ? getDraftSoundEffects(editingSoundEffectTarget.kind)[editingSoundEffectTarget.index] ?? null
+    : null;
 
   return createPortal(
     <div
@@ -1679,13 +2708,16 @@ export function ImageEffectsDetailModal({
                 className={`${textPreviewFrameClass} overflow-hidden rounded-[1.5rem]`}
                 contentClassName="p-[7%]"
                 enableMotion
-                motionResetKey={`${currentTab}-${draftTextAnimationEffect}-${resolvedText.speed ?? 1}-${resolvedText.animationIntensity ?? 1}`}
+                motionResetKey={`${currentTab}-${draftTextAnimationEffect}-${resolvedText.speed ?? 1}-${resolvedText.animationIntensity ?? 1}-${previewRestartNonce}`}
               />
             ) : currentTab === 'overlay' ? (
               <OverlayScenePreview
+                key={`overlay-preview-${previewRestartNonce}`}
                 isShortVideo={isShortVideo}
                 sceneImageUrl={resolvedOverlaySceneImageUrl}
                 sceneVideoUrl={resolvedOverlaySceneVideoUrl}
+                visualEffect={draftVisualEffect}
+                imageFilterSettings={resolvedLook}
                 overlayAssetUrl={resolvedOverlayPreviewUrl}
                 overlayMimeType={draftOverlayMimeType}
                 overlaySettings={resolvedOverlay}
@@ -2105,6 +3137,8 @@ export function ImageEffectsDetailModal({
                   <RangeField label="Animation intensity" value={resolvedText.animationIntensity ?? 0.82} min={0} max={1.2} step={0.01} onChange={(value) => updateTextSettings({ animationIntensity: value })} />
                 </div>
 
+                {renderSoundEffectsSection('text')}
+
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Save className="h-4 w-4 text-amber-600" />
@@ -2112,7 +3146,7 @@ export function ImageEffectsDetailModal({
                   </div>
                   <div className="space-y-2 text-sm text-slate-600">
                     <p>Apply updates only this text scene in the editor.</p>
-                    <p>Save as new preset creates a reusable text animation preset with a different title.</p>
+                    <p>Save as new preset creates a reusable text animation preset with its sound effects.</p>
                     {selectedTextPreset ? (
                       <p>Override preset updates {selectedTextPreset.title} in your preset library.</p>
                     ) : null}
@@ -2406,6 +3440,8 @@ export function ImageEffectsDetailModal({
                   <RangeField label="Rotation" value={resolvedOverlay.rotationDeg ?? 0} min={-180} max={180} step={1} onChange={(value) => updateOverlaySettings({ rotationDeg: value })} />
                 </div>
 
+                {renderSoundEffectsSection('overlay')}
+
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <Save className="h-4 w-4 text-emerald-600" />
@@ -2413,7 +3449,7 @@ export function ImageEffectsDetailModal({
                   </div>
                   <div className="space-y-2 text-sm text-slate-600">
                     <p>Apply updates only to this overlay scene in the editor.</p>
-                    <p>Save as new preset stores the asset and its placement settings in your overlay library.</p>
+                    <p>Save as new preset stores the asset, placement settings, and sound effects in your overlay library.</p>
                     {selectedOverlayPreset ? (
                       <p>Override preset updates {selectedOverlayPreset.title} in your overlay library.</p>
                     ) : null}
@@ -2770,6 +3806,140 @@ export function ImageEffectsDetailModal({
           isDeletingTextPreset ||
           isDeletingOverlayPreset
         }
+      />
+
+      <SoundEffectsLibraryModal
+        isOpen={isSoundEffectsLibraryOpen}
+        onClose={() => {
+          setIsSoundEffectsLibraryOpen(false);
+          setSoundEffectsLibraryTarget(null);
+        }}
+        onApply={handleApplySoundEffectsFromLibrary}
+        title={
+          soundEffectsLibraryTarget === 'overlay'
+            ? 'Overlay Sound Effects Library'
+            : 'Text Sound Effects Library'
+        }
+        subtitle={
+          soundEffectsLibraryTarget === 'overlay'
+            ? 'Select one or more sound effects for this overlay scene'
+            : 'Select one or more sound effects for this text scene'
+        }
+        applyLabel="Add selected"
+      />
+
+      <SoundEffectEditModal
+        isOpen={Boolean(editingSoundEffectTarget && editingSoundEffect)}
+        title={
+          editingSoundEffectTarget?.kind === 'overlay'
+            ? 'Edit overlay sound effect'
+            : 'Edit text sound effect'
+        }
+        audioUrl={editingSoundEffect?.url ?? null}
+        initialName={String(editingSoundEffect?.title ?? '').trim()}
+        initialVolumePercent={Number(editingSoundEffect?.volumePercent ?? 100) || 100}
+        initialAudioSettings={cloneSoundEffectAudioSettings(
+          editingSoundEffect?.audioSettings ?? editingSoundEffect?.defaultAudioSettings,
+        )}
+        isApplying={isApplyingSingleSoundEffectEdit}
+        showSaveButton={false}
+        showSaveAsPreset={false}
+        showEditPresetsSection={false}
+        actionError={soundEffectEditError}
+        onClose={() => {
+          setEditingSoundEffectTarget(null);
+          setSoundEffectEditError(null);
+        }}
+        onApply={async (values: SoundEffectEditValues) => {
+          if (!editingSoundEffectTarget) return;
+
+          const currentItems = getDraftSoundEffects(editingSoundEffectTarget.kind);
+          const current = currentItems[editingSoundEffectTarget.index];
+          if (!current) return;
+
+          setIsApplyingSingleSoundEffectEdit(true);
+          try {
+            const nextTitle =
+              String(values.name ?? '').trim() || String(current.title ?? '').trim() || 'Sound effect';
+            const nextVolumePercent = Math.max(
+              0,
+              Math.min(300, Number(values.volumePercent) || 100),
+            );
+            const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
+
+            commitDraftSoundEffects(
+              editingSoundEffectTarget.kind,
+              currentItems.map((item, index) =>
+                index === editingSoundEffectTarget.index
+                  ? {
+                      ...item,
+                      title: nextTitle,
+                      volumePercent: nextVolumePercent,
+                      audioSettings: nextAudioSettings,
+                    }
+                  : item,
+              ),
+            );
+            setEditingSoundEffectTarget(null);
+            setSoundEffectEditError(null);
+          } finally {
+            setIsApplyingSingleSoundEffectEdit(false);
+          }
+        }}
+        onSave={async () => undefined}
+      />
+
+      <SoundEffectEditModal
+        isOpen={Boolean(mixEditTarget && mixEditDraft)}
+        title={mixEditTarget === 'overlay' ? 'Edit overlay sound stack' : 'Edit text sound stack'}
+        audioUrl={mixEditDraft?.audioUrl ?? null}
+        initialName={mixEditDraft?.name ?? ''}
+        initialVolumePercent={mixEditDraft?.volumePercent ?? 100}
+        initialAudioSettings={
+          mixEditDraft?.audioSettings ??
+          cloneSoundEffectAudioSettings(DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS)
+        }
+        isApplying={isApplyingMixEdit}
+        showSaveButton={false}
+        showSaveAsPreset={false}
+        showEditPresetsSection={false}
+        actionError={soundEffectMixError}
+        onClose={() => {
+          setMixEditTarget(null);
+          setMixEditDraft(null);
+          setSoundEffectMixError(null);
+        }}
+        onApply={async (values: SoundEffectEditValues) => {
+          if (!mixEditTarget) return;
+
+          const items = getDraftSoundEffects(mixEditTarget);
+          setIsApplyingMixEdit(true);
+          try {
+            const nextVolumePercent = Math.max(
+              0,
+              Math.min(300, Number(values.volumePercent) || 100),
+            );
+            const nextAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
+
+            commitDraftSoundEffects(
+              mixEditTarget,
+              items.map((effect) => ({
+                ...effect,
+                volumePercent: nextVolumePercent,
+                audioSettings: mergeSoundEffectSettingsPreservingTrim(
+                  nextAudioSettings,
+                  effect.audioSettings ?? effect.defaultAudioSettings,
+                ),
+              })),
+            );
+            setMixEditTarget(null);
+            setMixEditDraft(null);
+            setSoundEffectMixError(null);
+          } finally {
+            setIsApplyingMixEdit(false);
+          }
+        }}
+        onSave={async () => undefined}
       />
     </div>,
     portalTarget,

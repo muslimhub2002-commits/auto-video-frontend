@@ -137,10 +137,12 @@ type SentencesImagesSectionProps = {
   onSaveTextAnimationPreset: (
     title: string,
     settings: TextAnimationSettings,
+    soundEffects: NonNullable<SentenceItem['textSoundEffects']>,
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onUpdateTextAnimationPreset: (
     presetId: string,
     settings: TextAnimationSettings,
+    soundEffects: NonNullable<SentenceItem['textSoundEffects']>,
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveOverlayPreset: (params: {
@@ -149,6 +151,7 @@ type SentencesImagesSectionProps = {
     file?: File | null;
     sourceUrl?: string | null;
     overlayId?: string | null;
+    soundEffects?: NonNullable<SentenceItem['overlaySoundEffects']>;
   }) => Promise<OverlayPresetDto | null> | OverlayPresetDto | null;
   onDeleteOverlayPreset: (overlayId: string) => Promise<boolean> | boolean;
   onGenerateSingleImageLookWithAi: (

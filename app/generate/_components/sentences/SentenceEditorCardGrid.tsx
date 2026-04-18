@@ -102,6 +102,7 @@ import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
 import { OverlayScenePreview } from './OverlayScenePreview';
 import { TextPreviewOverlay } from './TextPreviewOverlay';
+import { createSoundEffectPreviewGraph } from '../../_utils/soundEffectPreviewGraph';
 import {
   DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
   cloneSoundEffectAudioSettings,
@@ -445,10 +446,12 @@ type SentenceEditorCardProps = {
   onSaveTextAnimationPreset: (
     title: string,
     settings: TextAnimationSettings,
+    soundEffects: NonNullable<SentenceItem['textSoundEffects']>,
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onUpdateTextAnimationPreset: (
     presetId: string,
     settings: TextAnimationSettings,
+    soundEffects: NonNullable<SentenceItem['textSoundEffects']>,
   ) => Promise<TextAnimationPresetDto | null> | TextAnimationPresetDto | null;
   onDeleteTextAnimationPreset: (presetId: string) => Promise<boolean> | boolean;
   onSaveOverlayPreset: (params: {
@@ -457,6 +460,7 @@ type SentenceEditorCardProps = {
     file?: File | null;
     sourceUrl?: string | null;
     overlayId?: string | null;
+    soundEffects?: NonNullable<SentenceItem['overlaySoundEffects']>;
   }) => Promise<OverlayPresetDto | null> | OverlayPresetDto | null;
   onDeleteOverlayPreset: (overlayId: string) => Promise<boolean> | boolean;
   onGenerateSingleImageLookWithAi: (
@@ -750,7 +754,8 @@ function SentenceEditorCardComponent({
   const soundEffectsPreviewRef = useRef<{
     timeouts: number[];
     audios: HTMLAudioElement[];
-  }>({ timeouts: [], audios: [] });
+    cleanups: Array<() => void | Promise<void>>;
+  }>({ timeouts: [], audios: [], cleanups: [] });
 
   const soundEffectsEverStartedRef = useRef<Set<string>>(new Set());
 
@@ -868,6 +873,7 @@ function SentenceEditorCardComponent({
   const stopAllScheduledAudio = () => {
     const timeouts = soundEffectsPreviewRef.current.timeouts;
     const audios = soundEffectsPreviewRef.current.audios;
+    const cleanups = soundEffectsPreviewRef.current.cleanups;
 
     for (const t of timeouts) window.clearTimeout(t);
     soundEffectsPreviewRef.current.timeouts = [];
@@ -882,6 +888,15 @@ function SentenceEditorCardComponent({
     }
     soundEffectsPreviewRef.current.audios = [];
 
+    for (const cleanup of cleanups) {
+      try {
+        void cleanup();
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    soundEffectsPreviewRef.current.cleanups = [];
+
     setMixStatus('idle');
     setSingleStatusByIndex({});
   };
@@ -890,6 +905,7 @@ function SentenceEditorCardComponent({
     url: string;
     delaySeconds: number;
     volumePercent: number;
+    audioSettings?: SoundEffectAudioSettings | null;
     trimStartSeconds?: number;
     trimDurationSeconds?: number | null;
     onPlaying?: () => void;
@@ -898,32 +914,88 @@ function SentenceEditorCardComponent({
   }) => {
     const audio = new Audio(params.url);
     audio.preload = 'auto';
-    audio.volume = Math.max(0, Math.min(1, (Number(params.volumePercent) || 0) / 100));
+    audio.crossOrigin = 'anonymous';
+
+    let previewCleanup: (() => Promise<void>) | null = null;
+    let previewTailTimeoutId: number | null = null;
+    let previewTailDelayMs = 0;
+    let isPreviewCleanedUp = false;
+
+    const cleanupPreview = () => {
+      if (previewTailTimeoutId !== null) {
+        window.clearTimeout(previewTailTimeoutId);
+        previewTailTimeoutId = null;
+      }
+      if (isPreviewCleanedUp) return;
+      isPreviewCleanedUp = true;
+
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // ignore seek errors during cleanup
+      }
+
+      if (previewCleanup) {
+        void previewCleanup();
+        previewCleanup = null;
+      }
+    };
 
     let isFinalized = false;
     const finalizeEnded = () => {
       if (isFinalized) return;
       isFinalized = true;
+      cleanupPreview();
       params.onEnded?.();
     };
     const finalizeError = () => {
       if (isFinalized) return;
       isFinalized = true;
+      cleanupPreview();
       params.onError?.();
     };
 
-    audio.onended = finalizeEnded;
+    const finalizeEndedWithTail = () => {
+      if (isFinalized) return;
+      if (previewTailDelayMs <= 0) {
+        finalizeEnded();
+        return;
+      }
+
+      previewTailTimeoutId = window.setTimeout(() => {
+        previewTailTimeoutId = null;
+        finalizeEnded();
+      }, previewTailDelayMs);
+      soundEffectsPreviewRef.current.timeouts.push(previewTailTimeoutId);
+    };
+
+    audio.onended = finalizeEndedWithTail;
     audio.onerror = finalizeError;
     soundEffectsPreviewRef.current.audios.push(audio);
 
     const delayMs = Math.max(0, Number(params.delaySeconds) || 0) * 1000;
     const timeoutId = window.setTimeout(() => {
-      const startPlayback = () => {
+      const startPlayback = async () => {
         const trimStartSeconds = Math.max(0, Number(params.trimStartSeconds ?? 0) || 0);
         const trimDurationSeconds =
           typeof params.trimDurationSeconds === 'number' && Number.isFinite(params.trimDurationSeconds)
             ? Math.max(0, params.trimDurationSeconds)
             : null;
+
+        const previewGraph = createSoundEffectPreviewGraph({
+          audioElement: audio,
+          volumePercent: params.volumePercent,
+          audioSettings: params.audioSettings,
+        });
+
+        if (previewGraph) {
+          previewCleanup = previewGraph.cleanup;
+          previewTailDelayMs = Math.max(0, previewGraph.tailDurationSeconds) * 1000;
+          soundEffectsPreviewRef.current.cleanups.push(previewGraph.cleanup);
+          await previewGraph.audioContext.resume().catch(() => undefined);
+        } else {
+          audio.volume = Math.max(0, Math.min(1, (Number(params.volumePercent) || 0) / 100));
+        }
 
         if (trimStartSeconds > 0) {
           try {
@@ -950,24 +1022,23 @@ function SentenceEditorCardComponent({
           const stopTimeoutId = window.setTimeout(() => {
             try {
               audio.pause();
-              audio.currentTime = 0;
             } catch {
               // ignore
             }
-            finalizeEnded();
+            finalizeEndedWithTail();
           }, trimDurationSeconds * 1000);
           soundEffectsPreviewRef.current.timeouts.push(stopTimeoutId);
         }
       };
 
       if (audio.readyState >= 1) {
-        startPlayback();
+        void startPlayback();
         return;
       }
 
       const handleLoadedMetadata = () => {
         audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-        startPlayback();
+        void startPlayback();
       };
       audio.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
       audio.load();
@@ -1000,6 +1071,7 @@ function SentenceEditorCardComponent({
         url: sfx.url,
         delaySeconds: sfx.absoluteDelaySeconds,
         volumePercent: sfx.volumePercent,
+        audioSettings: sfx.audioSettings,
         trimStartSeconds: sfx.trimStartSeconds,
         trimDurationSeconds: sfx.durationSeconds,
         onPlaying: () => {
@@ -1040,6 +1112,7 @@ function SentenceEditorCardComponent({
         ? 0
         : Math.max(0, Number(sfx.delaySeconds ?? 0) || 0),
       volumePercent: sfx.volumePercent,
+      audioSettings: sfx.audioSettings,
       trimStartSeconds: trimWindow.startSeconds,
       trimDurationSeconds: trimWindow.effectiveDurationSeconds,
       onPlaying: () => {
@@ -2818,6 +2891,8 @@ function SentenceEditorCardComponent({
                     isShortVideo={isShortVideo}
                     sceneImageUrl={imagePreviewUrl}
                     sceneVideoUrl={videoPreviewUrl}
+                    visualEffect={item.visualEffect ?? null}
+                    imageFilterSettings={item.imageFilterSettings ?? null}
                     overlayAssetUrl={overlayPreviewUrl}
                     overlayMimeType={item.overlayMimeType ?? null}
                     overlaySettings={resolvedOverlaySettings}
@@ -4338,6 +4413,7 @@ function SentenceEditorCardComponent({
           imageMotionSpeed={item.imageMotionSpeed}
           textAnimationEffect={item.textAnimationEffect}
           textAnimationText={item.textAnimationText}
+          textSoundEffects={item.textSoundEffects ?? []}
           textBackgroundImage={item.textBackgroundImage ?? null}
           textBackgroundImageUrl={item.textBackgroundImageUrl ?? null}
           textBackgroundSavedImageId={item.textBackgroundSavedImageId ?? null}
@@ -4347,6 +4423,7 @@ function SentenceEditorCardComponent({
           overlayFile={item.overlayFile ?? null}
           overlayUrl={item.overlayUrl ?? null}
           overlayMimeType={item.overlayMimeType ?? null}
+          overlaySoundEffects={item.overlaySoundEffects ?? []}
           customImageFilterId={item.customImageFilterId ?? null}
           customMotionEffectId={item.customMotionEffectId ?? null}
           customTextAnimationId={item.customTextAnimationId ?? null}
@@ -4374,6 +4451,7 @@ function SentenceEditorCardComponent({
             customTextAnimationId,
             textAnimationSettings,
             textAnimationText,
+            textSoundEffects,
             textBackgroundImage,
             textBackgroundImageUrl,
             textBackgroundSavedImageId,
@@ -4385,6 +4463,7 @@ function SentenceEditorCardComponent({
             overlayUrl,
             overlayMimeType,
             overlaySettings,
+            overlaySoundEffects,
           }) => {
             onSentencePatch({
               ...(imageEffectsTab === 'text'
@@ -4409,6 +4488,7 @@ function SentenceEditorCardComponent({
               customTextAnimationId,
               textAnimationSettings,
               textAnimationText,
+              textSoundEffects,
               textBackgroundImage,
               textBackgroundImageUrl,
               textBackgroundSavedImageId,
@@ -4420,6 +4500,7 @@ function SentenceEditorCardComponent({
               overlayUrl,
               overlayMimeType,
               overlaySettings,
+              overlaySoundEffects,
             });
           }}
           onSaveImageFilterPreset={onSaveImageFilterPreset}

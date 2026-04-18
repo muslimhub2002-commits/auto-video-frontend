@@ -3,6 +3,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 import type { SentenceItem } from '../../_types/sentences';
+import type { SentenceSoundEffectItem } from '../../_types/sentences';
 
 const PREVIEW_MOTION_DURATION_MS = 6200;
 export const IMAGE_MOTION_SPEED_MIN = 0.5;
@@ -120,6 +121,7 @@ export type OverlayPresetDto = {
   url: string;
   mimeType?: string | null;
   settings?: Record<string, unknown> | null;
+  soundEffects?: SentenceSoundEffectItem[] | null;
 };
 
 function clamp(value: number, min: number, max: number) {

@@ -1,8 +1,10 @@
 'use client';
 
 import type { CSSProperties } from 'react';
+import type { SentenceItem } from '../../_types/sentences';
 
 import {
+  normalizeImageFilterSettings,
   normalizeOverlaySettings,
   type OverlaySettings,
 } from './ImageEffectPreview';
@@ -20,6 +22,8 @@ type OverlayScenePreviewProps = {
   className?: string;
   sceneImageUrl?: string | null;
   sceneVideoUrl?: string | null;
+  visualEffect?: SentenceItem['visualEffect'] | null;
+  imageFilterSettings?: Record<string, unknown> | null;
   overlayAssetUrl?: string | null;
   overlayMimeType?: string | null;
   overlaySettings?: Record<string, unknown> | OverlaySettings | null;
@@ -31,6 +35,37 @@ type OverlayScenePreviewProps = {
 
 const clamp = (value: number, min: number, max: number) => {
   return Math.min(max, Math.max(min, value));
+};
+
+const getStablePreviewSeed = (value: string) => {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967295;
+};
+
+const buildImageLookFilter = (
+  settings: ReturnType<typeof normalizeImageFilterSettings>,
+) => {
+  return [
+    `saturate(${(settings.saturation ?? 1).toFixed(3)})`,
+    `contrast(${(settings.contrast ?? 1).toFixed(3)})`,
+    `brightness(${(settings.brightness ?? 1).toFixed(3)})`,
+    (settings.blurPx ?? 0) > 0.001 ? `blur(${(settings.blurPx ?? 0).toFixed(2)}px)` : null,
+    (settings.sepia ?? 0) > 0.001 ? `sepia(${(settings.sepia ?? 0).toFixed(3)})` : null,
+    (settings.grayscale ?? 0) > 0.001
+      ? `grayscale(${(settings.grayscale ?? 0).toFixed(3)})`
+      : null,
+    Math.abs(settings.hueRotateDeg ?? 0) > 0.001
+      ? `hue-rotate(${(settings.hueRotateDeg ?? 0).toFixed(2)}deg)`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ') || undefined;
 };
 
 const LEGACY_OVERLAY_WIDTH_PERCENT = 26;
@@ -74,6 +109,8 @@ export function OverlayScenePreview({
   className,
   sceneImageUrl = null,
   sceneVideoUrl = null,
+  visualEffect = null,
+  imageFilterSettings = null,
   overlayAssetUrl = null,
   overlayMimeType = null,
   overlaySettings,
@@ -113,6 +150,23 @@ export function OverlayScenePreview({
     settings: resolvedText,
     textLayer: resolvedOverlay.textLayer ?? 'above',
   });
+  const resolvedBackgroundLook = normalizeImageFilterSettings(
+    imageFilterSettings,
+    visualEffect ?? null,
+  );
+  const backgroundMediaFilter = buildImageLookFilter(resolvedBackgroundLook);
+  const previewSeed = getStablePreviewSeed(
+    `${String(sceneImageUrl ?? '')}|${String(sceneVideoUrl ?? '')}|${String(overlayAssetUrl ?? '')}|${resolvedTextValue}`,
+  );
+  const lightingX = ((previewSeed * 320) % 100 + 100) % 100;
+  const lightingY = (35 + 25 * Math.sin(previewSeed * 8) + 100) % 100;
+  const lightingAlpha =
+    (0.22 + 0.1 * Math.sin(previewSeed * 12)) *
+    (resolvedBackgroundLook.animatedLightingIntensity ?? 0);
+  const glassOverlayOpacity = Math.max(
+    0,
+    Math.min(0.4, resolvedBackgroundLook.glassOverlayOpacity ?? 0),
+  );
   const isImageOverlayAsset = inferOverlayIsImage(overlayAssetUrl, overlayMimeType);
   const overlayAnimationDurationSeconds = clamp(7 / (resolvedOverlay.speed ?? 1), 2.4, 14);
   const backgroundMode = resolvedOverlay.backgroundMode ?? 'image';
@@ -158,22 +212,49 @@ export function OverlayScenePreview({
       </style>
 
       <div className="absolute inset-0">
-        {backgroundMode === 'image' && sceneImageUrl ? (
-          <img
-            src={sceneImageUrl}
-            alt="Overlay background"
-            className="h-full w-full object-cover"
-          />
-        ) : null}
-        {backgroundMode === 'video' && sceneVideoUrl ? (
-          <video
-            src={sceneVideoUrl}
-            className="h-full w-full object-cover"
-            autoPlay
-            muted
-            loop
-            playsInline
-          />
+        {backgroundMode === 'image' || backgroundMode === 'video' ? (
+          <div className="absolute inset-0" style={{ filter: backgroundMediaFilter }}>
+            {backgroundMode === 'image' && sceneImageUrl ? (
+              <img
+                src={sceneImageUrl}
+                alt="Overlay background"
+                className="h-full w-full object-cover"
+              />
+            ) : null}
+            {backgroundMode === 'video' && sceneVideoUrl ? (
+              <video
+                src={sceneVideoUrl}
+                className="h-full w-full object-cover"
+                autoPlay
+                muted
+                loop
+                playsInline
+              />
+            ) : null}
+
+            {(resolvedBackgroundLook.animatedLightingIntensity ?? 0) > 0.001 ? (
+              <div
+                className="absolute inset-0"
+                style={{
+                  opacity: Math.max(0, Math.min(0.42, lightingAlpha)),
+                  mixBlendMode: 'screen',
+                  background: `radial-gradient(circle at ${lightingX.toFixed(2)}% ${lightingY.toFixed(2)}%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)`,
+                }}
+              />
+            ) : null}
+
+            {glassOverlayOpacity > 0.001 ? (
+              <div
+                className="absolute inset-0"
+                style={{
+                  opacity: glassOverlayOpacity,
+                  mixBlendMode: 'screen',
+                  background:
+                    'linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 18%, rgba(255,255,255,0.00) 45%, rgba(255,255,255,0.10) 62%, rgba(255,255,255,0.00) 100%)',
+                }}
+              />
+            ) : null}
+          </div>
         ) : null}
         {backgroundMode === 'solid' ? (
           <div
