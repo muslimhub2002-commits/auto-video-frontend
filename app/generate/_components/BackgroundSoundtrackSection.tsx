@@ -15,6 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  audioBufferToWav,
+  decodeAudioBufferCompat,
+} from '../_utils/audioBrowserProcessing';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Download,
@@ -42,8 +46,12 @@ interface BackgroundSoundtrackSectionProps {
   isGenerating: boolean;
   videoJobStatus: string | null;
   voiceOver: File | null;
+  voicePreviewUrl?: string | null;
   backgroundSoundtracks: BackgroundSoundtrackItem[];
   selectedBackgroundSoundtrackValue: string;
+  selectedBackgroundSoundtrackPreviewUrl?: string | null;
+  selectedBackgroundSoundtrackRequiresMaterialization?: boolean;
+  isMaterializingSelectedBackgroundSoundtrack?: boolean;
   onSelectedBackgroundSoundtrackValueChange: (value: string) => void;
   backgroundSoundtrackVolumePercent: number;
   onBackgroundSoundtrackVolumePercentChange: (value: number) => void;
@@ -73,13 +81,16 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
     isGenerating,
     videoJobStatus,
     voiceOver,
+    voicePreviewUrl,
     backgroundSoundtracks,
     selectedBackgroundSoundtrackValue,
+    selectedBackgroundSoundtrackPreviewUrl,
+    selectedBackgroundSoundtrackRequiresMaterialization,
+    isMaterializingSelectedBackgroundSoundtrack,
     onSelectedBackgroundSoundtrackValueChange,
     backgroundSoundtrackVolumePercent,
     onBackgroundSoundtrackVolumePercentChange,
     hasOneOffBackgroundSoundtrack,
-    oneOffBackgroundSoundtrackUrl,
     onToast,
     onSetFavoriteBackgroundSoundtrack,
     isSettingFavoriteBackgroundSoundtrack,
@@ -219,41 +230,33 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
   };
 
   const selectedSoundtrackPreviewSrc = useMemo(() => {
-    const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
-    if (!value || value === '__default__' || value === '__none__') return null;
-
-    if (value === '__oneoff__') {
-      return oneOffBackgroundSoundtrackUrl
-        ? String(oneOffBackgroundSoundtrackUrl).trim()
-        : null;
-    }
-
-    if (value.startsWith('lib:')) {
-      const id = value.slice('lib:'.length);
-      const found = backgroundSoundtracks.find((soundtrack) => soundtrack.id === id);
-      return found?.url ? String(found.url).trim() : null;
-    }
-
-    return null;
-  }, [
-    backgroundSoundtracks,
-    oneOffBackgroundSoundtrackUrl,
-    selectedBackgroundSoundtrackValue,
-  ]);
+    const value = String(selectedBackgroundSoundtrackPreviewUrl ?? '').trim();
+    return value || null;
+  }, [selectedBackgroundSoundtrackPreviewUrl]);
 
   const mixPreviewBlockedReason = useMemo(() => {
     if (soundtrackUploadDisabled) return 'Preview is disabled while a job is running.';
     if (isMixPreviewPlaying) return null;
-    if (!voiceOver) return 'Add a voice-over first to preview the mix.';
+    if (isMaterializingSelectedBackgroundSoundtrack) {
+      return 'Preparing soundtrack preview...';
+    }
+    if (!voiceOver && !String(voicePreviewUrl ?? '').trim()) {
+      return 'Add a voice-over first to preview the mix.';
+    }
     if (!selectedSoundtrackPreviewSrc && !selectedSoundtrack) {
-      return 'Select or choose a background soundtrack to preview.';
+      return selectedBackgroundSoundtrackRequiresMaterialization
+        ? 'Finish preparing the soundtrack preview before mixing.'
+        : 'Select or choose a background soundtrack to preview.';
     }
     return null;
   }, [
+    isMaterializingSelectedBackgroundSoundtrack,
     isMixPreviewPlaying,
     selectedSoundtrack,
+    selectedBackgroundSoundtrackRequiresMaterialization,
     selectedSoundtrackPreviewSrc,
     soundtrackUploadDisabled,
+    voicePreviewUrl,
     voiceOver,
   ]);
 
@@ -313,10 +316,17 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
       return;
     }
 
-    if (isSoundtrackPreviewLoading) return;
+    if (isSoundtrackPreviewLoading || isMaterializingSelectedBackgroundSoundtrack) {
+      return;
+    }
 
     if (!selectedSoundtrackPreviewSrc) {
-      onToast?.('Select a soundtrack to preview.', 'warning');
+      onToast?.(
+        selectedBackgroundSoundtrackRequiresMaterialization
+          ? 'The edited soundtrack is still being prepared.'
+          : 'Select a soundtrack to preview.',
+        'warning',
+      );
       return;
     }
 
@@ -343,64 +353,36 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
     await playSoundtrackPreview(objectUrl, 'file');
   };
 
-  const decodeAudio = async (ctx: AudioContext, buffer: ArrayBuffer) => {
-    if (ctx.decodeAudioData.length <= 1) {
-      return await ctx.decodeAudioData(buffer);
-    }
-    return await new Promise<AudioBuffer>((resolve, reject) => {
-      ctx.decodeAudioData(buffer, resolve, reject);
-    });
-  };
-
-  const audioBufferToWav = (audioBuffer: AudioBuffer) => {
-    const channelCount = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
-    const frameCount = audioBuffer.length;
-    const bitDepth = 16;
-    const bytesPerSample = bitDepth / 8;
-    const blockAlign = channelCount * bytesPerSample;
-    const dataSize = frameCount * blockAlign;
-    const wavBuffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(wavBuffer);
-
-    const writeString = (offset: number, value: string) => {
-      for (let index = 0; index < value.length; index += 1) {
-        view.setUint8(offset + index, value.charCodeAt(index));
-      }
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, channelCount, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * blockAlign, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bitDepth, true);
-    writeString(36, 'data');
-    view.setUint32(40, dataSize, true);
-
-    let offset = 44;
-    for (let sampleIndex = 0; sampleIndex < frameCount; sampleIndex += 1) {
-      for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
-        const sample = audioBuffer.getChannelData(channelIndex)[sampleIndex] ?? 0;
-        const clamped = Math.max(-1, Math.min(1, sample));
-        view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-        offset += 2;
-      }
-    }
-
-    return wavBuffer;
-  };
-
   const sanitizeDownloadName = (value: string) =>
     value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'soundtrack';
+
+  const loadAudioBufferFromSource = async (
+    ctx: AudioContext,
+    params: {
+      file?: File | null;
+      url?: string | null;
+      errorLabel: string;
+    },
+  ) => {
+    if (params.file) {
+      return await decodeAudioBufferCompat(ctx, await params.file.arrayBuffer());
+    }
+
+    const sourceUrl = String(params.url ?? '').trim();
+    if (!sourceUrl) {
+      throw new Error(`Missing ${params.errorLabel}`);
+    }
+
+    const response = await fetch(sourceUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to load ${params.errorLabel}`);
+    }
+
+    return await decodeAudioBufferCompat(ctx, await response.arrayBuffer());
+  };
 
   const downloadBlob = (blob: Blob, fileName: string) => {
     const objectUrl = URL.createObjectURL(blob);
@@ -457,7 +439,10 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
       const decodeContext = new AudioContextCtor();
 
       try {
-        const decodedBuffer = await decodeAudio(decodeContext, audioData.slice(0));
+        const decodedBuffer = await decodeAudioBufferCompat(
+          decodeContext,
+          audioData.slice(0),
+        );
         const frameCount = Math.max(1, decodedBuffer.length);
         const channelCount = Math.max(1, decodedBuffer.numberOfChannels);
         const offlineContext = new OfflineAudioContextCtor(
@@ -502,7 +487,7 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
 
     if (isMixPreviewLoading) return;
 
-    if (!voiceOver) {
+    if (!voiceOver && !String(voicePreviewUrl ?? '').trim()) {
       onToast?.('Add a voice-over first to preview the mix.', 'warning');
       return;
     }
@@ -529,33 +514,17 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
       const ctx = new audioContextConstructor();
       mixAudioContextRef.current = ctx;
 
-      const voiceBufferRaw = await voiceOver.arrayBuffer();
-      const voiceAudioBuffer = await decodeAudio(ctx, voiceBufferRaw);
+      const voiceAudioBuffer = await loadAudioBufferFromSource(ctx, {
+        file: voiceOver,
+        url: voicePreviewUrl,
+        errorLabel: 'voice-over audio',
+      });
 
-      let bgAudioBuffer: AudioBuffer;
-      if (selectedSoundtrack) {
-        const bgRaw = await selectedSoundtrack.arrayBuffer();
-        bgAudioBuffer = await decodeAudio(ctx, bgRaw);
-      } else {
-        const selectedValue = String(selectedBackgroundSoundtrackValue ?? '').trim();
-        const preferOneOffOverLibrary =
-          Boolean(oneOffBackgroundSoundtrackUrl) && selectedValue.startsWith('lib:');
-
-        const bgSrc = preferOneOffOverLibrary
-          ? String(oneOffBackgroundSoundtrackUrl ?? '').trim()
-          : selectedSoundtrackPreviewSrc;
-
-        if (!bgSrc) {
-          throw new Error('Missing background soundtrack');
-        }
-
-        const res = await fetch(bgSrc);
-        if (!res.ok) {
-          throw new Error('Failed to fetch background soundtrack');
-        }
-        const bgRaw = await res.arrayBuffer();
-        bgAudioBuffer = await decodeAudio(ctx, bgRaw);
-      }
+      const bgAudioBuffer = await loadAudioBufferFromSource(ctx, {
+        file: selectedSoundtrack,
+        url: selectedSoundtrackPreviewSrc,
+        errorLabel: 'background soundtrack audio',
+      });
 
       const bgGain = ctx.createGain();
       bgGain.gain.value = normalizedBackgroundVolume;
@@ -749,11 +718,13 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
                     className="border-gray-300 hover:bg-gray-50 h-10 shrink-0"
                     onClick={() => void handlePreviewSelectedSoundtrack()}
                     disabled={
+                      Boolean(isMaterializingSelectedBackgroundSoundtrack) ||
                       isSoundtrackPreviewLoading ||
                       (!selectedSoundtrackPreviewSrc && !isSoundtrackPreviewPlaying)
                     }
                   >
-                    {isSoundtrackPreviewLoading && previewKind !== 'file' ? (
+                    {((isSoundtrackPreviewLoading && previewKind !== 'file') ||
+                      Boolean(isMaterializingSelectedBackgroundSoundtrack)) ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : isSoundtrackPreviewPlaying && previewKind === 'selected' ? (
                       <Pause className="h-4 w-4" />
@@ -768,6 +739,7 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
                     className="border-gray-300 hover:bg-gray-50 h-10 shrink-0"
                     onClick={() => void handleDownloadSelectedSoundtrack()}
                     disabled={
+                      Boolean(isMaterializingSelectedBackgroundSoundtrack) ||
                       isSoundtrackDownloadLoading ||
                       !selectedSoundtrackPreviewSrc
                     }
@@ -871,7 +843,11 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
                           : 'border-gray-300 hover:bg-gray-50 h-9 shrink-0'
                       }
                       onClick={() => void handlePreviewMix()}
-                      disabled={soundtrackUploadDisabled || isMixPreviewLoading}
+                      disabled={
+                        soundtrackUploadDisabled ||
+                        isMixPreviewLoading ||
+                        Boolean(isMaterializingSelectedBackgroundSoundtrack)
+                      }
                       aria-disabled={Boolean(mixPreviewBlockedReason)}
                       title={mixPreviewBlockedReason ?? 'Preview voice-over + background together'}
                     >

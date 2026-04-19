@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { useRouter, useParams } from 'next/navigation';
 import {
@@ -43,6 +43,7 @@ import { GenerateModalsHost } from './_components/GenerateModalsHost';
 import { SoundEffectEditModal, type SoundEffectEditValues } from './_components/SoundEffectEditModal';
 import type { SoundEffectDto } from './_components/SoundEffectsLibraryModal';
 import {
+  DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
   areSoundEffectAudioSettingsEqual,
   cloneSoundEffectAudioSettings,
   normalizeSoundEffectAudioSettings,
@@ -51,6 +52,10 @@ import {
 import {
   computeSentenceSoundEffectTiming,
 } from './_utils/soundEffectsTiming';
+import {
+  renderEditedAudioFile,
+  stripFileExtension,
+} from './_utils/audioBrowserProcessing';
 import {
   TranslateScriptModal,
   type TranslateMethod,
@@ -469,6 +474,15 @@ type BackgroundSoundtrackItem = {
   source_soundtrack_id?: string | null;
 };
 
+type MaterializedBackgroundSoundtrackAsset = {
+  cacheKey: string;
+  soundtrackId: string;
+  sourceUrl: string;
+  title: string;
+  file: File;
+  objectUrl: string;
+};
+
 const normalizeBackgroundSoundtrackItem = (
   item: Partial<BackgroundSoundtrackItem> | null | undefined,
 ): BackgroundSoundtrackItem => {
@@ -495,263 +509,6 @@ const getRequestErrorMessage = (error: unknown, fallback: string) => {
   }
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   return fallback;
-};
-
-const clampEditedAudioVolumePercent = (raw: unknown) => {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return 100;
-  return Math.max(0, Math.min(300, value));
-};
-
-const resolveEditedAudioTrimWindow = (
-  settings: SoundEffectAudioSettings,
-  sourceDurationSeconds: number,
-) => {
-  const normalizedSettings = normalizeSoundEffectAudioSettings(settings);
-  const safeDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0
-    ? sourceDurationSeconds
-    : 0;
-  const startSeconds = Math.max(
-    0,
-    Math.min(normalizedSettings.trim.startSeconds, Math.max(0, safeDuration - 0.05)),
-  );
-  const requestedDuration = Math.max(0, normalizedSettings.trim.durationSeconds);
-  const remainingDuration = Math.max(0.05, safeDuration - startSeconds);
-  const effectiveDurationSeconds = requestedDuration > 0
-    ? Math.min(requestedDuration, remainingDuration)
-    : remainingDuration;
-
-  return {
-    startSeconds,
-    durationSeconds: effectiveDurationSeconds,
-  };
-};
-
-const decodeAudioBufferCompat = async (audioContext: AudioContext, data: ArrayBuffer) => {
-  const maybePromise = (audioContext as AudioContext & {
-    decodeAudioData(audioData: ArrayBuffer): Promise<AudioBuffer>;
-  }).decodeAudioData(data.slice(0));
-
-  if (maybePromise && typeof maybePromise.then === 'function') {
-    return await maybePromise;
-  }
-
-  return await new Promise<AudioBuffer>((resolve, reject) => {
-    audioContext.decodeAudioData(data.slice(0), resolve, reject);
-  });
-};
-
-const createEditedAudioDistortionCurve = (drive: number) => {
-  const amount = Math.max(1, Math.min(10, drive)) * 60;
-  const sampleCount = 44100;
-  const curve = new Float32Array(sampleCount);
-
-  for (let index = 0; index < sampleCount; index += 1) {
-    const x = (index * 2) / sampleCount - 1;
-    curve[index] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
-  }
-
-  return curve;
-};
-
-const buildEditedAudioImpulseResponse = (audioContext: BaseAudioContext, duration: number, decay: number) => {
-  const safeDuration = Math.max(0.1, Math.min(8, duration));
-  const safeDecay = Math.max(0.1, Math.min(8, decay));
-  const length = Math.max(1, Math.floor(audioContext.sampleRate * safeDuration));
-  const impulse = audioContext.createBuffer(2, length, audioContext.sampleRate);
-
-  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
-    const samples = impulse.getChannelData(channel);
-    for (let index = 0; index < length; index += 1) {
-      const progress = 1 - index / length;
-      samples[index] = (Math.random() * 2 - 1) * Math.pow(progress, safeDecay);
-    }
-  }
-
-  return impulse;
-};
-
-const audioBufferToWav = (audioBuffer: AudioBuffer) => {
-  const channelCount = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const format = 1;
-  const bitDepth = 16;
-  const bytesPerSample = bitDepth / 8;
-  const frameCount = audioBuffer.length;
-  const blockAlign = channelCount * bytesPerSample;
-  const dataSize = frameCount * blockAlign;
-  const wavBuffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(wavBuffer);
-
-  const writeString = (offset: number, value: string) => {
-    for (let index = 0; index < value.length; index += 1) {
-      view.setUint8(offset + index, value.charCodeAt(index));
-    }
-  };
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, format, true);
-  view.setUint16(22, channelCount, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * blockAlign, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitDepth, true);
-  writeString(36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  let offset = 44;
-  for (let sampleIndex = 0; sampleIndex < frameCount; sampleIndex += 1) {
-    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
-      const sample = audioBuffer.getChannelData(channelIndex)[sampleIndex] ?? 0;
-      const clamped = Math.max(-1, Math.min(1, sample));
-      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-      offset += 2;
-    }
-  }
-
-  return wavBuffer;
-};
-
-const stripFileExtension = (value: string) =>
-  String(value ?? '').trim().replace(/\.[^.]+$/u, '').trim();
-
-const renderEditedAudioFile = async (params: {
-  sourceFile?: File | null;
-  sourceUrl?: string | null;
-  values: SoundEffectEditValues;
-  fallbackName: string;
-}) => {
-  if (typeof window === 'undefined') {
-    throw new Error('Audio rendering is only available in the browser.');
-  }
-
-  const sourceFile = params.sourceFile ?? null;
-  const sourceUrl = String(params.sourceUrl ?? '').trim();
-  const normalizedSettings = normalizeSoundEffectAudioSettings(params.values.audioSettings);
-  const trimmedName = stripFileExtension(String(params.values.name ?? '').trim() || stripFileExtension(params.fallbackName));
-
-  let audioData: ArrayBuffer;
-  if (sourceFile) {
-    audioData = await sourceFile.arrayBuffer();
-  } else if (sourceUrl) {
-    const response = await fetch(sourceUrl);
-    if (!response.ok) throw new Error('Failed to load the source audio.');
-    audioData = await response.arrayBuffer();
-  } else {
-    throw new Error('No source audio available.');
-  }
-
-  const AudioContextCtor = window.AudioContext || (window as typeof window & {
-    webkitAudioContext?: typeof AudioContext;
-  }).webkitAudioContext;
-  const OfflineAudioContextCtor = window.OfflineAudioContext || (window as typeof window & {
-    webkitOfflineAudioContext?: typeof OfflineAudioContext;
-  }).webkitOfflineAudioContext;
-
-  if (!AudioContextCtor || !OfflineAudioContextCtor) {
-    throw new Error('Web Audio is not supported in this browser.');
-  }
-
-  const decodeContext = new AudioContextCtor();
-
-  try {
-    const decodedBuffer = await decodeAudioBufferCompat(decodeContext, audioData);
-    const trimWindow = resolveEditedAudioTrimWindow(normalizedSettings, decodedBuffer.duration);
-    const channelCount = Math.max(1, decodedBuffer.numberOfChannels);
-    const frameCount = Math.max(1, Math.ceil(trimWindow.durationSeconds * decodedBuffer.sampleRate));
-    const offlineContext = new OfflineAudioContextCtor(channelCount, frameCount, decodedBuffer.sampleRate);
-
-    const sourceNode = offlineContext.createBufferSource();
-    sourceNode.buffer = decodedBuffer;
-
-    const lowFilter = offlineContext.createBiquadFilter();
-    const midFilter = offlineContext.createBiquadFilter();
-    const highFilter = offlineContext.createBiquadFilter();
-    const compressor = offlineContext.createDynamicsCompressor();
-    const dryGain = offlineContext.createGain();
-    const saturation = offlineContext.createWaveShaper();
-    const saturationWetGain = offlineContext.createGain();
-    const delay = offlineContext.createDelay(2.5);
-    const delayFeedbackGain = offlineContext.createGain();
-    const echoWetGain = offlineContext.createGain();
-    const convolver = offlineContext.createConvolver();
-    const reverbWetGain = offlineContext.createGain();
-    const masterGain = offlineContext.createGain();
-
-    lowFilter.type = 'lowshelf';
-    lowFilter.frequency.value = normalizedSettings.eq.lowFrequencyHz;
-    lowFilter.gain.value = normalizedSettings.eq.lowGainDb;
-
-    midFilter.type = 'peaking';
-    midFilter.frequency.value = normalizedSettings.eq.midFrequencyHz;
-    midFilter.gain.value = normalizedSettings.eq.midGainDb;
-    midFilter.Q.value = normalizedSettings.eq.midQ;
-
-    highFilter.type = 'highshelf';
-    highFilter.frequency.value = normalizedSettings.eq.highFrequencyHz;
-    highFilter.gain.value = normalizedSettings.eq.highGainDb;
-
-    compressor.threshold.value = normalizedSettings.compressor.enabled ? normalizedSettings.compressor.threshold : 0;
-    compressor.ratio.value = normalizedSettings.compressor.enabled ? normalizedSettings.compressor.ratio : 1;
-    compressor.attack.value = normalizedSettings.compressor.enabled ? normalizedSettings.compressor.attack : 0;
-    compressor.release.value = normalizedSettings.compressor.enabled ? normalizedSettings.compressor.release : 0.25;
-    compressor.knee.value = normalizedSettings.compressor.enabled ? normalizedSettings.compressor.knee : 0;
-
-    saturation.curve = createEditedAudioDistortionCurve(normalizedSettings.saturation.drive);
-    saturation.oversample = '4x';
-    saturationWetGain.gain.value = normalizedSettings.saturation.enabled ? normalizedSettings.saturation.mix : 0;
-
-    delay.delayTime.value = normalizedSettings.echo.delayMs / 1000;
-    delayFeedbackGain.gain.value = normalizedSettings.echo.enabled ? normalizedSettings.echo.feedback : 0;
-    echoWetGain.gain.value = normalizedSettings.echo.enabled ? normalizedSettings.echo.mix : 0;
-
-    convolver.buffer = normalizedSettings.reverb.enabled
-      ? buildEditedAudioImpulseResponse(offlineContext, normalizedSettings.reverb.duration, normalizedSettings.reverb.decay)
-      : null;
-    reverbWetGain.gain.value = normalizedSettings.reverb.enabled ? normalizedSettings.reverb.mix : 0;
-    dryGain.gain.value = 1;
-    masterGain.gain.value = clampEditedAudioVolumePercent(params.values.volumePercent) / 100;
-
-    sourceNode.connect(lowFilter);
-    lowFilter.connect(midFilter);
-    midFilter.connect(highFilter);
-    highFilter.connect(compressor);
-
-    compressor.connect(dryGain);
-    dryGain.connect(masterGain);
-
-    compressor.connect(saturation);
-    saturation.connect(saturationWetGain);
-    saturationWetGain.connect(masterGain);
-
-    compressor.connect(delay);
-    delay.connect(delayFeedbackGain);
-    delayFeedbackGain.connect(delay);
-    delay.connect(echoWetGain);
-    echoWetGain.connect(masterGain);
-
-    compressor.connect(convolver);
-    convolver.connect(reverbWetGain);
-    reverbWetGain.connect(masterGain);
-
-    masterGain.connect(offlineContext.destination);
-
-    sourceNode.start(0, trimWindow.startSeconds, trimWindow.durationSeconds);
-    const renderedBuffer = await offlineContext.startRendering();
-    const wavBuffer = audioBufferToWav(renderedBuffer);
-    const fileName = `${trimmedName || 'voice-over'}-enhanced.wav`;
-
-    return {
-      file: new File([wavBuffer], fileName, { type: 'audio/wav' }),
-      durationSeconds: renderedBuffer.duration,
-    };
-  } finally {
-    await decodeContext.close().catch(() => undefined);
-  }
 };
 
 function normalizeSettingsObject(
@@ -1942,6 +1699,8 @@ export function GeneratePageInner() {
     useRef<Record<string, SentenceVoiceCandidate | null>>({});
   const previousSentenceVoiceUrlsRef = useRef<Record<string, string | null>>({});
   const previousVoiceOverChunkUrlsRef = useRef<Record<string, string | null>>({});
+  const backgroundSoundtrackAssetCacheRef =
+    useRef<Map<string, MaterializedBackgroundSoundtrackAsset>>(new Map());
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [backgroundSoundtracks, setBackgroundSoundtracks] = useState<BackgroundSoundtrackItem[]>([]);
@@ -1968,6 +1727,11 @@ export function GeneratePageInner() {
   const [isApplyingBackgroundSoundtrackEdit, setIsApplyingBackgroundSoundtrackEdit] = useState(false);
   const [isSavingBackgroundSoundtrackEdit, setIsSavingBackgroundSoundtrackEdit] = useState(false);
   const [isSavingBackgroundSoundtrackPreset, setIsSavingBackgroundSoundtrackPreset] = useState(false);
+  const [activeMaterializedBackgroundSoundtrack, setActiveMaterializedBackgroundSoundtrack] =
+    useState<MaterializedBackgroundSoundtrackAsset | null>(null);
+  const [isMaterializingBackgroundSoundtrack, setIsMaterializingBackgroundSoundtrack] =
+    useState(false);
+  const [isHydratingVoiceOver, setIsHydratingVoiceOver] = useState(false);
   const [isRandomScriptLoading, setIsRandomScriptLoading] = useState(false);
   const [randomScriptError, setRandomScriptError] = useState<string | null>(
     null,
@@ -3150,24 +2914,63 @@ export function GeneratePageInner() {
     };
   };
 
-  const resolveBackgroundMusicSrcForRender = (): string | undefined => {
+  const resolveRawBackgroundMusicSrcForRender = useCallback((): string | undefined => {
     if (!addBackgroundSoundtrack) return '__none__';
 
     const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
     if (value === '__none__') return '__none__';
-
-    const oneOffUrl = String(oneOffBackgroundSoundtrackUrl ?? '').trim();
-    if (oneOffUrl) return oneOffUrl;
-
     if (!value || value === '__default__') return undefined;
-    if (value === '__oneoff__') return undefined;
+
+    if (value === '__oneoff__') {
+      const oneOffUrl = String(oneOffBackgroundSoundtrackUrl ?? '').trim();
+      return oneOffUrl || undefined;
+    }
+
     if (value.startsWith('lib:')) {
       const id = value.slice('lib:'.length);
       const found = backgroundSoundtracks.find((t) => t.id === id);
       return found?.url ? String(found.url).trim() : undefined;
     }
+
     return undefined;
-  };
+  }, [
+    addBackgroundSoundtrack,
+    backgroundSoundtracks,
+    oneOffBackgroundSoundtrackUrl,
+    selectedBackgroundSoundtrackValue,
+  ]);
+
+  async function resolveBackgroundMusicRenderAsset() {
+    const rawBackgroundMusicSrc = resolveRawBackgroundMusicSrcForRender();
+
+    if (!selectedBackgroundSoundtrackRequiresMaterialization) {
+      return {
+        backgroundMusicSrc: rawBackgroundMusicSrc,
+        backgroundMusicFile: null as File | null,
+      };
+    }
+
+    const activeAssetMatchesSelection =
+      activeMaterializedBackgroundSoundtrack?.cacheKey ===
+      selectedBackgroundSoundtrackMaterializationCacheKey
+        ? activeMaterializedBackgroundSoundtrack
+        : null;
+
+    const materialized =
+      activeAssetMatchesSelection ??
+      (await materializeBackgroundSoundtrackAsset(
+        selectedBackgroundSoundtrackLibraryItem,
+      ));
+
+    if (!materialized) {
+      throw new Error('Failed to prepare the edited background soundtrack.');
+    }
+
+    return {
+      backgroundMusicSrc: undefined,
+      backgroundMusicFile: materialized.file,
+    };
+  }
 
   const buildRenderSentencePayload = (
     sourceSentences: SentenceItem[],
@@ -4153,7 +3956,10 @@ export function GeneratePageInner() {
         form.append('isSilent', 'true');
       }
 
-      const backgroundMusicSrc = resolveBackgroundMusicSrcForRender();
+      const {
+        backgroundMusicSrc,
+        backgroundMusicFile,
+      } = await resolveBackgroundMusicRenderAsset();
 
       const normalizedBackgroundMusicVolume = Math.max(
         0,
@@ -4163,6 +3969,9 @@ export function GeneratePageInner() {
         addBackgroundSoundtrack && normalizedBackgroundMusicVolume !== 1;
       if (backgroundMusicSrc) {
         form.append('backgroundMusicSrc', backgroundMusicSrc);
+      }
+      if (backgroundMusicFile) {
+        form.append('backgroundMusicFile', backgroundMusicFile, backgroundMusicFile.name);
       }
       if (normalizedBackgroundMusicVolume !== 1) {
         if (shouldIncludeBackgroundMusicVolume) {
@@ -4290,6 +4099,7 @@ export function GeneratePageInner() {
     // downloaded into browser memory just to render later.
     if (msg.voice?.voice) {
       try {
+        setIsHydratingVoiceOver(true);
         setVoiceOver(null);
         setVoiceOverChunks([]);
         setSavedVoiceId(null);
@@ -4304,8 +4114,11 @@ export function GeneratePageInner() {
         setSavedVoiceId(null);
         setVoiceLibraryUrl(null);
         showAlert('Failed to load the saved voice-over. You can re-upload/select a voice.', { type: 'warning' });
+      } finally {
+        setIsHydratingVoiceOver(false);
       }
     } else {
+      setIsHydratingVoiceOver(false);
       setVoiceOver(null);
       setVoiceOverChunks([]);
       setVoiceDuration(null);
@@ -5068,6 +4881,10 @@ export function GeneratePageInner() {
       setIsDeletingBackgroundSoundtrack(true);
       await api.delete('/background-soundtracks/' + encodeURIComponent(id));
 
+      revokeCachedBackgroundSoundtrackAssets(
+        (asset) => asset.soundtrackId === id,
+      );
+
       setBackgroundSoundtracks((prev) => prev.filter((t) => t.id !== id));
 
       setSelectedBackgroundSoundtrackValue((prev) => {
@@ -5187,13 +5004,173 @@ export function GeneratePageInner() {
       return prev.map((entry) =>
         entry.id === nextItem.id
           ? {
-            ...entry,
-            ...nextItem,
-          }
+              ...entry,
+              ...nextItem,
+            }
           : entry,
       );
     });
   };
+
+  const revokeCachedBackgroundSoundtrackAssets = useCallback(
+    (predicate?: (asset: MaterializedBackgroundSoundtrackAsset) => boolean) => {
+      backgroundSoundtrackAssetCacheRef.current.forEach((asset, key) => {
+        if (predicate && !predicate(asset)) return;
+
+        try {
+          URL.revokeObjectURL(asset.objectUrl);
+        } catch {
+          // ignore URL cleanup failures
+        }
+
+        backgroundSoundtrackAssetCacheRef.current.delete(key);
+      });
+    },
+    [],
+  );
+
+  const buildBackgroundSoundtrackMaterializationCacheKey = useCallback(
+    (item: BackgroundSoundtrackItem | null | undefined) => {
+      const soundtrackId = String(item?.id ?? '').trim();
+      const sourceUrl = String(item?.url ?? '').trim();
+      if (!soundtrackId || !sourceUrl) return null;
+
+      const normalizedAudioSettings = normalizeSoundEffectAudioSettings(
+        item?.audio_settings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+      );
+      if (
+        areSoundEffectAudioSettingsEqual(
+          normalizedAudioSettings,
+          DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+        )
+      ) {
+        return null;
+      }
+
+      return JSON.stringify({
+        soundtrackId,
+        sourceUrl,
+        audioSettings: normalizedAudioSettings,
+      });
+    },
+    [],
+  );
+
+  const materializeBackgroundSoundtrackAsset = useCallback(
+    async (item: BackgroundSoundtrackItem | null | undefined) => {
+      const normalizedItem = item ? normalizeBackgroundSoundtrackItem(item) : null;
+      const cacheKey = buildBackgroundSoundtrackMaterializationCacheKey(normalizedItem);
+      if (!cacheKey || !normalizedItem?.url) {
+        return null;
+      }
+
+      const cached = backgroundSoundtrackAssetCacheRef.current.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
+      const rendered = await renderEditedAudioFile({
+        sourceUrl: normalizedItem.url,
+        values: {
+          name: normalizedItem.title,
+          volumePercent: 100,
+          audioSettings:
+            normalizedItem.audio_settings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+        },
+        fallbackName: normalizedItem.title || 'background-soundtrack',
+      });
+
+      const asset: MaterializedBackgroundSoundtrackAsset = {
+        cacheKey,
+        soundtrackId: normalizedItem.id,
+        sourceUrl: normalizedItem.url,
+        title: normalizedItem.title,
+        file: rendered.file,
+        objectUrl: URL.createObjectURL(rendered.file),
+      };
+
+      backgroundSoundtrackAssetCacheRef.current.set(cacheKey, asset);
+      return asset;
+    },
+    [buildBackgroundSoundtrackMaterializationCacheKey],
+  );
+
+  const selectedBackgroundSoundtrackLibraryItem = useMemo(() => {
+    const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
+    if (!value.startsWith('lib:')) return null;
+
+    const soundtrackId = value.slice('lib:'.length);
+    return backgroundSoundtracks.find((item) => item.id === soundtrackId) ?? null;
+  }, [backgroundSoundtracks, selectedBackgroundSoundtrackValue]);
+
+  const selectedBackgroundSoundtrackMaterializationCacheKey = useMemo(
+    () =>
+      buildBackgroundSoundtrackMaterializationCacheKey(
+        selectedBackgroundSoundtrackLibraryItem,
+      ),
+    [
+      buildBackgroundSoundtrackMaterializationCacheKey,
+      selectedBackgroundSoundtrackLibraryItem,
+    ],
+  );
+
+  const selectedBackgroundSoundtrackRequiresMaterialization = Boolean(
+    selectedBackgroundSoundtrackMaterializationCacheKey,
+  );
+
+  useEffect(() => {
+    if (!selectedBackgroundSoundtrackMaterializationCacheKey) {
+      setActiveMaterializedBackgroundSoundtrack(null);
+      setIsMaterializingBackgroundSoundtrack(false);
+      return;
+    }
+
+    const cached = backgroundSoundtrackAssetCacheRef.current.get(
+      selectedBackgroundSoundtrackMaterializationCacheKey,
+    );
+    if (cached) {
+      setActiveMaterializedBackgroundSoundtrack(cached);
+      setIsMaterializingBackgroundSoundtrack(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsMaterializingBackgroundSoundtrack(true);
+
+    void materializeBackgroundSoundtrackAsset(selectedBackgroundSoundtrackLibraryItem)
+      .then((asset) => {
+        if (cancelled) return;
+        setActiveMaterializedBackgroundSoundtrack(asset);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('Failed to materialize background soundtrack', error);
+        setActiveMaterializedBackgroundSoundtrack(null);
+        showToast(
+          'Failed to prepare the edited soundtrack for preview. The raw track will stay selected.',
+          'error',
+        );
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsMaterializingBackgroundSoundtrack(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    materializeBackgroundSoundtrackAsset,
+    selectedBackgroundSoundtrackLibraryItem,
+    selectedBackgroundSoundtrackMaterializationCacheKey,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      revokeCachedBackgroundSoundtrackAssets();
+    };
+  }, [revokeCachedBackgroundSoundtrackAssets]);
 
   const applyBackgroundSoundtrackEditsLocally = async (values: SoundEffectEditValues) => {
     const target = backgroundSoundtrackEditTarget;
@@ -5203,13 +5180,24 @@ export function GeneratePageInner() {
     try {
       const normalizedAudioSettings = normalizeSoundEffectAudioSettings(values.audioSettings);
 
-      mergeBackgroundSoundtrackItemIntoState({
+      const nextItem = normalizeBackgroundSoundtrackItem({
         ...target,
         title: String(values.name ?? '').trim() || target.title,
         volume_percent: Math.max(0, Math.min(300, Number(values.volumePercent) || 100)),
         audio_settings: normalizedAudioSettings,
       });
+
+      revokeCachedBackgroundSoundtrackAssets(
+        (asset) => asset.soundtrackId === nextItem.id,
+      );
+      mergeBackgroundSoundtrackItemIntoState(nextItem);
       setBackgroundSoundtrackVolumePercent(Math.max(0, Math.min(300, Number(values.volumePercent) || 100)));
+
+      if (`lib:${nextItem.id}` === String(selectedBackgroundSoundtrackValue ?? '').trim()) {
+        const materialized = await materializeBackgroundSoundtrackAsset(nextItem);
+        setActiveMaterializedBackgroundSoundtrack(materialized);
+      }
+
       setBackgroundSoundtrackEditTargetId(null);
       showToast('Background soundtrack changes applied to this draft.', 'success');
     } finally {
@@ -5233,9 +5221,16 @@ export function GeneratePageInner() {
       );
 
       const updated = normalizeBackgroundSoundtrackItem(response.data);
+      revokeCachedBackgroundSoundtrackAssets(
+        (asset) => asset.soundtrackId === updated.id,
+      );
       mergeBackgroundSoundtrackItemIntoState(updated);
       setSelectedBackgroundSoundtrackValue(`lib:${updated.id}`);
       setBackgroundSoundtrackVolumePercent(updated.volume_percent ?? 100);
+
+      const materialized = await materializeBackgroundSoundtrackAsset(updated);
+      setActiveMaterializedBackgroundSoundtrack(materialized);
+
       setBackgroundSoundtrackEditTargetId(null);
       showToast('Background soundtrack updated.', 'success');
     } catch (error) {
@@ -5264,9 +5259,16 @@ export function GeneratePageInner() {
       );
 
       const created = normalizeBackgroundSoundtrackItem(response.data);
+      revokeCachedBackgroundSoundtrackAssets(
+        (asset) => asset.soundtrackId === created.id,
+      );
       mergeBackgroundSoundtrackItemIntoState(created);
       setSelectedBackgroundSoundtrackValue(`lib:${created.id}`);
       setBackgroundSoundtrackVolumePercent(created.volume_percent ?? 100);
+
+      const materialized = await materializeBackgroundSoundtrackAsset(created);
+      setActiveMaterializedBackgroundSoundtrack(materialized);
+
       setBackgroundSoundtrackEditTargetId(null);
       showToast('Background soundtrack preset saved.', 'success');
     } catch (error) {
@@ -6244,7 +6246,16 @@ export function GeneratePageInner() {
   };
 
   const resolveBackgroundSoundtrackPreviewUrl = () => {
-    const resolved = resolveBackgroundMusicSrcForRender();
+    if (selectedBackgroundSoundtrackRequiresMaterialization) {
+      const asset =
+        activeMaterializedBackgroundSoundtrack?.cacheKey ===
+        selectedBackgroundSoundtrackMaterializationCacheKey
+          ? activeMaterializedBackgroundSoundtrack
+          : null;
+      return asset?.objectUrl ?? null;
+    }
+
+    const resolved = resolveRawBackgroundMusicSrcForRender();
     if (!resolved || resolved === '__none__') return null;
     return resolved;
   };
@@ -6834,31 +6845,10 @@ export function GeneratePageInner() {
 
     setIsGenerating(true);
     try {
-      const resolveBackgroundMusicSrcForRender = (): string | undefined => {
-        if (!addBackgroundSoundtrack) return '__none__';
-
-        const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
-        if (value === '__none__') return '__none__';
-
-        // If the user uploaded a one-off soundtrack, always use it for rendering
-        // even if another soundtrack is currently selected in the dropdown.
-        // (Unless the user explicitly chose "None" above.)
-        const oneOffUrl = String(oneOffBackgroundSoundtrackUrl ?? '').trim();
-        if (oneOffUrl) return oneOffUrl;
-
-        if (!value || value === '__default__') return undefined;
-        if (value === '__oneoff__') {
-          return undefined;
-        }
-        if (value.startsWith('lib:')) {
-          const id = value.slice('lib:'.length);
-          const found = backgroundSoundtracks.find((t) => t.id === id);
-          return found?.url ? String(found.url).trim() : undefined;
-        }
-        return undefined;
-      };
-
-      const backgroundMusicSrc = resolveBackgroundMusicSrcForRender();
+      const {
+        backgroundMusicSrc,
+        backgroundMusicFile,
+      } = await resolveBackgroundMusicRenderAsset();
 
       const normalizedBackgroundMusicVolume = Math.max(
         0,
@@ -6886,10 +6876,16 @@ export function GeneratePageInner() {
       const requiresMultipartTextBackgroundVideos =
         hasTextBackgroundVideoUploadsForRender(sentences);
       const requiresMultipartVoiceOver = Boolean(voiceOver);
+      const requiresMultipartBackgroundMusic = Boolean(backgroundMusicFile);
 
       let res: Response | null = null;
 
-      if (!requiresMultipartTextBackgroundVideos && !requiresMultipartVoiceOver && audioUrl) {
+      if (
+        !requiresMultipartTextBackgroundVideos &&
+        !requiresMultipartVoiceOver &&
+        !requiresMultipartBackgroundMusic &&
+        audioUrl
+      ) {
         res = await fetch(`${API_URL}/videos/url`, {
           method: 'POST',
           headers: {
@@ -6926,6 +6922,13 @@ export function GeneratePageInner() {
           fallbackForm.append('voiceOver', voiceOver);
         } else if (audioUrl) {
           fallbackForm.append('audioUrl', audioUrl);
+        }
+        if (backgroundMusicFile) {
+          fallbackForm.append(
+            'backgroundMusicFile',
+            backgroundMusicFile,
+            backgroundMusicFile.name,
+          );
         }
         fallbackForm.append('sentences', JSON.stringify(sentencePayload));
         fallbackForm.append('scriptLength', scriptLength);
@@ -7853,51 +7856,67 @@ export function GeneratePageInner() {
       setSentences([]);
     }
 
-    const loadedVoiceState = await hydrateVoiceStateFromDraft({
-      voice: draft.voice ?? null,
-      voiceOverChunks: draft.voice_over_chunks,
-      fallbackBaseName: 'draft-voice-over',
-    });
-    const rebuiltSentenceVoiceState =
-      !loadedVoiceState.voiceFile &&
-      !loadedVoiceState.voiceLibraryUrl &&
-      mappedDraftSentences.some((sentence) => hasSentenceVoiceOver(sentence))
-        ? await rebuildVoiceOverFromSentenceVoices({
-            sourceSentences: mappedDraftSentences,
-            fallbackBaseName: 'draft-voice-over',
-          }).catch((error) => {
-            console.error('Failed to rebuild draft sentence voices', error);
-            return null;
-          })
-        : null;
+    const shouldHydrateVoiceOver =
+      Boolean(String(draft.voice?.voice ?? '').trim()) ||
+      Boolean(draft.voice_over_chunks?.length) ||
+      mappedDraftSentences.some((sentence) => hasSentenceVoiceOver(sentence));
 
-    setVoiceOver(loadedVoiceState.voiceFile);
-    setVoiceOverChunks(loadedVoiceState.voiceOverChunks);
-    setVoiceDuration(loadedVoiceState.voiceDuration);
-    setSavedVoiceId(loadedVoiceState.savedVoiceId);
-    setVoiceLibraryUrl(loadedVoiceState.voiceLibraryUrl);
+    setIsHydratingVoiceOver(shouldHydrateVoiceOver);
 
-    if (rebuiltSentenceVoiceState) {
-      setVoiceOver(rebuiltSentenceVoiceState.file);
-      setVoiceOverChunks([]);
-      setVoiceDuration(rebuiltSentenceVoiceState.durationSeconds);
-      setSavedVoiceId(null);
-      setVoiceLibraryUrl(null);
+    let resolvedDraftVoiceFile: File | null = null;
+    let resolvedDraftVoiceDuration: number | null = null;
+    let resolvedDraftVoiceChunks: VoiceOverChunkState[] = [];
+    let resolvedDraftSavedVoiceId: string | null = null;
+    let resolvedDraftVoiceLibraryUrl: string | null = null;
+
+    try {
+      const loadedVoiceState = await hydrateVoiceStateFromDraft({
+        voice: draft.voice ?? null,
+        voiceOverChunks: draft.voice_over_chunks,
+        fallbackBaseName: 'draft-voice-over',
+      });
+      const rebuiltSentenceVoiceState =
+        !loadedVoiceState.voiceFile &&
+        !loadedVoiceState.voiceLibraryUrl &&
+        mappedDraftSentences.some((sentence) => hasSentenceVoiceOver(sentence))
+          ? await rebuildVoiceOverFromSentenceVoices({
+              sourceSentences: mappedDraftSentences,
+              fallbackBaseName: 'draft-voice-over',
+            }).catch((error) => {
+              console.error('Failed to rebuild draft sentence voices', error);
+              return null;
+            })
+          : null;
+
+      setVoiceOver(loadedVoiceState.voiceFile);
+      setVoiceOverChunks(loadedVoiceState.voiceOverChunks);
+      setVoiceDuration(loadedVoiceState.voiceDuration);
+      setSavedVoiceId(loadedVoiceState.savedVoiceId);
+      setVoiceLibraryUrl(loadedVoiceState.voiceLibraryUrl);
+
+      if (rebuiltSentenceVoiceState) {
+        setVoiceOver(rebuiltSentenceVoiceState.file);
+        setVoiceOverChunks([]);
+        setVoiceDuration(rebuiltSentenceVoiceState.durationSeconds);
+        setSavedVoiceId(null);
+        setVoiceLibraryUrl(null);
+      }
+
+      resolvedDraftVoiceFile = rebuiltSentenceVoiceState?.file ?? loadedVoiceState.voiceFile;
+      resolvedDraftVoiceDuration =
+        rebuiltSentenceVoiceState?.durationSeconds ?? loadedVoiceState.voiceDuration;
+      resolvedDraftVoiceChunks = rebuiltSentenceVoiceState
+        ? []
+        : cloneVoiceOverChunks(loadedVoiceState.voiceOverChunks);
+      resolvedDraftSavedVoiceId = rebuiltSentenceVoiceState
+        ? null
+        : loadedVoiceState.savedVoiceId;
+      resolvedDraftVoiceLibraryUrl = rebuiltSentenceVoiceState
+        ? null
+        : loadedVoiceState.voiceLibraryUrl;
+    } finally {
+      setIsHydratingVoiceOver(false);
     }
-
-    const resolvedDraftVoiceFile =
-      rebuiltSentenceVoiceState?.file ?? loadedVoiceState.voiceFile;
-    const resolvedDraftVoiceDuration =
-      rebuiltSentenceVoiceState?.durationSeconds ?? loadedVoiceState.voiceDuration;
-    const resolvedDraftVoiceChunks = rebuiltSentenceVoiceState
-      ? []
-      : cloneVoiceOverChunks(loadedVoiceState.voiceOverChunks);
-    const resolvedDraftSavedVoiceId = rebuiltSentenceVoiceState
-      ? null
-      : loadedVoiceState.savedVoiceId;
-    const resolvedDraftVoiceLibraryUrl = rebuiltSentenceVoiceState
-      ? null
-      : loadedVoiceState.voiceLibraryUrl;
 
     if (tabSnapshotsRef.current.full) {
       tabSnapshotsRef.current.full = {
@@ -12004,6 +12023,7 @@ export function GeneratePageInner() {
                   script={script}
                   voiceOver={voiceOver}
                   voicePreviewUrl={voiceOverPreviewUrl}
+                  isHydratingVoiceOver={isHydratingVoiceOver}
                   voiceDuration={voiceDuration}
                   voiceError={voiceError}
                   isGeneratingVoice={isGeneratingVoice}
@@ -12078,8 +12098,12 @@ export function GeneratePageInner() {
                   isGenerating={isGenerating}
                   videoJobStatus={videoJobStatus}
                   voiceOver={voiceOver}
+                  voicePreviewUrl={voiceOverPreviewUrl}
                   backgroundSoundtracks={backgroundSoundtracks}
                   selectedBackgroundSoundtrackValue={selectedBackgroundSoundtrackValue}
+                  selectedBackgroundSoundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
+                  selectedBackgroundSoundtrackRequiresMaterialization={selectedBackgroundSoundtrackRequiresMaterialization}
+                  isMaterializingSelectedBackgroundSoundtrack={isMaterializingBackgroundSoundtrack}
                   backgroundSoundtrackVolumePercent={backgroundSoundtrackVolumePercent}
                   onBackgroundSoundtrackVolumePercentChange={setBackgroundSoundtrackVolumePercent}
                   onSelectedBackgroundSoundtrackValueChange={(value: string) => {

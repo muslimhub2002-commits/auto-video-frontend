@@ -23,6 +23,7 @@ interface VoiceOverSectionProps {
   script: string;
   voiceOver: File | null;
   voicePreviewUrl?: string | null;
+  isHydratingVoiceOver?: boolean;
   voiceDuration: number | null;
   voiceError: string | null;
   isGeneratingVoice: boolean;
@@ -73,6 +74,7 @@ export function VoiceOverSection({
   script,
   voiceOver,
   voicePreviewUrl,
+  isHydratingVoiceOver,
   voiceDuration,
   voiceError,
   isGeneratingVoice,
@@ -315,7 +317,28 @@ export function VoiceOverSection({
               Audio Configuration
             </h4>
 
-            {!hasVoiceSelection ? (
+            {isHydratingVoiceOver ? (
+              <div className="rounded-xl border border-purple-200 bg-white p-5 shadow-sm">
+                <div className="animate-pulse space-y-4">
+                  <div className="flex items-start gap-4">
+                    <div className="h-12 w-12 rounded-xl bg-purple-100"></div>
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 w-40 rounded-full bg-purple-100"></div>
+                      <div className="h-3 w-64 rounded-full bg-gray-100"></div>
+                      <div className="h-8 w-full rounded-lg bg-gray-100"></div>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="h-10 rounded-lg bg-gray-100"></div>
+                    <div className="h-10 rounded-lg bg-gray-100"></div>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 text-xs text-purple-700">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Loading saved voice-over...</span>
+                </div>
+              </div>
+            ) : !hasVoiceSelection ? (
               <div className="space-y-4">
                 {/* Provider toggle */}
                 <div className="bg-white rounded-xl border border-purple-200 p-6 space-y-4 shadow-sm hover:shadow-md transition-shadow duration-200">
