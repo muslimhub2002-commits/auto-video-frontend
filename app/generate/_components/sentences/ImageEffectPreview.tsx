@@ -92,6 +92,10 @@ export const OVERLAY_BACKGROUND_MODE_VALUES = [
 ] as const;
 
 export const OVERLAY_TEXT_LAYER_VALUES = ['below', 'above'] as const;
+export const OVERLAY_START_DELAY_MIN = 0;
+export const OVERLAY_START_DELAY_MAX = 10;
+export const OVERLAY_START_DELAY_STEP = 0.1;
+export const DEFAULT_OVERLAY_START_DELAY = 0;
 
 export type OverlayBackgroundMode = (typeof OVERLAY_BACKGROUND_MODE_VALUES)[number];
 export type OverlayTextLayer = (typeof OVERLAY_TEXT_LAYER_VALUES)[number];
@@ -111,6 +115,7 @@ export type OverlaySettings = {
   gradientFrom?: string;
   gradientTo?: string;
   gradientAngleDeg?: number;
+  startDelaySeconds?: number;
   includeText?: boolean;
   textLayer?: OverlayTextLayer;
 };
@@ -494,6 +499,7 @@ export function getDefaultOverlaySettings(
     gradientFrom: '#020617',
     gradientTo: '#1d4ed8',
     gradientAngleDeg: 135,
+    startDelaySeconds: DEFAULT_OVERLAY_START_DELAY,
     includeText: false,
     textLayer: 'above',
   };
@@ -527,6 +533,12 @@ export function normalizeOverlaySettings(
       defaults.gradientAngleDeg ?? 135,
       0,
       360,
+    ),
+    startDelaySeconds: getNumeric(
+      settings?.startDelaySeconds,
+      defaults.startDelaySeconds ?? DEFAULT_OVERLAY_START_DELAY,
+      OVERLAY_START_DELAY_MIN,
+      OVERLAY_START_DELAY_MAX,
     ),
     includeText: getBoolean(settings?.includeText, defaults.includeText ?? false),
     textLayer: (OVERLAY_TEXT_LAYER_VALUES as readonly string[]).includes(

@@ -1,11 +1,14 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { SentenceItem } from '../../_types/sentences';
 
 import {
+  DEFAULT_OVERLAY_START_DELAY,
   normalizeImageFilterSettings,
   normalizeOverlaySettings,
+  OVERLAY_START_DELAY_MAX,
+  OVERLAY_START_DELAY_MIN,
   type OverlaySettings,
 } from './ImageEffectPreview';
 import {
@@ -36,6 +39,9 @@ type OverlayScenePreviewProps = {
 const clamp = (value: number, min: number, max: number) => {
   return Math.min(max, Math.max(min, value));
 };
+
+const OVERLAY_PREVIEW_FPS = 30;
+const OVERLAY_MOTION_RAMP_MS = 350;
 
 const getStablePreviewSeed = (value: string) => {
   let hash = 2166136261;
@@ -169,10 +175,59 @@ export function OverlayScenePreview({
   );
   const isImageOverlayAsset = inferOverlayIsImage(overlayAssetUrl, overlayMimeType);
   const overlayAnimationDurationSeconds = clamp(7 / (resolvedOverlay.speed ?? 1), 2.4, 14);
+  const overlayStartDelayMs =
+    clamp(
+      Number(resolvedOverlay.startDelaySeconds ?? DEFAULT_OVERLAY_START_DELAY) || 0,
+      OVERLAY_START_DELAY_MIN,
+      OVERLAY_START_DELAY_MAX,
+    ) * 1000;
+  const overlayPreviewCycleMs = Math.max(
+    overlayAnimationDurationSeconds * 1000 + overlayStartDelayMs,
+    1,
+  );
   const backgroundMode = resolvedOverlay.backgroundMode ?? 'image';
   const backgroundMissing =
     (backgroundMode === 'image' && !sceneImageUrl) ||
     (backgroundMode === 'video' && !sceneVideoUrl);
+  const overlayMotionResetKey = JSON.stringify({
+    overlayAssetUrl,
+    overlayMimeType,
+    overlaySettings: resolvedOverlay,
+  });
+  const [animationElapsedMs, setAnimationElapsedMs] = useState(0);
+
+  useEffect(() => {
+    let animationFrameId = 0;
+    const startedAt = performance.now();
+
+    const updateFrame = (now: number) => {
+      const elapsed = now - startedAt;
+      setAnimationElapsedMs(elapsed % overlayPreviewCycleMs);
+      animationFrameId = window.requestAnimationFrame(updateFrame);
+    };
+
+    animationFrameId = window.requestAnimationFrame(updateFrame);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [overlayMotionResetKey, overlayPreviewCycleMs]);
+
+  const overlayVisible = !overlayAssetUrl || animationElapsedMs >= overlayStartDelayMs;
+  const delayedOverlayAnimationMs = Math.max(0, animationElapsedMs - overlayStartDelayMs);
+  const cycleFrames = Math.max(
+    1,
+    Math.round(overlayAnimationDurationSeconds * OVERLAY_PREVIEW_FPS),
+  );
+  const animationFrame = (delayedOverlayAnimationMs / 1000) * OVERLAY_PREVIEW_FPS;
+  const phase = ((animationFrame % cycleFrames) / cycleFrames) * Math.PI * 2;
+  const motionRamp = shouldUseImageTabSizing
+    ? 0
+    : clamp(delayedOverlayAnimationMs / OVERLAY_MOTION_RAMP_MS, 0, 1);
+  const floatYOffset = shouldUseImageTabSizing ? 0 : Math.sin(phase) * 0.8 * motionRamp;
+  const floatRotation = shouldUseImageTabSizing
+    ? 0
+    : Math.sin(phase + Math.PI / 2) * 1.25 * motionRamp;
   const overlayFrameStyle: CSSProperties = {
     position: 'absolute',
     ...(shouldUseImageTabSizing
@@ -187,14 +242,13 @@ export function OverlayScenePreview({
           top: `calc(50% + ${resolvedOverlay.offsetY ?? 0}%)`,
           width: `${resolvedOverlay.widthPercent ?? 26}%`,
           height: `${resolvedOverlay.heightPercent ?? 22}%`,
-          transform: `translate(-50%, -50%) scale(${resolvedOverlay.scale ?? 1}) rotate(${resolvedOverlay.rotationDeg ?? 0}deg)`,
+          transform: `translate(-50%, -50%) translateY(${floatYOffset.toFixed(2)}%) scale(${resolvedOverlay.scale ?? 1}) rotate(${(
+            (resolvedOverlay.rotationDeg ?? 0) + floatRotation
+          ).toFixed(2)}deg)`,
         }),
     transformOrigin: 'center center',
     opacity: resolvedOverlay.opacity ?? 1,
     zIndex: 20,
-    animation: !shouldUseImageTabSizing && overlayAssetUrl
-      ? `av-overlay-float ${overlayAnimationDurationSeconds}s ease-in-out infinite alternate`
-      : undefined,
   };
   const overlayAssetClassName = shouldUseImageTabSizing
     ? 'block h-full w-full object-cover'
@@ -204,13 +258,6 @@ export function OverlayScenePreview({
     <div
       className={`relative overflow-hidden rounded-[1.5rem] bg-slate-950 text-white ${className ?? ''}`}
     >
-      <style>
-        {`@keyframes av-overlay-float {
-          0% { transform: translate(-50%, calc(-50% + 0.8%)) scale(var(--overlay-scale, 1)) rotate(var(--overlay-rotation, 0deg)); }
-          100% { transform: translate(-50%, calc(-50% - 0.8%)) scale(var(--overlay-scale, 1)) rotate(calc(var(--overlay-rotation, 0deg) + 1.25deg)); }
-        }`}
-      </style>
-
       <div className="absolute inset-0">
         {backgroundMode === 'image' || backgroundMode === 'video' ? (
           <div className="absolute inset-0" style={{ filter: backgroundMediaFilter }}>
@@ -299,14 +346,8 @@ export function OverlayScenePreview({
         </div>
       ) : null}
 
-      <div
-        style={{
-          ...overlayFrameStyle,
-          ['--overlay-scale' as string]: String(resolvedOverlay.scale ?? 1),
-          ['--overlay-rotation' as string]: `${resolvedOverlay.rotationDeg ?? 0}deg`,
-        }}
-      >
-        {overlayAssetUrl ? (
+      <div style={overlayFrameStyle}>
+        {overlayAssetUrl && overlayVisible ? (
           isImageOverlayAsset ? (
             <img
               src={overlayAssetUrl}
@@ -323,11 +364,11 @@ export function OverlayScenePreview({
               playsInline
             />
           )
-        ) : (
+        ) : !overlayAssetUrl ? (
           <div className={`flex h-full w-full items-center justify-center border-2 border-dashed border-white/20 bg-slate-950/35 px-4 text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/70 ${shouldUseImageTabSizing ? '' : 'rounded-[1.2rem]'}`}>
             Upload or choose an overlay asset
           </div>
-        )}
+        ) : null}
       </div>
 
       {showText && resolvedOverlay.textLayer === 'above' ? (

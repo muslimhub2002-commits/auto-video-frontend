@@ -54,6 +54,10 @@ export const TEXT_ANIMATION_WORD_DELAY_MIN = 0.03;
 export const TEXT_ANIMATION_WORD_DELAY_MAX = 0.4;
 export const TEXT_ANIMATION_WORD_DELAY_STEP = 0.01;
 export const DEFAULT_TEXT_ANIMATION_WORD_DELAY = 0.08;
+export const TEXT_ANIMATION_START_DELAY_MIN = 0;
+export const TEXT_ANIMATION_START_DELAY_MAX = 10;
+export const TEXT_ANIMATION_START_DELAY_STEP = 0.1;
+export const DEFAULT_TEXT_ANIMATION_START_DELAY = 0;
 export const TEXT_SCENE_FONT_MIN_PX = 19.2;
 export const TEXT_SCENE_FONT_MAX_PX = 92.8;
 export const TEXT_SCENE_DEFAULT_FONT_FAMILY = 'Oswald, system-ui, sans-serif';
@@ -91,6 +95,7 @@ export type TextAnimationSettings = {
   gradientAngleDeg?: number;
   backgroundDim?: number;
   animationIntensity?: number;
+  startDelaySeconds?: number;
   animatePerWord?: boolean;
   wordDelaySeconds?: number;
   textCase?: TextCaseMode;
@@ -252,6 +257,7 @@ export function getDefaultTextAnimationSettings(
     gradientAngleDeg: 135,
     backgroundDim: 0.44,
     animationIntensity: 0.92,
+    startDelaySeconds: DEFAULT_TEXT_ANIMATION_START_DELAY,
     animatePerWord: false,
     wordDelaySeconds: DEFAULT_TEXT_ANIMATION_WORD_DELAY,
     textCase: 'uppercase',
@@ -296,6 +302,12 @@ export function normalizeTextAnimationSettings(
     gradientAngleDeg: getNumeric(settings?.gradientAngleDeg, defaults.gradientAngleDeg ?? 135, 0, 360),
     backgroundDim: getNumeric(settings?.backgroundDim, defaults.backgroundDim ?? 0.38, 0, 0.92),
     animationIntensity: getNumeric(settings?.animationIntensity, defaults.animationIntensity ?? 0.82, 0, 1.2),
+    startDelaySeconds: getNumeric(
+      settings?.startDelaySeconds,
+      defaults.startDelaySeconds ?? DEFAULT_TEXT_ANIMATION_START_DELAY,
+      TEXT_ANIMATION_START_DELAY_MIN,
+      TEXT_ANIMATION_START_DELAY_MAX,
+    ),
     animatePerWord: settings?.animatePerWord === true,
     wordDelaySeconds: getNumeric(
       settings?.wordDelaySeconds,
@@ -368,6 +380,18 @@ function getWordDelayMs(settings: TextAnimationSettings) {
         DEFAULT_TEXT_ANIMATION_WORD_DELAY,
         TEXT_ANIMATION_WORD_DELAY_MIN,
         TEXT_ANIMATION_WORD_DELAY_MAX,
+      ),
+  );
+}
+
+function getStartDelayMs(settings: TextAnimationSettings) {
+  return Math.round(
+    1000 *
+      getNumeric(
+        settings.startDelaySeconds,
+        DEFAULT_TEXT_ANIMATION_START_DELAY,
+        TEXT_ANIMATION_START_DELAY_MIN,
+        TEXT_ANIMATION_START_DELAY_MAX,
       ),
   );
 }
@@ -592,8 +616,12 @@ export function TextAnimationPreview({
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
   const words = resolvedText.split(/\s+/u).filter(Boolean);
   const animatePerWord = resolvedSettings.animatePerWord === true && words.length > 1;
+  const startDelayMs = getStartDelayMs(resolvedSettings);
   const wordDelayMs = getWordDelayMs(resolvedSettings);
-  const totalAnimationWindowMs = animationDurationMs + (animatePerWord ? wordDelayMs * Math.max(0, words.length - 1) : 0);
+  const totalAnimationWindowMs =
+    startDelayMs +
+    animationDurationMs +
+    (animatePerWord ? wordDelayMs * Math.max(0, words.length - 1) : 0);
   const [animationElapsedMs, setAnimationElapsedMs] = useState(0);
   const contentAlign = resolveContentTextAlign(resolvedSettings);
   const resolvedBackgroundLook = normalizeImageFilterSettings(
@@ -647,9 +675,11 @@ export function TextAnimationPreview({
     };
   }, [enableMotion, motionResetKey, repeatMotion, totalAnimationWindowMs]);
 
+  const delayedAnimationElapsedMs = Math.max(0, animationElapsedMs - startDelayMs);
+
   const blockAnimatedStyle = enableMotion
     ? getSlideCutAnimatedStyle(
-        animationElapsedMs,
+        delayedAnimationElapsedMs,
         animationDurationMs,
         resolvedSettings.animationIntensity ?? 0.82,
       )
@@ -784,7 +814,7 @@ export function TextAnimationPreview({
             ? words.map((word, index) => {
                 const animatedWordStyle = enableMotion
                   ? getSlideCutAnimatedStyle(
-                      Math.max(0, animationElapsedMs - index * wordDelayMs),
+                      Math.max(0, delayedAnimationElapsedMs - index * wordDelayMs),
                       animationDurationMs,
                       resolvedSettings.animationIntensity ?? 0.82,
                     )

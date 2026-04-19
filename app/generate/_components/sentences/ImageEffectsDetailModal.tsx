@@ -50,6 +50,7 @@ import {
   type SoundEffectAudioSettings,
 } from '../../_types/sound-effect-audio';
 import {
+  DEFAULT_OVERLAY_START_DELAY,
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
   getDefaultImageMotionSpeed,
@@ -66,6 +67,9 @@ import {
   type MotionEffectPresetDto,
   normalizeOverlaySettings,
   OVERLAY_BACKGROUND_MODE_VALUES,
+  OVERLAY_START_DELAY_MAX,
+  OVERLAY_START_DELAY_MIN,
+  OVERLAY_START_DELAY_STEP,
   OVERLAY_TEXT_LAYER_VALUES,
   type OverlayPresetDto,
   type OverlaySettings,
@@ -76,6 +80,7 @@ import {
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
 import {
+  DEFAULT_TEXT_ANIMATION_START_DELAY,
   DEFAULT_TEXT_ANIMATION_WORD_DELAY,
   getDefaultTextAnimationSettings,
   getTextAnimationEffectLabel,
@@ -85,6 +90,9 @@ import {
   TEXT_ANIMATION_WORD_DELAY_MAX,
   TEXT_ANIMATION_WORD_DELAY_MIN,
   TEXT_ANIMATION_WORD_DELAY_STEP,
+  TEXT_ANIMATION_START_DELAY_MAX,
+  TEXT_ANIMATION_START_DELAY_MIN,
+  TEXT_ANIMATION_START_DELAY_STEP,
   TextAnimationPreview,
   TEXT_ANIMATION_EFFECT_VALUES,
   type TextAnimationPresetDto,
@@ -2307,8 +2315,8 @@ export function ImageEffectsDetailModal({
                 : 'These sound effects play when this overlay scene starts.'}
             </p>
           </div>
-          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">
-            {items.length} selected
+          <span className="inline-flex items-center rounded-full shadow-md bg-indigo-600 text-white px-2.5 py-1 text-[11px] font-bold">
+            {items.length}
           </span>
         </div>
 
@@ -2718,7 +2726,7 @@ export function ImageEffectsDetailModal({
                 className={`${textPreviewFrameClass} overflow-hidden rounded-[1.5rem]`}
                 contentClassName="p-[7%]"
                 enableMotion
-                motionResetKey={`${currentTab}-${draftTextAnimationEffect}-${resolvedText.speed ?? 1}-${resolvedText.animationIntensity ?? 1}-${previewRestartNonce}`}
+                motionResetKey={`${currentTab}-${draftTextAnimationEffect}-${resolvedText.speed ?? 1}-${resolvedText.animationIntensity ?? 1}-${resolvedText.startDelaySeconds ?? 0}-${previewRestartNonce}`}
               />
             ) : currentTab === 'overlay' ? (
               <OverlayScenePreview
@@ -2935,13 +2943,13 @@ export function ImageEffectsDetailModal({
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Block horizontal position</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Horizontal Align</div>
                       <Select
                         value={resolvedText.horizontalAlign ?? 'center'}
                         onValueChange={(value) => updateTextSettings({ horizontalAlign: value as TextAnimationSettings['horizontalAlign'] })}
                       >
                         <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
-                          <SelectValue placeholder="Block horizontal position" />
+                          <SelectValue placeholder="Horizontal Align" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="left">Left</SelectItem>
@@ -2951,13 +2959,13 @@ export function ImageEffectsDetailModal({
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Block vertical position</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Vertical Align</div>
                       <Select
                         value={resolvedText.verticalAlign ?? 'middle'}
                         onValueChange={(value) => updateTextSettings({ verticalAlign: value as TextAnimationSettings['verticalAlign'] })}
                       >
                         <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
-                          <SelectValue placeholder="Block vertical position" />
+                          <SelectValue placeholder="Vertical Align" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="top">Top</SelectItem>
@@ -3161,6 +3169,14 @@ export function ImageEffectsDetailModal({
                     </div>
                   ) : null}
                   <RangeField label="Speed" value={resolvedText.speed ?? 1} min={0.4} max={2.4} step={0.1} onChange={(value) => updateTextSettings({ speed: value })} />
+                  <RangeField
+                    label="Start delay"
+                    value={resolvedText.startDelaySeconds ?? DEFAULT_TEXT_ANIMATION_START_DELAY}
+                    min={TEXT_ANIMATION_START_DELAY_MIN}
+                    max={TEXT_ANIMATION_START_DELAY_MAX}
+                    step={TEXT_ANIMATION_START_DELAY_STEP}
+                    onChange={(value) => updateTextSettings({ startDelaySeconds: value })}
+                  />
                   <RangeField label="Font size" value={resolvedText.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateTextSettings({ fontSizePercent: value })} />
                   <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
                   {resolvedText.animatePerWord === true ? (
@@ -3478,6 +3494,14 @@ export function ImageEffectsDetailModal({
                   <RangeField label="Offset Y" value={resolvedOverlay.offsetY ?? 0} min={-50} max={50} step={1} onChange={(value) => updateOverlaySettings({ offsetY: value })} />
                   <RangeField label="Opacity" value={resolvedOverlay.opacity ?? 1} min={0} max={1} step={0.01} onChange={(value) => updateOverlaySettings({ opacity: value })} />
                   <RangeField label="Speed" value={resolvedOverlay.speed ?? 1} min={0.25} max={3} step={0.05} onChange={(value) => updateOverlaySettings({ speed: value })} />
+                  <RangeField
+                    label="Start delay"
+                    value={resolvedOverlay.startDelaySeconds ?? DEFAULT_OVERLAY_START_DELAY}
+                    min={OVERLAY_START_DELAY_MIN}
+                    max={OVERLAY_START_DELAY_MAX}
+                    step={OVERLAY_START_DELAY_STEP}
+                    onChange={(value) => updateOverlaySettings({ startDelaySeconds: value })}
+                  />
                   <RangeField label="Scale" value={resolvedOverlay.scale ?? 1} min={0.25} max={3} step={0.05} onChange={(value) => updateOverlaySettings({ scale: value })} />
                   <RangeField label="Rotation" value={resolvedOverlay.rotationDeg ?? 0} min={-180} max={180} step={1} onChange={(value) => updateOverlaySettings({ rotationDeg: value })} />
                 </div>

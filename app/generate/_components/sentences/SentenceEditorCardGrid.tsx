@@ -113,7 +113,7 @@ import {
 } from '../../_types/sound-effect-audio';
 import { useManagedObjectUrl } from './useManagedObjectUrl';
 
-import type { SentenceItem } from '../../_types/sentences';
+import type { SentenceItem, SentenceSoundEffectItem } from '../../_types/sentences';
 
 type VisualEffectValue = SentenceItem['visualEffect'];
 
@@ -147,6 +147,18 @@ const getSentenceSoundEffectSortableId = (
   sfx: NonNullable<SentenceItem['soundEffects']>[number],
   index: number,
 ) => `${String(sfx.id ?? 'sfx')}-${index}`;
+
+const cloneDetachedSentenceSoundEffects = (
+  items: SentenceSoundEffectItem[] | null | undefined,
+): SentenceSoundEffectItem[] => {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  return items.map((item) => ({
+    ...item,
+    audioSettings: cloneSoundEffectAudioSettings(item.audioSettings),
+    defaultAudioSettings: cloneSoundEffectAudioSettings(item.defaultAudioSettings),
+  }));
+};
 
 type SortableSentenceSoundEffectCardProps = {
   sfx: NonNullable<SentenceItem['soundEffects']>[number];
@@ -1589,6 +1601,7 @@ function SentenceEditorCardComponent({
         textAnimationEffect: nextEffect,
         customTextAnimationId: preset.id,
         textAnimationSettings: { ...nextSettings, presetKey: 'custom' },
+        textSoundEffects: cloneDetachedSentenceSoundEffects(preset.soundEffects),
       });
       return;
     }
@@ -1608,6 +1621,7 @@ function SentenceEditorCardComponent({
         overlayFile: null,
         overlayUrl: null,
         overlayMimeType: null,
+        overlaySoundEffects: [],
         overlaySettings: {
           ...resolvedOverlaySettings,
           presetKey: 'custom',
@@ -1635,6 +1649,7 @@ function SentenceEditorCardComponent({
       overlayUrl: preset.url,
       overlayMimeType: preset.mimeType ?? null,
       overlaySettings: { ...nextSettings, presetKey: 'custom' },
+      overlaySoundEffects: cloneDetachedSentenceSoundEffects(preset.soundEffects),
     });
   };
 

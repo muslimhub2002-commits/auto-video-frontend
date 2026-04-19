@@ -4568,6 +4568,56 @@ export function GeneratePageInner() {
     }
   };
 
+  const syncTextAnimationPresetToLinkedSentences = (preset: TextAnimationPresetDto) => {
+    const nextSoundEffects = normalizeDetachedSentenceSoundEffects(preset.soundEffects);
+
+    setSentences((prev) =>
+      prev.map((sentence) => {
+        if (sentence.customTextAnimationId !== preset.id) {
+          return sentence;
+        }
+
+        const nextEffect = resolveTextAnimationEffectFromSettings(
+          preset.settings,
+          sentence.textAnimationEffect ?? 'slideCutFast',
+        );
+
+        return {
+          ...sentence,
+          textAnimationEffect: nextEffect,
+          textAnimationSettings: {
+            ...normalizeTextAnimationSettings(preset.settings, nextEffect, effectiveIsShort),
+            presetKey: 'custom',
+          },
+          textSoundEffects: nextSoundEffects,
+        };
+      }),
+    );
+  };
+
+  const syncOverlayPresetToLinkedSentences = (preset: OverlayPresetDto) => {
+    const nextSoundEffects = normalizeDetachedSentenceSoundEffects(preset.soundEffects);
+
+    setSentences((prev) =>
+      prev.map((sentence) =>
+        sentence.customOverlayId === preset.id
+          ? {
+              ...sentence,
+              customOverlayId: preset.id,
+              overlayFile: null,
+              overlayUrl: preset.url,
+              overlayMimeType: preset.mimeType ?? null,
+              overlaySettings: {
+                ...normalizeOverlaySettings(preset.settings, 'image'),
+                presetKey: 'custom',
+              },
+              overlaySoundEffects: nextSoundEffects,
+            }
+          : sentence,
+      ),
+    );
+  };
+
   const handleSaveTextAnimationPreset = async (
     title: string,
     settings: TextAnimationSettings,
@@ -4645,6 +4695,7 @@ export function GeneratePageInner() {
         const next = prev.map((item) => (item.id === saved.id ? saved : item));
         return next.some((item) => item.id === saved.id) ? next : [saved, ...next];
       });
+      syncTextAnimationPresetToLinkedSentences(saved);
       showToast('Text animation preset updated.', 'success');
       return saved;
     } catch (error) {
@@ -4734,6 +4785,9 @@ export function GeneratePageInner() {
       }
 
       setOverlayPresets((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      if (params.overlayId) {
+        syncOverlayPresetToLinkedSentences(saved);
+      }
       return saved;
     } catch (error) {
       console.error('Failed to save overlay preset', error);
@@ -4767,6 +4821,7 @@ export function GeneratePageInner() {
                 overlayUrl: null,
                 overlayMimeType: null,
                 overlaySettings: null,
+                overlaySoundEffects: [],
               }
             : sentence,
         ),
