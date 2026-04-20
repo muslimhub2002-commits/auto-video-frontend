@@ -3,7 +3,7 @@ export const SHORT_FORM_MAX_SECONDS = 3 * 60;
 export type VideoFormatKind = 'short' | 'long' | 'unknown';
 
 export function formatVideoDuration(seconds?: number | null): string {
-  if (!Number.isFinite(seconds) || !seconds || seconds <= 0) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) {
     return 'Unknown';
   }
 
@@ -19,7 +19,7 @@ export function formatVideoDuration(seconds?: number | null): string {
 }
 
 export function isShortVideoDuration(seconds?: number | null): boolean | null {
-  if (!Number.isFinite(seconds) || seconds === null || seconds <= 0) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) {
     return null;
   }
 

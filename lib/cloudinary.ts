@@ -1,4 +1,5 @@
-import { API_URL } from './api';
+import { API_URL } from './api-config';
+import { getBackendAccessToken } from './client-session';
 
 export type CloudinaryResourceType = 'image' | 'video' | 'audio';
 
@@ -19,13 +20,12 @@ const UUID_REGEX =
 const MANAGED_UPLOAD_URL_REGEX =
   /^(https?:\/\/)?(res\.cloudinary\.com|(?:[a-z0-9-]+\.)?ucarecdn\.com|(?:[a-z0-9-]+\.)?ucarecd\.net|cdn\.filestackcontent\.com|(?:[a-z0-9-]+\.)?fromsmash\.com)\//i;
 
-const getAuthHeaders = (contentType?: string) => {
+const getAuthHeaders = async (contentType?: string) => {
   const headers = new Headers({
     Accept: 'application/json',
   });
 
-  const token =
-    typeof window !== 'undefined' ? window.localStorage.getItem('token') : null;
+  const token = await getBackendAccessToken();
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -109,7 +109,7 @@ export async function uploadManagedFile(
 
   const response = await fetch(`${API_URL}/uploads/file`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    headers: await getAuthHeaders(),
     body: form,
     credentials: 'include',
   });
@@ -144,7 +144,7 @@ export async function ensureManagedPublicUrl(
 
   const response = await fetch(`${API_URL}/uploads/ensure-public-url`, {
     method: 'POST',
-    headers: getAuthHeaders('application/json'),
+    headers: await getAuthHeaders('application/json'),
     credentials: 'include',
     body: JSON.stringify({
       url: trimmedUrl,

@@ -1,6 +1,10 @@
 import axios, { AxiosHeaders, type AxiosInstance } from 'axios';
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-export const YOUTUBE_API_URL = 'https://auto-video-backend.vercel.app';
+import { API_URL, YOUTUBE_API_URL } from './api-config';
+import {
+  clearClientSessionCache,
+  getBackendAccessToken,
+  signOutClient,
+} from './client-session';
 
 function createApiClient(baseURL: string): AxiosInstance {
   const client = axios.create({
@@ -12,9 +16,9 @@ function createApiClient(baseURL: string): AxiosInstance {
     withCredentials: true,
   });
 
-  client.interceptors.request.use((config) => {
+  client.interceptors.request.use(async (config) => {
     const headers = AxiosHeaders.from(config.headers);
-    const token = localStorage.getItem('token');
+    const token = await getBackendAccessToken();
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
@@ -29,7 +33,7 @@ function createApiClient(baseURL: string): AxiosInstance {
 
   client.interceptors.response.use(
     (response) => response,
-    (error) => {
+    async (error) => {
       if (error.response?.status === 401) {
         const rawUrl = error.config?.url ?? '';
         const url =
@@ -38,12 +42,13 @@ function createApiClient(baseURL: string): AxiosInstance {
             : rawUrl;
 
         const isAuthEndpoint =
-          url.startsWith('/auth/login') || url.startsWith('/auth/register');
+          url.startsWith('/auth/login') ||
+          url.startsWith('/auth/register') ||
+          url.startsWith('/auth/google/exchange');
 
         if (!isAuthEndpoint) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/login';
+          clearClientSessionCache();
+          await signOutClient('/login');
         }
       }
       return Promise.reject(error);
@@ -55,6 +60,7 @@ function createApiClient(baseURL: string): AxiosInstance {
 
 export const api = createApiClient(API_URL);
 export const youtubeApi = createApiClient(YOUTUBE_API_URL);
+export { API_URL, YOUTUBE_API_URL };
 
 export default api;
 

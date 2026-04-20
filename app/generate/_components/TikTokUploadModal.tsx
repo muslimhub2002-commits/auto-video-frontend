@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { youtubeApi } from '@/lib/api';
+import { getBackendAccessToken } from '@/lib/client-session';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import {
   formatVideoDuration,
@@ -179,7 +180,7 @@ export function TikTokUploadModal({
     if (!silent) setIsLoadingCreatorInfo(true);
 
     try {
-      const token = localStorage.getItem('token');
+      const token = await getBackendAccessToken();
       const response = await fetch(`${TIKTOK_API_URL}/tiktok/creator-info`, {
         method: 'GET',
         headers: {
@@ -434,7 +435,7 @@ export function TikTokUploadModal({
     setUploadError(null);
     setIsConnectingTikTok(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = await getBackendAccessToken();
       const response = await fetch(`${TIKTOK_API_URL}/tiktok/auth-url`, {
         method: 'GET',
         headers: {
@@ -536,7 +537,7 @@ export function TikTokUploadModal({
     setIsConnectingTikTok(false);
     setIsUploading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = await getBackendAccessToken();
       const publicVideoUrl = await ensureTikTokPublicVideoUrl(videoUrl);
       const formattedCaption = formatCaptionWithTags(caption, tiktokTags);
       const response = await fetch(`${TIKTOK_API_URL}/tiktok/upload`, {

@@ -1,3 +1,5 @@
+import { redirect } from 'next/navigation';
+import { auth } from '@/auth';
 import {
   normalizeVideoPlatform,
   type VideoPlatformCategory,
@@ -11,6 +13,12 @@ type VideosPageProps = {
 };
 
 export default async function VideosPage({ searchParams }: VideosPageProps) {
+  const session = await auth();
+
+  if (!session?.user) {
+    redirect('/login');
+  }
+
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const rawPlatform = Array.isArray(resolvedSearchParams?.platform)
     ? resolvedSearchParams.platform[0]

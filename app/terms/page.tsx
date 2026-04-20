@@ -1,13 +1,17 @@
-import Link from 'next/link';
-import { Video, FileText, ChevronRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import type { Metadata } from 'next';
+import { FileText } from 'lucide-react';
+import {
+  LegalDocumentLayout,
+  type LegalSection,
+} from '@/components/marketing/legal-document-layout';
+import { MarketingShell } from '@/components/marketing/marketing-shell';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Terms of Service | Auto Video Generator',
   description: 'Terms of Service for Auto Video Generator – the rules and guidelines governing the use of our platform.',
 };
 
-const sections = [
+const sections: LegalSection[] = [
   {
     id: 'acceptance',
     title: '1. Acceptance of Terms',
@@ -216,132 +220,17 @@ export default function TermsOfServicePage() {
   const lastUpdated = 'April 3, 2026';
 
   return (
-    <div className="flex min-h-screen flex-col bg-linear-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
-      {/* Header */}
-      <header className="border-b bg-white/50 backdrop-blur-sm dark:bg-gray-900/50 sticky top-0 z-10">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <Video className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold">Auto Video Generator</span>
-          </Link>
-          <div className="flex gap-2">
-            <Link href="/login">
-              <Button variant="ghost">Login</Button>
-            </Link>
-            <Link href="/signup">
-              <Button>Get Started</Button>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1">
-        {/* Hero */}
-        <div className="border-b bg-white/60 dark:bg-gray-900/60 py-12">
-          <div className="container mx-auto px-4">
-            <div className="mx-auto max-w-3xl">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
-                <FileText className="h-4 w-4" />
-                Legal Agreement
-              </div>
-              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">Terms of Service</h1>
-              <p className="mt-4 text-lg text-gray-600 dark:text-gray-400">
-                Please read these terms carefully before using our platform. They govern your
-                relationship with Auto Video Generator.
-              </p>
-              <p className="mt-3 text-sm text-gray-500 dark:text-gray-500">
-                Last updated: {lastUpdated}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="container mx-auto px-4 py-12">
-          <div className="mx-auto max-w-5xl lg:grid lg:grid-cols-[260px_1fr] lg:gap-12">
-
-            {/* Table of Contents — sticky sidebar */}
-            <aside className="hidden lg:block">
-              <div className="sticky top-24 rounded-xl border bg-white p-5 shadow-sm dark:bg-gray-900">
-                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Table of Contents
-                </h2>
-                <nav className="space-y-1">
-                  {sections.map((section) => (
-                    <a
-                      key={section.id}
-                      href={`#${section.id}`}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-primary/5 hover:text-primary dark:text-gray-400 dark:hover:text-primary"
-                    >
-                      <ChevronRight className="h-3 w-3 shrink-0" />
-                      {section.title.replace(/^\d+\.\s/, '')}
-                    </a>
-                  ))}
-                </nav>
-              </div>
-            </aside>
-
-            {/* Main Content */}
-            <article className="space-y-10">
-              {/* Intro Banner */}
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-6">
-                <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
-                  These Terms of Service ("Terms") are a legally binding agreement between you and{' '}
-                  <strong>Auto Video Generator</strong> ("we", "us", or "our") governing your access
-                  to and use of our website, applications, APIs, and all associated services
-                  (collectively, the "Service"). These Terms were last updated on{' '}
-                  <strong>{lastUpdated}</strong> and are effective immediately for new users and 30
-                  days after posting for existing users.
-                </p>
-              </div>
-
-              {sections.map((section) => (
-                <section key={section.id} id={section.id} className="scroll-mt-24">
-                  <div className="rounded-xl border bg-white p-6 shadow-sm dark:bg-gray-900">
-                    <h2 className="mb-5 text-xl font-bold text-gray-900 dark:text-gray-100">
-                      {section.title}
-                    </h2>
-                    <div className="space-y-5">
-                      {section.content.map((item, idx) => (
-                        <div key={idx}>
-                          {item.subtitle && (
-                            <h3 className="mb-2 font-semibold text-gray-800 dark:text-gray-200">
-                              {item.subtitle}
-                            </h3>
-                          )}
-                          <p className="whitespace-pre-line text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                            {item.body}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </section>
-              ))}
-
-              {/* Related links */}
-              <div className="rounded-xl border bg-white p-6 shadow-sm dark:bg-gray-900">
-                <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">Related Documents</h2>
-                <div className="flex flex-wrap gap-3">
-                  <Link href="/privacy" className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-primary/5 hover:text-primary dark:text-gray-300">
-                    <ChevronRight className="h-4 w-4" />
-                    Privacy Policy
-                  </Link>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t bg-white/50 backdrop-blur-sm dark:bg-gray-900/50">
-        <div className="container mx-auto px-4 py-6 text-center text-sm text-gray-600 dark:text-gray-400">
-          © {new Date().getFullYear()} Auto Video Generator. All rights reserved.{' '}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-primary">Privacy Policy</Link>
-          {' · '}
-          <Link href="/terms" className="underline underline-offset-2 hover:text-primary">Terms of Service</Link>
-        </div>
-      </footer>
-    </div>
+    <MarketingShell activePath="/terms">
+      <LegalDocumentLayout
+        badgeLabel="Legal agreement"
+        title="Terms of Service"
+        intro="These terms govern access to the platform, the subscription rules around usage, and the boundaries for how the studio can be used."
+        summary="These Terms of Service are a binding agreement between you and Auto Video Generator covering the website, applications, APIs, and related services. They are effective immediately for new users and after notice for existing users."
+        lastUpdated={lastUpdated}
+        sections={sections}
+        relatedLinks={[{ href: '/privacy', label: 'Privacy Policy' }]}
+        icon={FileText}
+      />
+    </MarketingShell>
   );
 }

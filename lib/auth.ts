@@ -1,30 +1,15 @@
 import api from './api';
+import {
+  clearClientSessionCache,
+  getBackendAccessToken,
+  getClientSession,
+  getSessionUser,
+  signOutClient,
+} from './client-session';
+import type { AppUser, AuthResponse, LoginData, RegisterData } from './auth-contract';
 
-export interface User {
-  id: string;
-  email: string;
-  roles: string[];
-  number_of_videos_generated: number;
-  number_of_images_generated: number;
-  number_of_voices_generated: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AuthResponse {
-  access_token: string;
-  user: User;
-}
-
-export interface RegisterData {
-  email: string;
-  password: string;
-}
-
-export interface LoginData {
-  email: string;
-  password: string;
-}
+export type User = AppUser;
+export type { AuthResponse, LoginData, RegisterData };
 
 export const authService = {
   async register(data: RegisterData): Promise<AuthResponse> {
@@ -42,30 +27,25 @@ export const authService = {
     return response.data;
   },
 
-  setToken(token: string) {
-    localStorage.setItem('token', token);
+  async getToken() {
+    return getBackendAccessToken();
   },
 
-  getToken(): string | null {
-    return localStorage.getItem('token');
+  async getSession() {
+    return getClientSession();
   },
 
-  setUser(user: User) {
-    localStorage.setItem('user', JSON.stringify(user));
+  async getUser() {
+    return getSessionUser();
   },
 
-  getUser(): User | null {
-    const user = localStorage.getItem('user');
-    return user ? JSON.parse(user) : null;
+  async logout(options?: { redirectTo?: string }) {
+    clearClientSessionCache();
+    await signOutClient(options?.redirectTo ?? '/login');
   },
 
-  logout() {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-  },
-
-  isAuthenticated(): boolean {
-    return !!this.getToken();
+  async isAuthenticated() {
+    return !!(await getBackendAccessToken());
   },
 };
 

@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import { youtubeApi } from '@/lib/api';
+import { getBackendAccessToken } from '@/lib/client-session';
 import {
   formatVideoDuration,
   getVideoDurationSeconds,
@@ -215,7 +216,7 @@ export function MetaUploadModal({
   const loadCredentialStatus = useCallback(async () => {
     setIsLoadingCredStatus(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = await getBackendAccessToken();
       const res = await fetch(`${META_API_URL}/meta/credentials`, {
         headers: {
           Accept: 'application/json',
@@ -250,7 +251,7 @@ export function MetaUploadModal({
     }
     setIsExchangingToken(true);
     try {
-      const authToken = localStorage.getItem('token');
+      const authToken = await getBackendAccessToken();
       const res = await fetch(`${META_API_URL}/meta/credentials/exchange-token`, {
         method: 'POST',
         headers: {
@@ -295,7 +296,7 @@ export function MetaUploadModal({
     setCredentialActionNotice(null);
     setIsRefreshingCredentials(true);
     try {
-      const authToken = localStorage.getItem('token');
+      const authToken = await getBackendAccessToken();
       const res = await fetch(`${META_API_URL}/meta/credentials/refresh`, {
         method: 'POST',
         headers: {
@@ -524,7 +525,7 @@ export function MetaUploadModal({
 
     setIsUploading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = await getBackendAccessToken();
       const publicVideoUrl = await ensureMetaPublicVideoUrl(videoUrl);
       const formattedCaption = formatMetaCaption(caption, metaTags);
       const response = await fetch(`${META_API_URL}/meta/upload`, {

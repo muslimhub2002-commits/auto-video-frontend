@@ -1,13 +1,17 @@
-import Link from 'next/link';
-import { Video, Shield, ChevronRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import type { Metadata } from 'next';
+import { Shield } from 'lucide-react';
+import {
+  LegalDocumentLayout,
+  type LegalSection,
+} from '@/components/marketing/legal-document-layout';
+import { MarketingShell } from '@/components/marketing/marketing-shell';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Privacy Policy | Auto Video Generator',
   description: 'Privacy Policy for Auto Video Generator – how we collect, use, and protect your personal information.',
 };
 
-const sections = [
+const sections: LegalSection[] = [
   {
     id: 'information-we-collect',
     title: '1. Information We Collect',
@@ -162,130 +166,17 @@ export default function PrivacyPolicyPage() {
   const lastUpdated = 'April 3, 2026';
 
   return (
-    <div className="flex min-h-screen flex-col bg-linear-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
-      {/* Header */}
-      <header className="border-b bg-white/50 backdrop-blur-sm dark:bg-gray-900/50 sticky top-0 z-10">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-            <Video className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold">Auto Video Generator</span>
-          </Link>
-          <div className="flex gap-2">
-            <Link href="/login">
-              <Button variant="ghost">Login</Button>
-            </Link>
-            <Link href="/signup">
-              <Button>Get Started</Button>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1">
-        {/* Hero */}
-        <div className="border-b bg-white/60 dark:bg-gray-900/60 py-12">
-          <div className="container mx-auto px-4">
-            <div className="mx-auto max-w-3xl">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
-                <Shield className="h-4 w-4" />
-                Your Privacy Matters
-              </div>
-              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">Privacy Policy</h1>
-              <p className="mt-4 text-lg text-gray-600 dark:text-gray-400">
-                We are committed to protecting your personal information and your right to privacy.
-                This policy explains how we collect, use, and safeguard your data.
-              </p>
-              <p className="mt-3 text-sm text-gray-500 dark:text-gray-500">
-                Last updated: {lastUpdated}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="container mx-auto px-4 py-12">
-          <div className="mx-auto max-w-5xl lg:grid lg:grid-cols-[260px_1fr] lg:gap-12">
-
-            {/* Table of Contents — sticky sidebar */}
-            <aside className="hidden lg:block">
-              <div className="sticky top-24 rounded-xl border bg-white p-5 shadow-sm dark:bg-gray-900">
-                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Table of Contents
-                </h2>
-                <nav className="space-y-1">
-                  {sections.map((section) => (
-                    <a
-                      key={section.id}
-                      href={`#${section.id}`}
-                      className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-primary/5 hover:text-primary dark:text-gray-400 dark:hover:text-primary"
-                    >
-                      <ChevronRight className="h-3 w-3 shrink-0" />
-                      {section.title.replace(/^\d+\.\s/, '')}
-                    </a>
-                  ))}
-                </nav>
-              </div>
-            </aside>
-
-            {/* Main Content */}
-            <article className="space-y-10">
-              {/* Intro */}
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-6">
-                <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
-                  This Privacy Policy describes how <strong>Auto Video Generator</strong> ("we", "us", or "our")
-                  collects, uses, and shares information about you when you access or use our website,
-                  mobile applications, and services (collectively, the "Services"). By using our Services,
-                  you agree to the collection and use of information in accordance with this policy.
-                </p>
-              </div>
-
-              {sections.map((section) => (
-                <section key={section.id} id={section.id} className="scroll-mt-24">
-                  <div className="rounded-xl border bg-white p-6 shadow-sm dark:bg-gray-900">
-                    <h2 className="mb-5 text-xl font-bold text-gray-900 dark:text-gray-100">
-                      {section.title}
-                    </h2>
-                    <div className="space-y-5">
-                      {section.content.map((item, idx) => (
-                        <div key={idx}>
-                          {item.subtitle && (
-                            <h3 className="mb-2 font-semibold text-gray-800 dark:text-gray-200">
-                              {item.subtitle}
-                            </h3>
-                          )}
-                          <p className="whitespace-pre-line text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                            {item.body}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </section>
-              ))}
-
-              {/* Related links */}
-              <div className="rounded-xl border bg-white p-6 shadow-sm dark:bg-gray-900">
-                <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-gray-100">Related Documents</h2>
-                <div className="flex flex-wrap gap-3">
-                  <Link href="/terms" className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-primary/5 hover:text-primary dark:text-gray-300">
-                    <ChevronRight className="h-4 w-4" />
-                    Terms of Service
-                  </Link>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t bg-white/50 backdrop-blur-sm dark:bg-gray-900/50">
-        <div className="container mx-auto px-4 py-6 text-center text-sm text-gray-600 dark:text-gray-400">
-          © {new Date().getFullYear()} Auto Video Generator. All rights reserved.{' '}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-primary">Privacy Policy</Link>
-          {' · '}
-          <Link href="/terms" className="underline underline-offset-2 hover:text-primary">Terms of Service</Link>
-        </div>
-      </footer>
-    </div>
+    <MarketingShell activePath="/privacy">
+      <LegalDocumentLayout
+        badgeLabel="Your privacy matters"
+        title="Privacy Policy"
+        intro="We collect only what is needed to operate the studio, protect the platform, and support the integrations you explicitly enable. This page explains what that means in practice."
+        summary="This Privacy Policy describes how Auto Video Generator collects, uses, safeguards, and shares information when you use the website, applications, and related services. By using the service, you agree to these data practices."
+        lastUpdated={lastUpdated}
+        sections={sections}
+        relatedLinks={[{ href: '/terms', label: 'Terms of Service' }]}
+        icon={Shield}
+      />
+    </MarketingShell>
   );
 }
