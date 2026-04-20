@@ -16,6 +16,10 @@ export type ScriptListItem = {
   facebook_url?: string | null;
   instagram_url?: string | null;
   tiktok_url?: string | null;
+  voice?: {
+    id: string;
+    voice: string;
+  } | null;
 };
 
 export type ScriptVoiceOverChunk = {

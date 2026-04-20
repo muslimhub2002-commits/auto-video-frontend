@@ -21,6 +21,7 @@ import {
   getVideoFormatKind,
   getVideoFormatLabel,
 } from '@/lib/video-format';
+import { getApiErrorMessage, startYoutubeReconnect } from '@/lib/youtube-auth';
 import {
   WallpaperGeneratorSection,
   YOUTUBE_WALLPAPER_THEME,
@@ -321,23 +322,11 @@ export function YouTubeUploadModal({
     setUploadedYoutubeUrl(null);
     setIsConnectingYouTube(true);
     try {
-      const response = await youtubeApi.get<{ url?: string }>('/youtube/auth-url');
-      const data = response.data;
-      const url = data?.url as string | undefined;
-      if (!url) throw new Error('Missing YouTube auth url');
-
-      window.open(url, '_blank', 'noopener,noreferrer');
+      await startYoutubeReconnect();
     } catch (err: unknown) {
-      const messageFromApi = (() => {
-        if (typeof err === 'object' && err !== null && 'response' in err) {
-          const response = (err as { response?: { data?: { message?: unknown } } }).response;
-          const message = response?.data?.message;
-          if (typeof message === 'string' && message.trim()) return message;
-        }
-        if (err instanceof Error && err.message.trim()) return err.message;
-        return null;
-      })();
-      setUploadError(messageFromApi ?? 'Failed to start YouTube connection.');
+      setUploadError(
+        getApiErrorMessage(err, 'Failed to start YouTube connection.'),
+      );
     } finally {
       setIsConnectingYouTube(false);
     }

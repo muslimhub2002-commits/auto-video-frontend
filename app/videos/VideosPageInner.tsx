@@ -253,6 +253,18 @@ export function VideosPageInner({
       return;
     }
 
+    const isResolvingSelectedVideoDetail =
+      isLoadingDetails &&
+      detailRequestRef.current === activeSelectedVideoId &&
+      !detailCacheRef.current.has(activeSelectedVideoId);
+
+    if (isResolvingSelectedVideoDetail) {
+      setYoutubeAnalytics(null);
+      setYoutubeAnalyticsError(null);
+      setIsLoadingYoutubeAnalytics(true);
+      return;
+    }
+
     if (!activeSelectedYoutubeUrl) {
       setYoutubeAnalytics(null);
       setYoutubeAnalyticsError('This video has not been published to YouTube yet.');
@@ -307,7 +319,13 @@ export function VideosPageInner({
     return () => {
       cancelled = true;
     };
-  }, [activeModal, activePlatform, activeSelectedVideoId, activeSelectedYoutubeUrl]);
+  }, [
+    activeModal,
+    activePlatform,
+    activeSelectedVideoId,
+    activeSelectedYoutubeUrl,
+    isLoadingDetails,
+  ]);
 
   const loadVideoDetail = useCallback(
     async (videoId: string, baseVideo?: VideoListItem | null) => {
@@ -362,9 +380,36 @@ export function VideosPageInner({
     [loadVideoDetail],
   );
 
+  const primeAnalyticsStateForVideo = useCallback(
+    (video: VideoListItem) => {
+      if (activePlatform !== 'youtube') {
+        setIsLoadingYoutubeAnalytics(false);
+        setYoutubeAnalytics(null);
+        setYoutubeAnalyticsError(null);
+        return;
+      }
+
+      const cachedAnalytics = analyticsCacheRef.current.get(video.id);
+      if (cachedAnalytics) {
+        setYoutubeAnalytics(cachedAnalytics);
+        setYoutubeAnalyticsError(null);
+        setIsLoadingYoutubeAnalytics(false);
+        return;
+      }
+
+      setYoutubeAnalytics(null);
+      setYoutubeAnalyticsError(null);
+      setIsLoadingYoutubeAnalytics(true);
+    },
+    [activePlatform],
+  );
+
   const openModalForVideo = useCallback(
     (video: VideoListItem, modalKind: ModalKind) => {
       setPendingModalAction(modalKind);
+      if (modalKind === 'analytics') {
+        primeAnalyticsStateForVideo(video);
+      }
       setActiveModal(modalKind);
       void handleSelectVideo(video).finally(() => {
         setPendingModalAction((current) =>
@@ -372,7 +417,7 @@ export function VideosPageInner({
         );
       });
     },
-    [handleSelectVideo],
+    [handleSelectVideo, primeAnalyticsStateForVideo],
   );
 
   const handleCloseSelectedVideo = useCallback(() => {

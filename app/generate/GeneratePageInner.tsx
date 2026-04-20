@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent } from 'react';
 import { flushSync } from 'react-dom';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Accordion } from '@/components/ui/accordion';
 import {
   Video,
@@ -1569,6 +1570,13 @@ export function GeneratePageInner() {
   ] as const;
 
   const { user, isLoading, handleLogout } = useAuthGuard();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pendingScriptHandoffId =
+    String(searchParams.get('scriptId') ?? '').trim() || null;
+  const [isLoadingScriptHandoff, setIsLoadingScriptHandoff] = useState(
+    () => Boolean(pendingScriptHandoffId),
+  );
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // When a draft is saved/loaded, we keep its script id so we can attach
@@ -1861,6 +1869,10 @@ export function GeneratePageInner() {
   const [shortsValidationError, setShortsValidationError] = useState<string | null>(null);
   const tabSnapshotsRef = useRef<Record<string, TabSnapshot>>({});
   const aiSplitCacheRef = useRef<AiSplitCache | null>(null);
+  const handledScriptHandoffRef = useRef<string | null>(null);
+  const activeScriptHandoffRequestRef = useRef<string | null>(null);
+  const handleSelectScriptFromLibraryRef =
+    useRef<((draft: ScriptDraftDto) => Promise<void>) | null>(null);
 
   // Scripts longer than 3 minutes are treated as regular (non-shorts) videos.
   const isLongForm = script.length > 2500
@@ -1870,6 +1882,23 @@ export function GeneratePageInner() {
   const effectiveEnableLongFormSubscribeOverlay =
     isLongForm && enableLongFormSubscribeOverlay;
   const previousIsLongFormRef = useRef(isLongForm);
+
+  const clearPendingScriptHandoff = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (!params.has('scriptId')) return;
+
+    params.delete('scriptId');
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `/generate?${nextQuery}` : '/generate');
+  }, [router, searchParams]);
+
+  useEffect(() => {
+    if (!pendingScriptHandoffId) {
+      return;
+    }
+
+    setIsLoadingScriptHandoff(true);
+  }, [pendingScriptHandoffId]);
 
   useEffect(() => {
     if (hasTouchedImageAspectRatio) return;
@@ -7932,6 +7961,67 @@ export function GeneratePageInner() {
     }
   };
 
+  handleSelectScriptFromLibraryRef.current = handleSelectScriptFromLibrary;
+
+  useEffect(() => {
+    if (isLoading || !user || !pendingScriptHandoffId) {
+      return;
+    }
+
+    if (handledScriptHandoffRef.current === pendingScriptHandoffId) {
+      return;
+    }
+
+    if (activeScriptHandoffRequestRef.current === pendingScriptHandoffId) {
+      return;
+    }
+
+    handledScriptHandoffRef.current = pendingScriptHandoffId;
+    activeScriptHandoffRequestRef.current = pendingScriptHandoffId;
+    setIsLoadingScriptHandoff(true);
+
+    void (async () => {
+      try {
+        const response = await api.get<ScriptDraftDto>(
+          `/scripts/${encodeURIComponent(pendingScriptHandoffId)}`,
+        );
+
+        if (activeScriptHandoffRequestRef.current !== pendingScriptHandoffId) {
+          return;
+        }
+
+        const loadScript = handleSelectScriptFromLibraryRef.current;
+        if (!loadScript) {
+          throw new Error('Script hydration handler is unavailable.');
+        }
+
+        await loadScript(response.data);
+        clearPendingScriptHandoff();
+      } catch (error) {
+        console.error('Failed to load redirected script handoff:', error);
+
+        if (activeScriptHandoffRequestRef.current !== pendingScriptHandoffId) {
+          return;
+        }
+
+        showToast('Failed to load the selected script.', 'error');
+        clearPendingScriptHandoff();
+      } finally {
+        if (activeScriptHandoffRequestRef.current === pendingScriptHandoffId) {
+          activeScriptHandoffRequestRef.current = null;
+        }
+
+        setIsLoadingScriptHandoff(false);
+      }
+    })();
+  }, [
+    clearPendingScriptHandoff,
+    isLoading,
+    pendingScriptHandoffId,
+    showToast,
+    user,
+  ]);
+
   const handleEnhanceScript = async () => {
     if (!script.trim()) {
       setRandomScriptError('Please enter or generate a script before enhancing.');
@@ -11322,7 +11412,7 @@ export function GeneratePageInner() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || isLoadingScriptHandoff) {
     return <GeneratePageSkeleton />;
   }
 

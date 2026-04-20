@@ -35,6 +35,7 @@ import {
     Play,
     Search,
     Sparkles,
+    Video,
     Volume2,
 } from 'lucide-react';
 
@@ -151,7 +152,41 @@ function getPublishedLinks(script: ScriptListItem | ScriptDetail) {
     });
 }
 
+function getSavedVoiceUrl(script: ScriptListItem | ScriptDetail) {
+    const url = script.voice?.voice;
+    return typeof url === 'string' ? url.trim() : '';
+}
+
+function hasScriptVoiceReady(script: ScriptListItem) {
+    return Boolean(
+        getSavedVoiceUrl(script) ||
+        script.voice_over_chunks_count > 0 ||
+        script.voice_over_sentences_count > 0,
+    );
+}
+
+function getVoiceReadyLabel(script: ScriptListItem) {
+    if (getSavedVoiceUrl(script)) {
+        return 'Saved voice';
+    }
+
+    if (script.voice_over_chunks_count > 0) {
+        return 'Full narration';
+    }
+
+    if (script.voice_over_sentences_count > 0) {
+        return 'Sentence clips';
+    }
+
+    return 'Unavailable';
+}
+
 function resolveVoiceoverUrls(script: ScriptDetail) {
+    const savedVoiceUrl = getSavedVoiceUrl(script);
+    if (savedVoiceUrl) {
+        return [savedVoiceUrl];
+    }
+
     const chunkUrls = [...(script.voice_over_chunks ?? [])]
         .sort((left, right) => left.index - right.index)
         .map((chunk) => String(chunk.url ?? '').trim())
@@ -200,6 +235,7 @@ export function ScriptsPageInner() {
     const [fullScriptModalScript, setFullScriptModalScript] =
         useState<ScriptListItem | null>(null);
     const [isSavingLinks, setIsSavingLinks] = useState(false);
+    const [redirectingScriptId, setRedirectingScriptId] = useState<string | null>(null);
 
     const pendingListResetRef = useRef(true);
     const detailCacheRef = useRef<Map<string, ScriptDetail>>(new Map());
@@ -210,12 +246,10 @@ export function ScriptsPageInner() {
         index: number;
     } | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    const showToastRef = useRef(showToast);
 
     const totalPages = total > 0 ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
-    const voiceReadyCount = scripts.filter(
-        (script) =>
-            script.voice_over_chunks_count > 0 || script.voice_over_sentences_count > 0,
-    ).length;
+    const voiceReadyCount = scripts.filter((script) => hasScriptVoiceReady(script)).length;
     const publishedCount = scripts.filter(
         (script) => getPublishedLinks(script).length > 0,
     ).length;
@@ -227,6 +261,10 @@ export function ScriptsPageInner() {
 
         return () => window.clearTimeout(timeoutId);
     }, [searchText]);
+
+    useEffect(() => {
+        showToastRef.current = showToast;
+    }, [showToast]);
 
     useEffect(() => {
         pendingListResetRef.current = true;
@@ -272,6 +310,34 @@ export function ScriptsPageInner() {
         if (!audioElement) return;
         const audio = audioElement;
 
+        function handlePlaybackStartError(error: unknown) {
+            const message =
+                error instanceof Error ? error.message : String(error ?? '');
+            const errorName =
+                typeof error === 'object' && error !== null && 'name' in error
+                    ? String((error as { name?: unknown }).name ?? '')
+                    : '';
+            const normalizedMessage = message.toLowerCase();
+
+            if (
+                errorName === 'AbortError' ||
+                normalizedMessage.includes('interrupted') ||
+                normalizedMessage.includes('aborted')
+            ) {
+                return;
+            }
+
+            if (errorName === 'NotAllowedError') {
+                showToastRef.current(
+                    'Audio playback is blocked until the browser allows playback on this page.',
+                    'warning',
+                );
+                return;
+            }
+
+            showToastRef.current('Failed to play the script voice-over.', 'error');
+        }
+
         function stopPlayback() {
             playbackQueueRef.current = null;
             setPlayingScriptId(null);
@@ -294,7 +360,7 @@ export function ScriptsPageInner() {
 
             void audio.play().catch((error) => {
                 console.error('Voice-over playback failed:', error);
-                showToast('The browser blocked audio playback for this script.', 'warning');
+                handlePlaybackStartError(error);
                 stopPlayback();
             });
         }
@@ -313,7 +379,7 @@ export function ScriptsPageInner() {
         }
 
         function handleError() {
-            showToast('One of the voice-over segments could not be played.', 'warning');
+            showToastRef.current('One of the voice-over segments could not be played.', 'warning');
             stopPlayback();
         }
 
@@ -325,7 +391,7 @@ export function ScriptsPageInner() {
             audio.removeEventListener('error', handleError);
             stopPlayback();
         };
-    }, [showToast]);
+    }, []);
 
     async function loadScriptDetail(scriptId: string) {
         const cachedDetail = detailCacheRef.current.get(scriptId);
@@ -363,8 +429,32 @@ export function ScriptsPageInner() {
         audio.currentTime = 0;
 
         void audio.play().catch((error) => {
+            const message = error instanceof Error ? error.message.toLowerCase() : String(error ?? '').toLowerCase();
+            const errorName =
+                typeof error === 'object' && error !== null && 'name' in error
+                    ? String((error as { name?: unknown }).name ?? '')
+                    : '';
+
             console.error('Voice-over playback failed:', error);
-            showToast('The browser blocked audio playback for this script.', 'warning');
+
+            if (
+                errorName === 'AbortError' ||
+                message.includes('interrupted') ||
+                message.includes('aborted')
+            ) {
+                stopPlayback();
+                return;
+            }
+
+            if (errorName === 'NotAllowedError') {
+                showToastRef.current(
+                    'Audio playback is blocked until the browser allows playback on this page.',
+                    'warning',
+                );
+            } else {
+                showToastRef.current('Failed to play the script voice-over.', 'error');
+            }
+
             stopPlayback();
         });
     }
@@ -550,6 +640,26 @@ export function ScriptsPageInner() {
         }
     }
 
+    function handleUseScript(script: ScriptListItem) {
+        if (redirectingScriptId) return;
+
+        const scriptId = String(script.id ?? '').trim();
+        if (!scriptId) {
+            showToast('This script cannot be opened in the generator yet.', 'error');
+            return;
+        }
+
+        setRedirectingScriptId(scriptId);
+
+        try {
+            router.push(`/generate?scriptId=${encodeURIComponent(scriptId)}`);
+        } catch (error) {
+            console.error('Failed to redirect to the generate page:', error);
+            setRedirectingScriptId(null);
+            showToast('Failed to open this script in the generator.', 'error');
+        }
+    }
+
     if (isLoading) {
         return (
             <div className="flex min-h-screen items-center justify-center bg-slate-100">
@@ -698,18 +808,18 @@ export function ScriptsPageInner() {
                                 <>
                                     {scripts.map((script) => {
                                         const publishedLinks = getPublishedLinks(script);
-                                        const hasVoiceover =
-                                            script.voice_over_chunks_count > 0 ||
-                                            script.voice_over_sentences_count > 0;
+                                        const hasVoiceover = hasScriptVoiceReady(script);
                                         const hasAllRequestedLinks = Boolean(
                                             String(script.youtube_url ?? '').trim() &&
                                             String(script.facebook_url ?? '').trim() &&
                                             String(script.tiktok_url ?? '').trim(),
                                         );
+                                        const savedVoiceUrl = getSavedVoiceUrl(script);
                                         const isScriptTruncated = isScriptPreviewTruncated(script.script);
                                         const isPlaying = playingScriptId === script.id;
                                         const isVoiceLoading = voiceLoadScriptId === script.id;
                                         const isDetailLoading = detailLoadScriptId === script.id;
+                                        const isRedirecting = redirectingScriptId === script.id;
 
                                         return (
                                             <article
@@ -733,7 +843,9 @@ export function ScriptsPageInner() {
                                                                     }`}
                                                             >
                                                                 <Volume2 className="h-3.5 w-3.5" />
-                                                                {script.voice_over_chunks_count > 0
+                                                                {savedVoiceUrl
+                                                                    ? 'Saved voice file'
+                                                                    : script.voice_over_chunks_count > 0
                                                                     ? `${script.voice_over_chunks_count} narration chunks`
                                                                     : script.voice_over_sentences_count > 0
                                                                         ? `${script.voice_over_sentences_count} sentence clips`
@@ -790,6 +902,25 @@ export function ScriptsPageInner() {
                                                     </div>
 
                                                     <div className="w-full space-y-3 xl:w-70">
+                                                        <Button
+                                                            type="button"
+                                                            onClick={() => handleUseScript(script)}
+                                                            disabled={isRedirecting}
+                                                            className="w-full cursor-pointer justify-between rounded-2xl bg-[linear-gradient(135deg,#312e81_0%,#4338ca_48%,#818cf8_100%)] py-6 text-white shadow-[0_18px_36px_-24px_rgba(67,56,202,0.95)] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
+                                                        >
+                                                            <span className="flex items-center gap-2">
+                                                                {isRedirecting ? (
+                                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <Video className="h-4 w-4" />
+                                                                )}
+                                                                Use Script
+                                                            </span>
+                                                            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/75">
+                                                                {isRedirecting ? 'Opening generator' : 'Open in generate'}
+                                                            </span>
+                                                        </Button>
+
                                                         {isScriptTruncated ? (
                                                             <Button
                                                                 type="button"
@@ -843,11 +974,7 @@ export function ScriptsPageInner() {
                                                                 {isPlaying ? 'Stop voice-over' : 'Play voice-over'}
                                                             </span>
                                                             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-white/70">
-                                                                {script.voice_over_chunks_count > 0
-                                                                    ? 'Full narration'
-                                                                    : script.voice_over_sentences_count > 0
-                                                                        ? 'Sentence clips'
-                                                                        : 'Unavailable'}
+                                                                {getVoiceReadyLabel(script)}
                                                             </span>
                                                         </Button>
 

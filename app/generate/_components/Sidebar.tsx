@@ -1,10 +1,10 @@
 'use client';
 
 import { Accordion } from '@/components/ui/accordion';
+import { SidebarProfileHeader } from '@/app/generate/_components/sidebar/SidebarProfileHeader';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Clapperboard, FileText, UserRound } from 'lucide-react';
+import { Clapperboard, FileText, UserRound, Video } from 'lucide-react';
 import type { User } from '@/lib/auth';
-import { SidebarFooter } from './sidebar/SidebarFooter';
 import { SidebarItemButton } from './sidebar/SidebarItemButton';
 import { SidebarItemList } from './sidebar/SidebarItemList';
 import { SidebarSection } from './sidebar/SidebarSection';
@@ -25,6 +25,7 @@ interface SidebarProps {
 export function Sidebar({ user, isOpen, onLogout }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isGenerateActive = pathname.startsWith('/generate');
   const activeScriptCategory =
     pathname === '/scripts'
       ? normalizeScriptCategory(searchParams.get('category'))
@@ -38,7 +39,19 @@ export function Sidebar({ user, isOpen, onLogout }: SidebarProps) {
     <div
       className={`${isOpen ? 'w-72' : 'w-0'} flex flex-col overflow-hidden border-r border-slate-200/80 bg-linear-to-b from-stone-100 via-white to-slate-100 transition-all duration-300`}
     >
-      <div className="flex-1 px-4 py-4">
+      <div className="flex-1 space-y-4 px-4 py-4">
+        <SidebarProfileHeader user={user} onLogout={onLogout} />
+
+        <SidebarItemButton
+          label="Add New Generation"
+          description="Start a fresh script and video workflow"
+          icon={Video}
+          href="/generate"
+          isActive={isGenerateActive}
+          tone="primary"
+          badgeClassName="border-white/20 bg-white/15 text-white"
+        />
+
         <Accordion type="multiple" defaultValue={[]} className="space-y-4">
           <SidebarSection
             value="scripts"
@@ -83,7 +96,6 @@ export function Sidebar({ user, isOpen, onLogout }: SidebarProps) {
           </SidebarSection>
         </Accordion>
       </div>
-      <SidebarFooter user={user} onLogout={onLogout} />
     </div>
   );
 }

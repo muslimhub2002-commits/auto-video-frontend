@@ -61,6 +61,9 @@ export type PlatformStatus = {
   privacyOptions?: string[];
   requiresReconnect?: boolean;
   canUpload?: boolean;
+  hasAccessToken?: boolean;
+  hasRefreshToken?: boolean;
+  supportsAnalytics?: boolean;
   lastError?: string | null;
   facebookPageId?: string | null;
   instagramAccountId?: string | null;
