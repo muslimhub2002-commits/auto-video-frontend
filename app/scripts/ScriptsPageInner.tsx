@@ -16,6 +16,7 @@ import {
 } from '../generate/_components/sidebar/sidebar-data';
 import { useAuthGuard } from '../generate/_hooks/useAuthGuard';
 import { ScriptDetailsModal } from './_components/ScriptDetailsModal';
+import { ScriptFullModal } from './_components/ScriptFullModal';
 import { ScriptLinksModal } from './_components/ScriptLinksModal';
 import type {
     ScriptDetail,
@@ -84,6 +85,10 @@ function buildScriptPreview(scriptText: string) {
     return `${normalized.slice(0, 237)}...`;
 }
 
+function isScriptPreviewTruncated(scriptText: string) {
+    return scriptText.replace(/\s+/g, ' ').trim().length > 240;
+}
+
 function formatDate(value?: string) {
     if (!value) return 'Unknown date';
 
@@ -95,6 +100,39 @@ function formatDate(value?: string) {
         day: 'numeric',
         year: 'numeric',
     });
+}
+
+function hasPublishedSocialLink(
+    script: ScriptListItem | ScriptDetail,
+    category?: (typeof socialPlatforms)[number]['category'],
+) {
+    if (!category) {
+        return socialPlatforms.some((platform) => {
+            const rawUrl = script[platform.key];
+            return typeof rawUrl === 'string' && rawUrl.trim().length > 0;
+        });
+    }
+
+    const platform = socialPlatforms.find((item) => item.category === category);
+    if (!platform) return false;
+
+    const rawUrl = script[platform.key];
+    return typeof rawUrl === 'string' && rawUrl.trim().length > 0;
+}
+
+function doesScriptMatchCategory(
+    script: ScriptListItem | ScriptDetail,
+    category: ScriptCategory,
+) {
+    if (category === 'all') {
+        return true;
+    }
+
+    if (category === 'draft') {
+        return !hasPublishedSocialLink(script);
+    }
+
+    return hasPublishedSocialLink(script, category);
 }
 
 function getPublishedLinks(script: ScriptListItem | ScriptDetail) {
@@ -159,6 +197,8 @@ export function ScriptsPageInner() {
     const [playingScriptId, setPlayingScriptId] = useState<string | null>(null);
     const [voiceLoadScriptId, setVoiceLoadScriptId] = useState<string | null>(null);
     const [linksModalScript, setLinksModalScript] = useState<ScriptListItem | null>(null);
+    const [fullScriptModalScript, setFullScriptModalScript] =
+        useState<ScriptListItem | null>(null);
     const [isSavingLinks, setIsSavingLinks] = useState(false);
 
     const pendingListResetRef = useRef(true);
@@ -344,16 +384,31 @@ export function ScriptsPageInner() {
         };
 
         detailCacheRef.current.set(detail.id, detail);
-        setScripts((current) =>
-            current.map((script) =>
-                script.id === detail.id
-                    ? {
-                        ...script,
-                        ...nextLinkFields,
-                    }
-                    : script,
-            ),
-        );
+        const isCurrentlyVisible = scripts.some((script) => script.id === detail.id);
+        const shouldRemainVisible = doesScriptMatchCategory(detail, activeCategory);
+        const shouldMoveToPreviousPage =
+            isCurrentlyVisible && !shouldRemainVisible && scripts.length === 1 && page > 1;
+
+        if (isCurrentlyVisible && !shouldRemainVisible) {
+            setScripts((current) => current.filter((script) => script.id !== detail.id));
+            setTotal((current) => Math.max(0, current - 1));
+
+            if (shouldMoveToPreviousPage) {
+                setPage((current) => Math.max(1, current - 1));
+            }
+        } else {
+            setScripts((current) =>
+                current.map((script) =>
+                    script.id === detail.id
+                        ? {
+                            ...script,
+                            ...nextLinkFields,
+                        }
+                        : script,
+                ),
+            );
+        }
+
         setSelectedScript((current) =>
             current && current.id === detail.id
                 ? {
@@ -366,6 +421,14 @@ export function ScriptsPageInner() {
             current && current.id === detail.id ? detail : current,
         );
         setLinksModalScript((current) =>
+            current && current.id === detail.id
+                ? {
+                    ...current,
+                    ...nextLinkFields,
+                }
+                : current,
+        );
+        setFullScriptModalScript((current) =>
             current && current.id === detail.id
                 ? {
                     ...current,
@@ -414,6 +477,14 @@ export function ScriptsPageInner() {
         setDetailError(null);
         setIsLoadingDetails(false);
         setDetailLoadScriptId(null);
+    }
+
+    function handleOpenFullScript(script: ScriptListItem) {
+        setFullScriptModalScript(script);
+    }
+
+    function handleCloseFullScript() {
+        setFullScriptModalScript(null);
     }
 
     function handleOpenLinks(script: ScriptListItem) {
@@ -635,6 +706,7 @@ export function ScriptsPageInner() {
                                             String(script.facebook_url ?? '').trim() &&
                                             String(script.tiktok_url ?? '').trim(),
                                         );
+                                        const isScriptTruncated = isScriptPreviewTruncated(script.script);
                                         const isPlaying = playingScriptId === script.id;
                                         const isVoiceLoading = voiceLoadScriptId === script.id;
                                         const isDetailLoading = detailLoadScriptId === script.id;
@@ -718,6 +790,23 @@ export function ScriptsPageInner() {
                                                     </div>
 
                                                     <div className="w-full space-y-3 xl:w-70">
+                                                        {isScriptTruncated ? (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                onClick={() => handleOpenFullScript(script)}
+                                                                className="w-full cursor-pointer justify-between rounded-2xl border-slate-200 bg-white py-6 text-slate-900 hover:bg-slate-50"
+                                                            >
+                                                                <span className="flex items-center gap-2">
+                                                                    <FileText className="h-4 w-4" />
+                                                                    Full script
+                                                                </span>
+                                                                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                                                    Open modal
+                                                                </span>
+                                                            </Button>
+                                                        ) : null}
+
                                                         <Button
                                                             type="button"
                                                             variant="outline"
@@ -798,6 +887,11 @@ export function ScriptsPageInner() {
 
             <audio ref={audioRef} className="hidden" />
 
+            <ScriptFullModal
+                isOpen={!!fullScriptModalScript}
+                script={fullScriptModalScript}
+                onClose={handleCloseFullScript}
+            />
             <ScriptDetailsModal
                 isOpen={isDetailsOpen}
                 scriptSummary={selectedScript}

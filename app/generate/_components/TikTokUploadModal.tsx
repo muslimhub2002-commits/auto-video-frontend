@@ -19,8 +19,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { api } from '@/lib/api';
+import { youtubeApi } from '@/lib/api';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
+import {
+  formatVideoDuration,
+  getVideoDurationSeconds,
+  getVideoFormatKind,
+  getVideoFormatLabel,
+} from '@/lib/video-format';
 import {
   TIKTOK_WALLPAPER_THEME,
   WallpaperGeneratorSection,
@@ -32,9 +38,15 @@ interface TikTokUploadModalProps {
   onClose: () => void;
   videoUrl: string | null;
   isShortVideo: boolean;
+  videoDurationSeconds?: number | null;
   scriptId: string | null;
   script: string;
   scriptCharacters: SocialUploadScriptCharacter[];
+  onUploaded?: (payload: {
+    scriptId: string | null;
+    tiktokUrl: string | null;
+    publishId: string;
+  }) => void | Promise<void>;
 }
 
 type TikTokCreatorInfo = {
@@ -62,9 +74,11 @@ export function TikTokUploadModal({
   onClose,
   videoUrl,
   isShortVideo,
+  videoDurationSeconds,
   scriptId,
   script,
   scriptCharacters,
+  onUploaded,
 }: TikTokUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
@@ -92,6 +106,30 @@ export function TikTokUploadModal({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<TikTokUploadResponse | null>(null);
   const [isWallpaperBusy, setIsWallpaperBusy] = useState(false);
+  const [resolvedVideoDurationSeconds, setResolvedVideoDurationSeconds] =
+    useState<number | null>(videoDurationSeconds ?? null);
+  const [isResolvingVideoFormat, setIsResolvingVideoFormat] = useState(false);
+  const [videoFormatError, setVideoFormatError] = useState<string | null>(null);
+
+  const effectiveVideoDurationSeconds =
+    typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
+      ? videoDurationSeconds
+      : resolvedVideoDurationSeconds;
+  const resolvedVideoFormatKind = getVideoFormatKind(effectiveVideoDurationSeconds);
+  const resolvedIsShortVideo =
+    resolvedVideoFormatKind === 'short'
+      ? true
+      : resolvedVideoFormatKind === 'long'
+        ? false
+        : isShortVideo;
+  const resolvedVideoFormatLabel =
+    resolvedVideoFormatKind === 'unknown'
+      ? videoUrl
+        ? 'Checking format'
+        : isShortVideo
+          ? 'Short'
+          : 'Long'
+      : getVideoFormatLabel(effectiveVideoDurationSeconds);
 
   const popupRef = useRef<Window | null>(null);
   const popupIntervalRef = useRef<number | null>(null);
@@ -99,7 +137,6 @@ export function TikTokUploadModal({
   const TIKTOK_API_URL =
     process.env.NEXT_PUBLIC_TIKTOK_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_YOUTUBE_API_URL ||
     'https://auto-video-backend.vercel.app';
 
   useEffect(() => {
@@ -229,6 +266,55 @@ export function TikTokUploadModal({
     };
   }, [isOpen, onClose, loadCreatorInfo, stopPopupMonitor]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    if (typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0) {
+      setResolvedVideoDurationSeconds(videoDurationSeconds);
+      setVideoFormatError(null);
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    if (!videoUrl) {
+      setResolvedVideoDurationSeconds(null);
+      setVideoFormatError(null);
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsResolvingVideoFormat(true);
+    setVideoFormatError(null);
+
+    void getVideoDurationSeconds(videoUrl)
+      .then((duration) => {
+        if (cancelled) return;
+        setResolvedVideoDurationSeconds(duration);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setResolvedVideoDurationSeconds(null);
+        setVideoFormatError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Failed to confirm the video format from the uploaded file.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsResolvingVideoFormat(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, videoDurationSeconds, videoUrl]);
+
   const isBusy =
     isUploading ||
     isConnectingTikTok ||
@@ -311,10 +397,10 @@ export function TikTokUploadModal({
 
     setIsGeneratingSeo(true);
     try {
-      const res = await api.post('/ai/youtube-seo', {
+      const res = await youtubeApi.post('/ai/youtube-seo', {
         script: trimmedScript,
         useWebSearch: useWebSearchForSeo,
-        isShort: isShortVideo,
+        isShort: resolvedIsShortVideo,
       });
 
       const data = res.data as { title?: string; description?: string; tags?: string[] };
@@ -423,7 +509,11 @@ export function TikTokUploadModal({
 
     if (typeof creatorInfo.max_video_post_duration_sec === 'number') {
       try {
-        const durationSeconds = await getVideoDurationSeconds(videoUrl, 20_000);
+        const durationSeconds =
+          typeof effectiveVideoDurationSeconds === 'number' &&
+          effectiveVideoDurationSeconds > 0
+            ? effectiveVideoDurationSeconds
+            : await getVideoDurationSeconds(videoUrl, 20_000);
         if (
           typeof durationSeconds === 'number' &&
           durationSeconds > creatorInfo.max_video_post_duration_sec
@@ -480,6 +570,12 @@ export function TikTokUploadModal({
       }
 
       setUploadResult(data as TikTokUploadResponse);
+      await onUploaded?.({
+        scriptId: String((data as TikTokUploadResponse).scriptId ?? scriptId ?? '').trim() || null,
+        tiktokUrl:
+          String((data as TikTokUploadResponse).tiktokUrl ?? '').trim() || null,
+        publishId: String((data as TikTokUploadResponse).publishId ?? '').trim(),
+      });
       if ((data as TikTokUploadResponse).tiktokUrl) {
         window.open((data as TikTokUploadResponse).tiktokUrl!, '_blank', 'noopener,noreferrer');
       }
@@ -541,6 +637,29 @@ export function TikTokUploadModal({
                     TikTok requires each user to authorize posting. We load your live privacy options from TikTok before upload.
                   </p>
                 </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-rose-200 bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-rose-700">
+                    {resolvedVideoFormatLabel} format
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-rose-200 bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-rose-700">
+                    {effectiveVideoDurationSeconds
+                      ? formatVideoDuration(effectiveVideoDurationSeconds)
+                      : isResolvingVideoFormat
+                        ? 'Reading duration'
+                        : 'Duration unknown'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-gray-600">
+                  Videos shorter than 3 minutes are treated as short-form. Long-form-only helpers stay hidden for short uploads.
+                </p>
+
+                {videoFormatError ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    {videoFormatError}
+                  </div>
+                ) : null}
 
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
@@ -651,10 +770,10 @@ export function TikTokUploadModal({
             </div>
           </div>
 
-          {!isShortVideo ? (
+          {resolvedVideoFormatKind === 'long' ? (
             <WallpaperGeneratorSection
               isOpen={isOpen}
-              isShortVideo={isShortVideo}
+              isShortVideo={resolvedIsShortVideo}
               script={script}
               scriptCharacters={scriptCharacters}
               disabled={isBusy}
@@ -730,7 +849,7 @@ export function TikTokUploadModal({
             <div className="bg-neutral-950 rounded-2xl px-4 py-3 text-sm text-white/90">
               <div className="font-semibold text-white mb-1">Posting behavior</div>
               <p>
-                {isShortVideo
+                {resolvedIsShortVideo
                   ? 'Short-form videos are suitable for direct TikTok posting.'
                   : 'TikTok account limits differ by creator. Check the max duration shown above before posting longer videos.'}
               </p>
@@ -943,42 +1062,4 @@ export function TikTokUploadModal({
       </div>
     </div>
   );
-}
-
-async function getVideoDurationSeconds(url: string, timeoutMs: number): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    let finished = false;
-
-    const cleanup = () => {
-      video.onloadedmetadata = null;
-      video.onerror = null;
-      video.removeAttribute('src');
-      video.load();
-    };
-
-    const complete = (value: number | null, error?: Error) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timeout);
-      cleanup();
-      if (error) {
-        reject(error);
-      } else {
-        resolve(value);
-      }
-    };
-
-    const timeout = window.setTimeout(() => {
-      complete(null, new Error('Timed out while reading the video duration.'));
-    }, timeoutMs);
-
-    video.preload = 'metadata';
-    video.onloadedmetadata = () => {
-      const duration = Number(video.duration);
-      complete(Number.isFinite(duration) && duration > 0 ? duration : null);
-    };
-    video.onerror = () => complete(null, new Error('Failed to read the video duration.'));
-    video.src = url;
-  });
 }

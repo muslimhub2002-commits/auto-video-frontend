@@ -10,6 +10,7 @@ import { SidebarItemList } from './sidebar/SidebarItemList';
 import { SidebarSection } from './sidebar/SidebarSection';
 import {
   normalizeScriptCategory,
+  normalizeVideoPlatform,
   scriptPlatforms,
   utilityItems,
   videoPlatforms,
@@ -27,6 +28,10 @@ export function Sidebar({ user, isOpen, onLogout }: SidebarProps) {
   const activeScriptCategory =
     pathname === '/scripts'
       ? normalizeScriptCategory(searchParams.get('category'))
+      : null;
+  const activeVideoPlatform =
+    pathname === '/videos'
+      ? normalizeVideoPlatform(searchParams.get('platform'))
       : null;
 
   return (
@@ -50,7 +55,10 @@ export function Sidebar({ user, isOpen, onLogout }: SidebarProps) {
             icon={Clapperboard}
             iconGradient="from-sky-400 via-blue-500 to-indigo-600 shadow-sky-200"
           >
-            <SidebarItemList items={videoPlatforms} />
+            <SidebarItemList
+              items={videoPlatforms}
+              activeCategory={activeVideoPlatform}
+            />
           </SidebarSection>
 
           <SidebarSection

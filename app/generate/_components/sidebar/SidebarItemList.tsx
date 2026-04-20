@@ -1,12 +1,15 @@
-import type { PlatformItem, ScriptCategory } from './sidebar-data';
+import type { PlatformItem } from './sidebar-data';
 import { SidebarItemButton } from './SidebarItemButton';
 
-type SidebarItemListProps = {
-  items: readonly PlatformItem[];
-  activeCategory?: ScriptCategory | null;
+type SidebarItemListProps<Category extends string = string> = {
+  items: readonly PlatformItem<Category>[];
+  activeCategory?: Category | null;
 };
 
-export function SidebarItemList({ items, activeCategory }: SidebarItemListProps) {
+export function SidebarItemList<Category extends string = string>({
+  items,
+  activeCategory,
+}: SidebarItemListProps<Category>) {
   return (
     <div className="space-y-2">
       {items.map((item) => (

@@ -13,8 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { api } from '@/lib/api';
+import { youtubeApi } from '@/lib/api';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
+import {
+  formatVideoDuration,
+  getVideoDurationSeconds,
+  getVideoFormatKind,
+  getVideoFormatLabel,
+} from '@/lib/video-format';
 import {
   WallpaperGeneratorSection,
   YOUTUBE_WALLPAPER_THEME,
@@ -26,9 +32,15 @@ interface YouTubeUploadModalProps {
   onClose: () => void;
   videoUrl: string | null;
   isShortVideo: boolean;
+  videoDurationSeconds?: number | null;
   scriptId: string | null;
   script: string;
   scriptCharacters: SocialUploadScriptCharacter[];
+  onUploaded?: (payload: {
+    scriptId: string | null;
+    youtubeUrl: string;
+    videoId: string;
+  }) => void | Promise<void>;
 }
 
 export function YouTubeUploadModal({
@@ -36,19 +48,14 @@ export function YouTubeUploadModal({
   onClose,
   videoUrl,
   isShortVideo,
+  videoDurationSeconds,
   scriptId,
   script,
   scriptCharacters,
+  onUploaded,
 }: YouTubeUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
-
-  // YouTube endpoints may be hosted on a different backend than rendering.
-  // Use a dedicated env override so we don't accidentally point YouTube calls
-  // at the render backend (NEXT_PUBLIC_API_URL).
-  const YOUTUBE_API_URL =
-    process.env.NEXT_PUBLIC_YOUTUBE_API_URL ||
-    'https://auto-video-backend.vercel.app';
 
   const [youtubeTitle, setYoutubeTitle] = useState('');
   const [youtubeDescription, setYoutubeDescription] = useState('');
@@ -76,6 +83,30 @@ export function YouTubeUploadModal({
   const [scheduledHour, setScheduledHour] = useState('12');
   const [useWebSearchForSeo, setUseWebSearchForSeo] = useState(false);
   const [isWallpaperBusy, setIsWallpaperBusy] = useState(false);
+  const [resolvedVideoDurationSeconds, setResolvedVideoDurationSeconds] =
+    useState<number | null>(videoDurationSeconds ?? null);
+  const [isResolvingVideoFormat, setIsResolvingVideoFormat] = useState(false);
+  const [videoFormatError, setVideoFormatError] = useState<string | null>(null);
+
+  const effectiveVideoDurationSeconds =
+    typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
+      ? videoDurationSeconds
+      : resolvedVideoDurationSeconds;
+  const resolvedVideoFormatKind = getVideoFormatKind(effectiveVideoDurationSeconds);
+  const resolvedIsShortVideo =
+    resolvedVideoFormatKind === 'short'
+      ? true
+      : resolvedVideoFormatKind === 'long'
+        ? false
+        : isShortVideo;
+  const resolvedVideoFormatLabel =
+    resolvedVideoFormatKind === 'unknown'
+      ? videoUrl
+        ? 'Checking format'
+        : isShortVideo
+          ? 'Short'
+          : 'Long'
+      : getVideoFormatLabel(effectiveVideoDurationSeconds);
 
   const getCairoTodayISODate = () => {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -189,7 +220,7 @@ export function YouTubeUploadModal({
     setIsVisible(false);
     const timer = setTimeout(() => setIsRendered(false), 300);
     return () => clearTimeout(timer);
-  }, [isOpen]);
+  }, [isOpen, scheduledDate]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -199,6 +230,55 @@ export function YouTubeUploadModal({
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    if (typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0) {
+      setResolvedVideoDurationSeconds(videoDurationSeconds);
+      setVideoFormatError(null);
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    if (!videoUrl) {
+      setResolvedVideoDurationSeconds(null);
+      setVideoFormatError(null);
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsResolvingVideoFormat(true);
+    setVideoFormatError(null);
+
+    void getVideoDurationSeconds(videoUrl)
+      .then((duration) => {
+        if (cancelled) return;
+        setResolvedVideoDurationSeconds(duration);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setResolvedVideoDurationSeconds(null);
+        setVideoFormatError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Failed to confirm the video format from the uploaded file.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsResolvingVideoFormat(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, videoDurationSeconds, videoUrl]);
 
   const handleGenerateSeo = async () => {
     setSeoError(null);
@@ -210,10 +290,10 @@ export function YouTubeUploadModal({
 
     setIsGeneratingSeo(true);
     try {
-      const res = await api.post('/ai/youtube-seo', {
+      const res = await youtubeApi.post('/ai/youtube-seo', {
         script: trimmed,
         useWebSearch: useWebSearchForSeo,
-        isShort: isShortVideo,
+        isShort: resolvedIsShortVideo,
       });
       const data = res.data as { title?: string; description?: string; tags?: string[] };
 
@@ -241,22 +321,8 @@ export function YouTubeUploadModal({
     setUploadedYoutubeUrl(null);
     setIsConnectingYouTube(true);
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${YOUTUBE_API_URL}/youtube/auth-url`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          Authorization: token ? `Bearer ${token}` : '',
-        },
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.message || 'Failed to get YouTube auth url');
-      }
-
-      const data = await response.json();
+      const response = await youtubeApi.get<{ url?: string }>('/youtube/auth-url');
+      const data = response.data;
       const url = data?.url as string | undefined;
       if (!url) throw new Error('Missing YouTube auth url');
 
@@ -327,18 +393,15 @@ export function YouTubeUploadModal({
     try {
       const tags = parseTagsPreserveOrder(youtubeTags);
       tags.join(',');
-      const token = localStorage.getItem('token');
       // 1) Ensure the rendered video has a stable public URL before upload.
       const publicVideoUrl = await ensureYoutubePublicVideoUrl(videoUrl);
 
       // 2) Upload to YouTube using the prepared public URL.
-      const response = await fetch(`${YOUTUBE_API_URL}/youtube/upload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: token ? `Bearer ${token}` : '',
-        },
-        body: JSON.stringify({
+      const response = await youtubeApi.post<{
+        videoId?: string;
+        youtubeUrl?: string;
+        scriptId?: string | null;
+      }>('/youtube/upload', {
           videoUrl: publicVideoUrl,
           title: youtubeTitle,
           description: youtubeDescription,
@@ -350,15 +413,9 @@ export function YouTubeUploadModal({
           scriptId: scriptId || undefined,
           scriptText: (script || '').trim() || undefined,
           ...(publishAt ? { publishAt } : {}),
-        }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.message || 'Upload failed');
-      }
-
-      const data = await response.json();
+      const data = response.data;
       const videoId = data?.videoId as string | undefined;
       if (!videoId) throw new Error('Upload succeeded but missing videoId');
 
@@ -367,6 +424,11 @@ export function YouTubeUploadModal({
           ? String(data.youtubeUrl).trim()
           : `https://www.youtube.com/watch?v=${videoId}`;
       setUploadedYoutubeUrl(url);
+      await onUploaded?.({
+        scriptId: String(data?.scriptId ?? scriptId ?? '').trim() || null,
+        youtubeUrl: url,
+        videoId,
+      });
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (error: unknown) {
       const messageFromApi = (() => {
@@ -452,6 +514,29 @@ export function YouTubeUploadModal({
                   Complete the form below to upload your AI-generated video to YouTube. All fields marked with{' '}
                   <span className="text-red-600 font-semibold">*</span> are required.
                 </p>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-blue-800">
+                    {resolvedVideoFormatLabel} format
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-blue-800">
+                    {effectiveVideoDurationSeconds
+                      ? formatVideoDuration(effectiveVideoDurationSeconds)
+                      : isResolvingVideoFormat
+                        ? 'Reading duration'
+                        : 'Duration unknown'}
+                  </span>
+                </div>
+
+                <p className="mt-3 text-xs text-blue-700">
+                  Videos shorter than 3 minutes are treated as short-form. Long-form-only options stay hidden for short videos.
+                </p>
+
+                {videoFormatError ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    {videoFormatError}
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <Button
@@ -625,10 +710,10 @@ export function YouTubeUploadModal({
             </p>
           </div>
 
-          {!isShortVideo ? (
+          {resolvedVideoFormatKind === 'long' ? (
             <WallpaperGeneratorSection
               isOpen={isOpen}
-              isShortVideo={isShortVideo}
+              isShortVideo={resolvedIsShortVideo}
               script={script}
               scriptCharacters={scriptCharacters}
               titleContext={youtubeTitle}

@@ -17,7 +17,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
-import { api } from '@/lib/api';
+import { youtubeApi } from '@/lib/api';
+import {
+  formatVideoDuration,
+  getVideoDurationSeconds,
+  getVideoFormatKind,
+  getVideoFormatLabel,
+} from '@/lib/video-format';
 import {
   META_WALLPAPER_THEME,
   WallpaperGeneratorSection,
@@ -31,9 +37,16 @@ interface MetaUploadModalProps {
   onClose: () => void;
   videoUrl: string | null;
   isShortVideo: boolean;
+  videoDurationSeconds?: number | null;
   scriptId: string | null;
   script: string;
   scriptCharacters: SocialUploadScriptCharacter[];
+  onUploaded?: (payload: {
+    scriptId: string | null;
+    facebookUrl: string | null;
+    instagramUrl: string | null;
+    partialFailure: boolean;
+  }) => void | Promise<void>;
 }
 
 type PlatformResult = {
@@ -128,9 +141,11 @@ export function MetaUploadModal({
   onClose,
   videoUrl,
   isShortVideo,
+  videoDurationSeconds,
   scriptId,
   script,
   scriptCharacters,
+  onUploaded,
 }: MetaUploadModalProps) {
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
@@ -156,11 +171,34 @@ export function MetaUploadModal({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<MetaUploadResponse | null>(null);
   const [isWallpaperBusy, setIsWallpaperBusy] = useState(false);
+  const [resolvedVideoDurationSeconds, setResolvedVideoDurationSeconds] =
+    useState<number | null>(videoDurationSeconds ?? null);
+  const [isResolvingVideoFormat, setIsResolvingVideoFormat] = useState(false);
+  const [videoFormatError, setVideoFormatError] = useState<string | null>(null);
+
+  const effectiveVideoDurationSeconds =
+    typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
+      ? videoDurationSeconds
+      : resolvedVideoDurationSeconds;
+  const resolvedVideoFormatKind = getVideoFormatKind(effectiveVideoDurationSeconds);
+  const resolvedIsShortVideo =
+    resolvedVideoFormatKind === 'short'
+      ? true
+      : resolvedVideoFormatKind === 'long'
+        ? false
+        : isShortVideo;
+  const resolvedVideoFormatLabel =
+    resolvedVideoFormatKind === 'unknown'
+      ? videoUrl
+        ? 'Checking format'
+        : isShortVideo
+          ? 'Short'
+          : 'Long'
+      : getVideoFormatLabel(effectiveVideoDurationSeconds);
 
   const META_API_URL =
     process.env.NEXT_PUBLIC_META_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_YOUTUBE_API_URL ||
     'http://localhost:3000';
   useEffect(() => {
     if (isOpen) {
@@ -311,6 +349,55 @@ export function MetaUploadModal({
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    if (typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0) {
+      setResolvedVideoDurationSeconds(videoDurationSeconds);
+      setVideoFormatError(null);
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    if (!videoUrl) {
+      setResolvedVideoDurationSeconds(null);
+      setVideoFormatError(null);
+      setIsResolvingVideoFormat(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsResolvingVideoFormat(true);
+    setVideoFormatError(null);
+
+    void getVideoDurationSeconds(videoUrl)
+      .then((duration) => {
+        if (cancelled) return;
+        setResolvedVideoDurationSeconds(duration);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setResolvedVideoDurationSeconds(null);
+        setVideoFormatError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Failed to confirm the video format from the uploaded file.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsResolvingVideoFormat(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, videoDurationSeconds, videoUrl]);
+
   const isBusy =
     isUploading ||
     isGeneratingSeo ||
@@ -394,10 +481,10 @@ export function MetaUploadModal({
 
     setIsGeneratingSeo(true);
     try {
-      const res = await api.post('/ai/youtube-seo', {
+      const res = await youtubeApi.post('/ai/youtube-seo', {
         script: trimmedScript,
         useWebSearch: useWebSearchForSeo,
-        isShort: isShortVideo,
+        isShort: resolvedIsShortVideo,
       });
       const data = res.data as { title?: string; description?: string; tags?: string[] };
 
@@ -451,7 +538,7 @@ export function MetaUploadModal({
           platforms: selectedPlatforms,
           title: facebookTitle.trim() || undefined,
           caption: formattedCaption,
-          isShortVideo,
+          isShortVideo: resolvedIsShortVideo,
           scriptId: scriptId || undefined,
           scriptText: (script || '').trim() || undefined,
         }),
@@ -466,6 +553,14 @@ export function MetaUploadModal({
       }
 
       setUploadResult(data as MetaUploadResponse);
+      await onUploaded?.({
+        scriptId: String((data as MetaUploadResponse).scriptId ?? scriptId ?? '').trim() || null,
+        facebookUrl:
+          String((data as MetaUploadResponse).results.facebook?.url ?? '').trim() || null,
+        instagramUrl:
+          String((data as MetaUploadResponse).results.instagram?.url ?? '').trim() || null,
+        partialFailure: Boolean((data as MetaUploadResponse).partialFailure),
+      });
     } catch (err: unknown) {
       const message = err instanceof Error && err.message.trim()
         ? err.message
@@ -522,10 +617,33 @@ export function MetaUploadModal({
               <div className="flex-1">
                 <h4 className="font-semibold text-sky-900 mb-1">Publish directly from the app</h4>
                 <p className="text-sm text-sky-700 leading-relaxed">
-                  {isShortVideo
+                  {resolvedIsShortVideo
                     ? 'Short videos will be sent to Instagram as Reels. Facebook will receive a native video post.'
                     : 'Full-length videos will be published as native video posts. Make sure the caption fits both platforms.'}
                 </p>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-sky-200 bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-sky-800">
+                    {resolvedVideoFormatLabel} format
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-sky-200 bg-white/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-sky-800">
+                    {effectiveVideoDurationSeconds
+                      ? formatVideoDuration(effectiveVideoDurationSeconds)
+                      : isResolvingVideoFormat
+                        ? 'Reading duration'
+                        : 'Duration unknown'}
+                  </span>
+                </div>
+
+                <p className="mt-3 text-xs text-sky-700">
+                  Videos shorter than 3 minutes are treated as short-form. Long-form-only helpers stay hidden for short uploads.
+                </p>
+
+                {videoFormatError ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    {videoFormatError}
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <Button
@@ -569,10 +687,10 @@ export function MetaUploadModal({
             </div>
           </div>
 
-          {!isShortVideo ? (
+          {resolvedVideoFormatKind === 'long' ? (
             <WallpaperGeneratorSection
               isOpen={isOpen}
-              isShortVideo={isShortVideo}
+              isShortVideo={resolvedIsShortVideo}
               script={script}
               scriptCharacters={scriptCharacters}
               disabled={isBusy}
@@ -767,7 +885,7 @@ export function MetaUploadModal({
                   </div>
                   <div>
                     <div className="font-semibold text-gray-900">Instagram</div>
-                    <div className="text-sm text-gray-600">{isShortVideo ? 'Publish as Reel' : 'Publish as video post'}</div>
+                    <div className="text-sm text-gray-600">{resolvedIsShortVideo ? 'Publish as Reel' : 'Publish as video post'}</div>
                   </div>
                 </div>
               </button>
