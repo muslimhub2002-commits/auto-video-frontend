@@ -1,244 +1,81 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
-import { MoreVertical, Plus, Trash2, MessageSquare, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { Accordion } from '@/components/ui/accordion';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Clapperboard, FileText, UserRound } from 'lucide-react';
 import type { User } from '@/lib/auth';
-import { useToast } from '@/components/ui/toast';
+import { SidebarFooter } from './sidebar/SidebarFooter';
+import { SidebarItemButton } from './sidebar/SidebarItemButton';
+import { SidebarItemList } from './sidebar/SidebarItemList';
+import { SidebarSection } from './sidebar/SidebarSection';
+import {
+  normalizeScriptCategory,
+  scriptPlatforms,
+  utilityItems,
+  videoPlatforms,
+} from './sidebar/sidebar-data';
 
 interface SidebarProps {
   user: User | null;
   isOpen: boolean;
   onLogout: () => void;
-  onNewGeneration: () => void;
-  onSelectChat: (chatId: string | null) => void;
-  activeChatId: string | null;
 }
 
-interface ChatSummary {
-  id: string;
-  title: string | null;
-  created_at: string;
-}
+export function Sidebar({ user, isOpen, onLogout }: SidebarProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeScriptCategory =
+    pathname === '/scripts'
+      ? normalizeScriptCategory(searchParams.get('category'))
+      : null;
 
-// Simple in-memory cache so we only hit the chats API once
-// per user during the app lifetime (except when explicitly
-// loading more pages).
-let cachedChats: ChatSummary[] | null = null;
-let cachedPage = 1;
-let cachedHasMore = true;
-let cachedUserId: string | null = null;
-
-export function Sidebar({ user, isOpen, onLogout, onNewGeneration, onSelectChat, activeChatId }: SidebarProps) {
-  const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
-  const [openMenuChatId, setOpenMenuChatId] = useState<string | null>(null);
-  const [isDeletingChatId, setIsDeletingChatId] = useState<string | null>(null);
-  const { showToast, ToastContainer } = useToast();
-
-  const fetchChats = async (pageToLoad = 1) => {
-    setIsLoading(true);
-    try {
-      const res = await api.get<{ items: ChatSummary[]; total: number; page: number; limit: number }>(
-        '/chats',
-        { params: { page: pageToLoad, limit: 20 } },
-      );
-      const data = res.data;
-      if (pageToLoad === 1) {
-        const items = data.items || [];
-        setChats(items);
-        cachedChats = items;
-      } else {
-        setChats((prev) => {
-          const merged = [...prev, ...(data.items || [])];
-          cachedChats = merged;
-          return merged;
-        });
-      }
-      setPage(data.page);
-      cachedPage = data.page;
-      const loadedCount = (data.page - 1) * data.limit + data.items.length;
-      const more = loadedCount < data.total;
-      setHasMore(more);
-      cachedHasMore = more;
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to load chats', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!user) return;
-
-    // If we already have chats cached for this user, reuse them
-    if (cachedChats && cachedUserId === user.id) {
-      setChats(cachedChats);
-      setPage(cachedPage);
-      setHasMore(cachedHasMore);
-      return;
-    }
-
-    cachedUserId = user.id;
-    fetchChats(1);
-  }, [user]);
-
-  useEffect(() => {
-    if (!openMenuChatId) return;
-
-    const onDocumentClick = () => setOpenMenuChatId(null);
-    document.addEventListener('click', onDocumentClick);
-    return () => document.removeEventListener('click', onDocumentClick);
-  }, [openMenuChatId]);
-
-  const handleSelectChat = (chatId: string) => {
-    onSelectChat(chatId);
-  };
-
-  const handleDeleteChat = async (chatId: string) => {
-    setIsDeletingChatId(chatId);
-    try {
-      await api.delete(`/chats/${chatId}`);
-
-      setChats((prev) => {
-        const next = prev.filter((c) => c.id !== chatId);
-        cachedChats = next;
-        return next;
-      });
-
-      if (activeChatId === chatId) {
-        onSelectChat(null);
-      }
-
-      showToast('Chat deleted successfully', 'success');
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to delete chat', error);
-      showToast('Failed to delete chat', 'error');
-    } finally {
-      setOpenMenuChatId(null);
-      setIsDeletingChatId(null);
-    }
-  };
   return (
     <div
-      className={`${isOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-gray-50 border-r border-gray-200 flex flex-col overflow-hidden`}
+      className={`${isOpen ? 'w-72' : 'w-0'} flex flex-col overflow-hidden border-r border-slate-200/80 bg-linear-to-b from-stone-100 via-white to-slate-100 transition-all duration-300`}
     >
-      <ToastContainer />
-      <div className="p-4 space-y-2">
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 text-gray-900 hover:bg-gray-200"
-          onClick={onNewGeneration}
-        >
-          <Plus className="h-4 w-4" />
-          New Generation
-        </Button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-2">
-        <div className="text-xs text-gray-500 px-3 py-2">Chats</div>
-        <div className="space-y-1">
-          {chats.map((chat) => (
-            <div
-              key={chat.id}
-              className={`w-full px-2 py-1 text-sm rounded-md flex items-center gap-2 ${
-                activeChatId === chat.id
-                  ? 'bg-linear-to-r from-indigo-500 to-purple-600 text-white shadow-sm'
-                  : 'bg-transparent hover:bg-gray-200 text-gray-700'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => handleSelectChat(chat.id)}
-                className="flex flex-1 min-w-0 items-center gap-2 text-left px-1 py-1"
-              >
-                <MessageSquare className="h-3 w-3 shrink-0" />
-                <span className="truncate">{chat.title || 'Untitled Chat'}</span>
-              </button>
-
-              <div className="relative">
-                <button
-                  type="button"
-                  aria-label="Chat options"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpenMenuChatId((prev) => (prev === chat.id ? null : chat.id));
-                  }}
-                  className={`p-1 rounded-md ${
-                    activeChatId === chat.id
-                      ? 'hover:bg-white/15'
-                      : 'hover:bg-gray-300'
-                  }`}
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </button>
-
-                {openMenuChatId === chat.id && (
-                  <div
-                    className="absolute right-0 mt-2 w-40 rounded-md border border-gray-200 bg-white shadow-md z-20 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteChat(chat.id)}
-                      disabled={isDeletingChatId === chat.id}
-                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-100 flex items-center gap-2 disabled:opacity-50 rounded-md transition-colors"
-                    >
-                      {isDeletingChatId === chat.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                      {isDeletingChatId === chat.id ? 'Deleting...' : 'Delete chat'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="px-3 py-2 text-xs text-gray-400">Loading...</div>
-          )}
-          {!isLoading && hasMore && (
-            <button
-              type="button"
-              onClick={() => fetchChats(page + 1)}
-              className="w-full text-left px-3 py-2 text-xs rounded-md text-blue-600 hover:bg-blue-50"
-            >
-              Load more
-            </button>
-          )}
-          {!isLoading && chats.length === 0 && (
-            <div className="px-3 py-2 text-xs text-gray-400">
-              No chats yet. Generate and save a video to get started.
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-sm font-semibold">
-            {user?.email?.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{user?.email}</p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onLogout}
-            className="text-gray-600 hover:text-gray-900 hover:bg-gray-200"
+      <div className="flex-1 px-4 py-4">
+        <Accordion type="multiple" defaultValue={[]} className="space-y-4">
+          <SidebarSection
+            value="scripts"
+            title="Scripts"
+            icon={FileText}
+            iconGradient="from-amber-400 via-orange-500 to-rose-500 shadow-orange-200"
           >
-            Logout
-          </Button>
-        </div>
+            <SidebarItemList items={scriptPlatforms} activeCategory={activeScriptCategory} />
+          </SidebarSection>
+
+          <SidebarSection
+            value="videos"
+            title="Videos"
+            icon={Clapperboard}
+            iconGradient="from-sky-400 via-blue-500 to-indigo-600 shadow-sky-200"
+          >
+            <SidebarItemList items={videoPlatforms} />
+          </SidebarSection>
+
+          <SidebarSection
+            value="workspace"
+            title="Workspace"
+            icon={UserRound}
+            iconGradient="from-emerald-400 via-teal-500 to-cyan-600 shadow-emerald-200"
+          >
+            <div className="space-y-2">
+              {utilityItems.map((item) => {
+                return (
+                  <SidebarItemButton
+                    key={item.label}
+                    label={item.label}
+                    description={item.description}
+                    icon={item.icon}
+                    badgeClassName="border-slate-200 bg-white text-slate-700"
+                  />
+                );
+              })}
+            </div>
+          </SidebarSection>
+        </Accordion>
       </div>
+      <SidebarFooter user={user} onLogout={onLogout} />
     </div>
   );
 }

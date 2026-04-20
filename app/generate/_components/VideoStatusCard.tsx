@@ -23,9 +23,6 @@ interface VideoStatusCardProps {
         isProphet: boolean;
         isWoman: boolean;
     }>;
-    onSaveGeneration: () => Promise<void>;
-    isSavingGeneration: boolean;
-    canSaveGeneration: boolean;
     onRetry?: () => void;
 }
 

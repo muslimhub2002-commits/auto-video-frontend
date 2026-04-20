@@ -2,22 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type ChangeEvent } from 'react';
 import { flushSync } from 'react-dom';
-import { useRouter, useParams } from 'next/navigation';
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from '@/components/ui/accordion';
+import { Accordion } from '@/components/ui/accordion';
 import {
   Video,
-  Image as ImageIcon,
-  FileText,
-  Play,
-  Mic,
-  Sparkles,
-  MessageSquare,
-  RotateCcw,
 } from 'lucide-react';
 import { Sidebar } from './_components/Sidebar';
 import { HeaderBar } from './_components/HeaderBar';
@@ -1582,9 +1569,6 @@ export function GeneratePageInner() {
   ] as const;
 
   const { user, isLoading, handleLogout } = useAuthGuard();
-  const router = useRouter();
-  const params = useParams<{ id?: string }>();
-  const routeChatId = typeof params?.id === 'string' ? params.id : null;
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // When a draft is saved/loaded, we keep its script id so we can attach
@@ -1771,7 +1755,6 @@ export function GeneratePageInner() {
   const [isSplittingIntoShorts, setIsSplittingIntoShorts] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
-  const [isSavingGeneration, setIsSavingGeneration] = useState(false);
   const [voicesByProvider, setVoicesByProvider] = useState<Record<VoiceProvider, VoiceOverOption[]>>({
     google: [],
     elevenlabs: [],
@@ -1835,32 +1818,6 @@ export function GeneratePageInner() {
   const [isSavingSentenceSfxMixBySentenceId, setIsSavingSentenceSfxMixBySentenceId] = useState<Record<string, boolean>>({});
   const [isGeneratingVideoBySentenceId, setIsGeneratingVideoBySentenceId] = useState<Record<string, boolean>>({});
   const [isGeneratingVideoPromptBySentenceId, setIsGeneratingVideoPromptBySentenceId] = useState<Record<string, boolean>>({});
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(
-    routeChatId,
-  );
-  const [selectedChatTitle, setSelectedChatTitle] = useState<string | null>(
-    null,
-  );
-  const [selectedChatMessages, setSelectedChatMessages] = useState<
-    | {
-      id: string;
-      created_at: string;
-      video?: { video: string } | null;
-      voice?: { voice: string } | null;
-      scripts?: {
-        id: string;
-        title: string | null;
-        script: string;
-        sentences?: {
-          id: string;
-          text: string;
-          index: number;
-          image?: { id: string; image: string } | null;
-        }[];
-      }[];
-    }[]
-    | null
-  >(null);
   const [isScriptLibraryOpen, setIsScriptLibraryOpen] = useState(false);
   const [isScriptReferencesOpen, setIsScriptReferencesOpen] = useState(false);
   const [referenceScripts, setReferenceScripts] = useState<ReferenceScriptPayload[]>([]);
@@ -4044,104 +4001,6 @@ export function GeneratePageInner() {
     setSelectedVoiceIdByProvider((prev) => ({ ...prev, [voiceProvider]: voiceId }));
   };
 
-  const handleReuseSavedGeneration = async (
-    msg: {
-      id: string;
-      video?: { video: string } | null;
-      voice?: { voice: string } | null;
-      scripts?: {
-        id: string;
-        title: string | null;
-        script: string;
-        sentences?: BackendSentenceDto[];
-      }[];
-    },
-  ) => {
-    const primaryScript = msg.scripts?.[0];
-    if (!primaryScript?.script) {
-      showAlert('This saved generation is missing a script.', { type: 'warning' });
-      return;
-    }
-
-    setSplitError(null);
-    setRandomScriptError(null);
-    setVoiceError(null);
-
-    // Restore script + sentences/images
-    setScript(primaryScript.script);
-    setOriginalScriptSubject(scriptSubject);
-    setOriginalScriptSubjectContent(
-      scriptSubject === 'religious (Islam)' ? scriptSubjectContent : '',
-    );
-
-    const sortedSentences: BackendSentenceDto[] = (primaryScript.sentences ?? [])
-      .slice()
-      .sort((a, b) => a.index - b.index);
-
-    const now = Date.now();
-    const sentencesForRestore: BackendSentenceDto[] =
-      sortedSentences.length
-        ? sortedSentences
-        : [
-          {
-            id: `${now}-0`,
-            text: primaryScript.script,
-            index: 0,
-            image: null,
-          },
-        ];
-
-    const restored = mapBackendSentencesToUi(sentencesForRestore);
-
-    setSentences(restored);
-
-    // Restore voice-over as a URL reference so large saved voices don't need to be
-    // downloaded into browser memory just to render later.
-    if (msg.voice?.voice) {
-      try {
-        setIsHydratingVoiceOver(true);
-        setVoiceOver(null);
-        setVoiceOverChunks([]);
-        setSavedVoiceId(null);
-        setVoiceLibraryUrl(msg.voice.voice);
-
-        const duration = await getAudioDurationSecondsFromUrl(msg.voice.voice);
-        setVoiceDuration(duration);
-      } catch {
-        setVoiceOver(null);
-        setVoiceOverChunks([]);
-        setVoiceDuration(null);
-        setSavedVoiceId(null);
-        setVoiceLibraryUrl(null);
-        showAlert('Failed to load the saved voice-over. You can re-upload/select a voice.', { type: 'warning' });
-      } finally {
-        setIsHydratingVoiceOver(false);
-      }
-    } else {
-      setIsHydratingVoiceOver(false);
-      setVoiceOver(null);
-      setVoiceOverChunks([]);
-      setVoiceDuration(null);
-      setSavedVoiceId(null);
-      setVoiceLibraryUrl(null);
-    }
-
-    // Restore the generated video URL into the VideoStatusCard area
-    if (msg.video?.video) {
-      setVideoJobError(null);
-      setVideoUrl(msg.video.video);
-      setJobFromResponse(msg.id, 'completed');
-
-      // Smoothly scroll to the video section
-      if (videoSectionRef.current) {
-        videoSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    } else {
-      // Clear the preview if this saved item has no video
-      resetJob();
-    }
-  };
-
   const fetchProviderVoices = async (provider: VoiceProvider) => {
     setIsLoadingVoicesByProvider((prev) => ({ ...prev, [provider]: true }));
     setVoicesErrorByProvider((prev) => ({ ...prev, [provider]: null }));
@@ -5387,43 +5246,6 @@ export function GeneratePageInner() {
     setReferenceScripts([]);
   };
 
-  const handleSelectChat = async (chatId: string | null) => {
-    setSelectedChatId(chatId);
-    setSelectedChatMessages(null);
-    setSelectedChatTitle(null);
-
-    if (!chatId) return;
-
-    try {
-      const res = await api.get<{
-        chat: { id: string; title: string | null };
-        messages: {
-          id: string;
-          created_at: string;
-          video?: { video: string } | null;
-          voice?: { voice: string } | null;
-          scripts?: {
-            id: string;
-            title: string | null;
-            script: string;
-            sentences?: {
-              id: string;
-              text: string;
-              index: number;
-              image?: { id: string; image: string } | null;
-            }[];
-          }[];
-        }[];
-      }>(`/chats/${chatId}/messages`);
-
-      setSelectedChatTitle(res.data.chat.title);
-      setSelectedChatMessages(res.data.messages || []);
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to load chat messages', error);
-    }
-  };
-
   useEffect(() => {
     // Prefetch both providers so switching is instant.
     void Promise.all([fetchProviderVoices('google'), fetchProviderVoices('elevenlabs')]);
@@ -5624,14 +5446,6 @@ export function GeneratePageInner() {
       setIsPreviewingVoice(false);
     }
   };
-
-  // When navigated to /generate/:id, auto-load that chat's messages
-  useEffect(() => {
-    if (routeChatId) {
-      handleSelectChat(routeChatId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeChatId]);
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -10252,108 +10066,6 @@ export function GeneratePageInner() {
     }
   };
 
-  const handleSaveGeneration = async () => {
-    if (!videoUrl) {
-      showAlert('No generated video found to save.', { type: 'warning' });
-      return;
-    }
-
-    if (!script.trim()) {
-      showAlert('Please provide a script before saving.', { type: 'warning' });
-      return;
-    }
-
-    if (!voiceOver) {
-      showAlert('Please provide or select a voice-over before saving.', { type: 'warning' });
-      return;
-    }
-
-    setIsSavingGeneration(true);
-
-    try {
-      // Ensure images are saved and collect image IDs per sentence
-      const sentencePayload: { text: string; image_id?: string; isSuspense?: boolean }[] = [];
-
-      // eslint-disable-next-line no-restricted-syntax
-      for (let index = 0; index < sentences.length; index += 1) {
-        const s = sentences[index];
-        let imageId = s.savedImageId ?? null;
-
-        if (!imageId && (s.image || s.imageUrl)) {
-          let fileToUpload: File | null = null;
-
-          if (s.image) {
-            fileToUpload = s.image;
-          } else if (s.imageUrl?.startsWith('data:')) {
-            fileToUpload = dataUrlToFile(
-              s.imageUrl,
-              `sentence-${index + 1}.png`,
-            );
-          }
-
-          if (fileToUpload) {
-            const formData = new FormData();
-            formData.append('image', fileToUpload);
-            if ((s.imagePrompt ?? '').trim()) {
-              formData.append('prompt', (s.imagePrompt ?? '').trim());
-            }
-
-            const response = await api.post<{ id: string }>(
-              '/images',
-              formData,
-              {
-                headers: {
-                  'Content-Type': 'multipart/form-data',
-                },
-              },
-            );
-
-            imageId = response.data.id;
-          }
-        }
-
-        sentencePayload.push({
-          text: s.text,
-          image_id: imageId ?? undefined,
-          isSuspense: Boolean(s.isSuspense) && !isSubscribeLikeSentence(s.text),
-        });
-      }
-
-      // Ensure we have a persisted voice and get its ID
-      let voiceId = savedVoiceId;
-
-      if (!voiceId) {
-        const saved = await persistVoiceToLibrary(voiceOver);
-        voiceId = saved.id;
-        setSavedVoiceId(voiceId);
-      }
-
-      await api.post('/messages/save-generation', {
-        script,
-        video_url: videoUrl,
-        voice_id: voiceId ?? undefined,
-        sentences: sentencePayload.length > 0 ? sentencePayload : undefined,
-        chat_id: selectedChatId ?? routeChatId ?? undefined,
-        subject: scriptSubject,
-        subject_content:
-          scriptSubject === 'religious (Islam)' ? (scriptSubjectContent || null) : null,
-        length: scriptLength,
-        style: referenceScripts.length > 0 ? null : scriptStyle,
-        technique: scriptTechnique,
-        reference_script_ids:
-          referenceScripts.length > 0 ? referenceScripts.map((s) => s.id) : undefined,
-      });
-
-      showAlert('Saved to your chats successfully.', { type: 'success' });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Save generation failed', error);
-      showAlert('Failed to save this generation. Please try again.', { type: 'error' });
-    } finally {
-      setIsSavingGeneration(false);
-    }
-  };
-
   const handleSaveScriptDraft = async () => {
     if (!script.trim()) {
       showAlert('Please enter or generate a script before saving a draft.', { type: 'warning' });
@@ -11622,20 +11334,6 @@ export function GeneratePageInner() {
         user={user}
         isOpen={isSidebarOpen}
         onLogout={handleLogout}
-        activeChatId={selectedChatId}
-        onNewGeneration={() => {
-          setSelectedChatId(null);
-          setSelectedChatMessages(null);
-          setSelectedChatTitle(null);
-          router.push('/generate');
-        }}
-        onSelectChat={(chatId) => {
-          if (chatId) {
-            router.push(`/generate/${chatId}`);
-          } else {
-            router.push('/generate');
-          }
-        }}
       />
 
       {/* Main Content */}
@@ -11661,176 +11359,6 @@ export function GeneratePageInner() {
                 AI-directed video with professional results
               </p>
             </div>
-
-            {/* Collapsible Chat Messages Section */}
-            {selectedChatMessages && selectedChatMessages.length > 0 && (
-              <div className="bg-linear-to-br from-white to-gray-50 rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
-                <div className="px-6 py-6 border-b border-gray-100 flex items-center gap-3">
-                  <div className="p-2 bg-linear-to-br from-purple-100 to-blue-100 rounded-lg">
-                    <MessageSquare className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <div className="text-left">
-                    <h3 className="text-xl font-bold text-gray-900">
-                      All Videos
-                    </h3>
-                    <p className="text-xs text-gray-600 flex items-center gap-1.5 font-normal">
-                      <Sparkles className="h-3 w-3" />
-                      {selectedChatMessages.length} saved generation{selectedChatMessages.length !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="px-4 pb-6 pt-2">
-                  <Accordion type="multiple" className="w-full space-y-3">
-                    {selectedChatMessages.map((msg) => {
-                      const primaryScript = msg.scripts?.[0];
-                      const sentencesForScript = primaryScript?.sentences || [];
-                      const generationTitle = primaryScript?.title || 'Untitled generation';
-
-                      return (
-                        <AccordionItem
-                          key={msg.id}
-                          value={msg.id}
-                          className="border border-gray-200 rounded-xl bg-white shadow-sm"
-                        >
-                          <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-gray-50 rounded-xl">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full gap-2">
-                              <div className="flex items-center gap-3 w-full">
-                                <div className="p-2 bg-linear-to-br from-purple-100 to-blue-100 rounded-lg">
-                                  <FileText className="h-4 w-4 text-purple-600" />
-                                </div>
-                                <div className="text-left">
-                                  <p className="text-sm font-semibold text-gray-900 line-clamp-1">{generationTitle}</p>
-                                  <p className="text-xs text-gray-500 line-clamp-1">
-                                    {primaryScript?.script.substring(0, 80) || 'Saved generation'}
-                                    {primaryScript?.script && primaryScript.script.length > 80 ? '…' : ''}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2 mx-2">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    void handleReuseSavedGeneration(msg);
-                                  }}
-                                  className="group/reuse relative inline-flex items-center gap-3 px-4 py-2.5 rounded-xl bg-linear-to-r from-purple-500 via-purple-600 to-blue-600 hover:from-purple-600 hover:via-purple-700 hover:to-blue-700 text-white font-semibold text-sm shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-300 overflow-hidden"
-                                  aria-label="Reuse this generation"
-                                  title="Load this configuration into the editor"
-                                >
-                                  {/* Shine effect on hover */}
-                                  <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover/reuse:translate-x-full transition-transform duration-700 skew-x-12"></div>
-
-                                  {/* Icon with smooth rotation */}
-                                  <RotateCcw className="relative h-4 w-4 group-hover/reuse:rotate-360 transition-transform duration-500 ease-out" />
-
-                                  {/* Text */}
-                                  <span className="relative drop-shadow-sm text-sm">Reuse</span>
-                                </button>
-                              </div>
-                            </div>
-                          </AccordionTrigger>
-                          <AccordionContent className="px-5 pb-4 pt-1 space-y-6">
-                            {primaryScript && (
-                              <div className="mb-2">
-                                <div className="flex items-start gap-3 mb-3">
-                                  <div className="p-2 bg-linear-to-br from-purple-100 to-blue-100 rounded-lg">
-                                    <FileText className="h-5 w-5 text-purple-600" />
-                                  </div>
-                                  <h4 className="text-sm font-semibold text-gray-700">Script</h4>
-                                </div>
-                                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line bg-gray-50 rounded-lg p-4 border border-gray-100">
-                                  {primaryScript.script}
-                                </p>
-                              </div>
-                            )}
-
-                            {sentencesForScript.length > 0 && (
-                              <div className="space-y-4 mb-2">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <div className="p-1.5 bg-linear-to-br from-cyan-100 to-blue-100 rounded-lg">
-                                    <ImageIcon className="h-4 w-4 text-cyan-600" />
-                                  </div>
-                                  <h4 className="text-base font-bold text-gray-900">Sentences & Images</h4>
-                                </div>
-                                <div className="space-y-3">
-                                  {sentencesForScript
-                                    .slice()
-                                    .sort((a, b) => a.index - b.index)
-                                    .map((s, idx) => (
-                                      <div
-                                        key={s.id}
-                                        className="group flex flex-col md:flex-row gap-4 rounded-xl border border-gray-200 p-4 bg-linear-to-br from-white to-gray-50 hover:shadow-md transition-all duration-200"
-                                      >
-                                        <div className="flex items-start gap-3 flex-1">
-                                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-linear-to-br from-purple-500 to-blue-500 text-white text-xs font-bold shrink-0">
-                                            {idx + 1}
-                                          </span>
-                                          <div className="text-sm text-gray-800 leading-relaxed">{s.text}</div>
-                                        </div>
-                                        {s.image && (
-                                          <div className="relative w-full md:w-40 h-24 rounded-lg overflow-hidden border-2 border-gray-200 shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                            <img
-                                              src={s.image.image}
-                                              alt="Sentence visual"
-                                              className="w-full h-full object-cover"
-                                            />
-                                            <div className="absolute inset-0 bg-linear-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
-
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-5 mt-4 border-t border-gray-200 items-center">
-                              {msg.video && (
-                                <div className="group relative">
-                                  <div className="absolute -inset-0.5 bg-linear-to-r from-blue-500 via-cyan-500 to-blue-500 rounded-xl opacity-75 group-hover:opacity-100 blur transition duration-200"></div>
-                                  <a
-                                    href={msg.video.video}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="relative flex items-center justify-center gap-3 px-6 py-4 bg-linear-to-r from-blue-600 to-cyan-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200"
-                                  >
-                                    <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                                      <Play className="h-5 w-5 group-hover:scale-110 transition-transform" fill="currentColor" />
-                                    </div>
-                                    <span className="text-base">Watch Video</span>
-                                    <div className="absolute inset-0 bg-white/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                  </a>
-                                </div>
-                              )}
-                              {msg.voice && (
-                                <div className="relative group">
-                                  <div className="absolute -inset-0.5 bg-linear-to-r from-purple-400 via-pink-400 to-purple-400 rounded-xl opacity-50 group-hover:opacity-75 blur transition duration-200"></div>
-                                  <div className="relative flex items-center gap-4 bg-linear-to-br from-purple-50 via-white to-pink-50 rounded-xl p-4 border border-purple-200/50 shadow-md hover:shadow-lg transition-all duration-200">
-                                    <div className="p-3 bg-linear-to-br from-purple-500 to-pink-600 rounded-xl shadow-lg shrink-0">
-                                      <Mic className="h-5 w-5 text-white" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">Voice Over</p>
-                                      <audio
-                                        controls
-                                        src={msg.voice.voice}
-                                        className="w-full h-8"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                      );
-                    })}
-                  </Accordion>
-                </div>
-              </div>
-            )}
 
             {/* Generate Form */}
             <div className="bg-linear-to-br from-white to-gray-50 rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
@@ -12460,9 +11988,6 @@ export function GeneratePageInner() {
                   .join(' ')
                   .trim()}
                 scriptCharacters={scriptCharacters}
-                onSaveGeneration={handleSaveGeneration}
-                isSavingGeneration={isSavingGeneration}
-                canSaveGeneration={!!videoUrl && !!script.trim() && !!voiceOver && sentences.length > 0}
                 onRetry={handleGenerate}
               />
             </div>

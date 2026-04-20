@@ -18,9 +18,6 @@ interface VideoJobSectionProps {
     isProphet: boolean;
     isWoman: boolean;
   }>;
-  onSaveGeneration: () => Promise<void>;
-  isSavingGeneration: boolean;
-  canSaveGeneration: boolean;
   onRetry?: () => void;
 }
 
@@ -33,9 +30,6 @@ export function VideoJobSection({
   scriptId,
   scriptTextForUpload,
   scriptCharacters,
-  onSaveGeneration,
-  isSavingGeneration,
-  canSaveGeneration,
   onRetry,
 }: VideoJobSectionProps) {
   return (
@@ -66,9 +60,6 @@ export function VideoJobSection({
         scriptId={scriptId}
         scriptTextForUpload={scriptTextForUpload}
         scriptCharacters={scriptCharacters}
-        onSaveGeneration={onSaveGeneration}
-        isSavingGeneration={isSavingGeneration}
-        canSaveGeneration={canSaveGeneration}
         onRetry={onRetry}
       />
     </>
