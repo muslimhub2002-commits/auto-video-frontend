@@ -471,6 +471,17 @@ type MaterializedBackgroundSoundtrackAsset = {
   objectUrl: string;
 };
 
+type RenderSoundEffectMaterializationSource = {
+  title?: string | null;
+  url?: string | null;
+  durationSeconds?: number | null;
+  audioSettings?: SoundEffectAudioSettings | null;
+};
+
+const RENDER_SOUND_EFFECT_MATERIALIZATION_CONCURRENCY = 4;
+const RENDER_SOUND_EFFECT_UPLOAD_FOLDER =
+  'auto-video-generator/render-sound-effects';
+
 const normalizeBackgroundSoundtrackItem = (
   item: Partial<BackgroundSoundtrackItem> | null | undefined,
 ): BackgroundSoundtrackItem => {
@@ -1537,6 +1548,11 @@ type ScriptIdeaRequestPayload = {
   title: string;
 };
 
+type GenerateLibrariesBootstrapState = {
+  userId: string | null;
+  status: 'idle' | 'loading' | 'loaded';
+};
+
 type TransitionSoundDraftItem = NonNullable<SentenceItem['transitionSoundEffects']>;
 type SentenceImageSlot = 'primary' | 'secondary';
 
@@ -1570,6 +1586,7 @@ export function GeneratePageInner() {
   ] as const;
 
   const { user, isLoading, handleLogout } = useAuthGuard();
+  const authenticatedUserId = String(user?.id ?? '').trim();
   const router = useRouter();
   const searchParams = useSearchParams();
   const pendingScriptHandoffId =
@@ -1693,6 +1710,12 @@ export function GeneratePageInner() {
   const previousVoiceOverChunkUrlsRef = useRef<Record<string, string | null>>({});
   const backgroundSoundtrackAssetCacheRef =
     useRef<Map<string, MaterializedBackgroundSoundtrackAsset>>(new Map());
+  const backgroundSoundtrackAssetInFlightRef =
+    useRef<Map<string, Promise<MaterializedBackgroundSoundtrackAsset | null>>>(new Map());
+  const generateLibrariesBootstrapRef = useRef<GenerateLibrariesBootstrapState>({
+    userId: null,
+    status: 'idle',
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [backgroundSoundtracks, setBackgroundSoundtracks] = useState<BackgroundSoundtrackItem[]>([]);
@@ -2958,7 +2981,7 @@ export function GeneratePageInner() {
     };
   }
 
-  const buildRenderSentencePayload = (
+  const buildRenderSentencePayload = async (
     sourceSentences: SentenceItem[],
     options?: {
       clearLastTransition?: boolean;
@@ -2971,7 +2994,165 @@ export function GeneratePageInner() {
       >;
     },
   ) => {
-    return sourceSentences.map((s, index) => {
+    const materializationCache = new Map<
+      string,
+      Promise<{
+        uploadedUrl: string;
+        durationSeconds: number | null;
+      }>
+    >();
+
+    const materializeRenderSoundEffect = async (
+      source: RenderSoundEffectMaterializationSource,
+    ) => {
+      const sourceUrl = String(source.url ?? '').trim();
+      if (!sourceUrl) {
+        return {
+          uploadedUrl: '',
+          durationSeconds: null,
+        };
+      }
+
+      const normalizedAudioSettings = normalizeSoundEffectAudioSettings(
+        source.audioSettings,
+      );
+      const cacheKey = JSON.stringify({
+        sourceUrl,
+        audioSettings: normalizedAudioSettings,
+      });
+      const cached = materializationCache.get(cacheKey);
+      if (cached) {
+        return await cached;
+      }
+
+      const request = (async () => {
+        const rendered = await renderEditedAudioFile({
+          sourceUrl,
+          values: {
+            name: String(source.title ?? '').trim() || 'sound-effect',
+            volumePercent: 100,
+            audioSettings: normalizedAudioSettings,
+          },
+          fallbackName: String(source.title ?? '').trim() || 'sound-effect',
+        });
+
+        const uploadedUrl = await uploadManagedFile(rendered.file, {
+          resourceType: 'audio',
+          folder: RENDER_SOUND_EFFECT_UPLOAD_FOLDER,
+        });
+
+        return {
+          uploadedUrl,
+          durationSeconds:
+            rendered.durationSeconds > 0 ? rendered.durationSeconds : null,
+        };
+      })();
+
+      materializationCache.set(cacheKey, request);
+
+      try {
+        return await request;
+      } finally {
+        if (materializationCache.get(cacheKey) === request) {
+          materializationCache.delete(cacheKey);
+        }
+      }
+    };
+
+    const materializeSentenceSoundEffectsForRender = async (
+      items: SentenceSoundEffectItem[] | null | undefined,
+    ): Promise<SentenceSoundEffectItem[]> => {
+      if (!Array.isArray(items) || items.length === 0) return [];
+
+      return await mapWithConcurrency(
+        items,
+        RENDER_SOUND_EFFECT_MATERIALIZATION_CONCURRENCY,
+        async (item) => {
+          const sourceUrl = String(item?.url ?? '').trim();
+          if (!sourceUrl) return item;
+
+          const effectiveAudioSettings = normalizeSoundEffectAudioSettings(
+            item.audioSettings ?? item.defaultAudioSettings,
+          );
+
+          if (
+            areSoundEffectAudioSettingsEqual(
+              effectiveAudioSettings,
+              DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+            )
+          ) {
+            return item;
+          }
+
+          const materialized = await materializeRenderSoundEffect({
+            title: item.title,
+            url: sourceUrl,
+            durationSeconds: item.durationSeconds ?? null,
+            audioSettings: effectiveAudioSettings,
+          });
+
+          return {
+            ...item,
+            url: materialized.uploadedUrl || sourceUrl,
+            durationSeconds:
+              typeof materialized.durationSeconds === 'number' &&
+              Number.isFinite(materialized.durationSeconds)
+                ? Math.max(0, materialized.durationSeconds)
+                : item.durationSeconds ?? null,
+            audioSettings: cloneSoundEffectAudioSettings(
+              DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+            ),
+            defaultAudioSettings: cloneSoundEffectAudioSettings(
+              DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+            ),
+          };
+        },
+      );
+    };
+
+    const materializeTransitionSoundEffectsForRender = async (
+      items: SentenceItem['transitionSoundEffects'],
+    ) => {
+      if (!Array.isArray(items) || items.length === 0) return [];
+
+      return await mapWithConcurrency(
+        items,
+        RENDER_SOUND_EFFECT_MATERIALIZATION_CONCURRENCY,
+        async (item) => {
+          const sourceUrl = String(item?.url ?? '').trim();
+          if (!sourceUrl) return item;
+
+          const effectiveAudioSettings = normalizeSoundEffectAudioSettings(
+            item.audioSettings,
+          );
+
+          if (
+            areSoundEffectAudioSettingsEqual(
+              effectiveAudioSettings,
+              DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+            )
+          ) {
+            return item;
+          }
+
+          const materialized = await materializeRenderSoundEffect({
+            title: item.title,
+            url: sourceUrl,
+            audioSettings: effectiveAudioSettings,
+          });
+
+          return {
+            ...item,
+            url: materialized.uploadedUrl || sourceUrl,
+            audioSettings: cloneSoundEffectAudioSettings(
+              DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+            ),
+          };
+        },
+      );
+    };
+
+    return await Promise.all(sourceSentences.map(async (s, index) => {
       const text = String(s.text ?? '');
       const trimmed = text.trim();
       const tab = resolveSentenceSceneTab(s);
@@ -3007,16 +3188,26 @@ export function GeneratePageInner() {
             ? s.overlaySoundEffects
             : [];
 
+      const materializedSentenceSoundEffects =
+        await materializeSentenceSoundEffectsForRender(s.soundEffects);
+      const materializedDetachedSoundEffects =
+        await materializeSentenceSoundEffectsForRender(activeDetachedSoundEffects);
+
       const soundEffects = [
         ...toRenderSoundEffects(
-          s.soundEffects,
+          materializedSentenceSoundEffects,
           s.alignSoundEffectsToSceneEnd === true,
         ),
-        ...toRenderSoundEffects(activeDetachedSoundEffects),
+        ...toRenderSoundEffects(materializedDetachedSoundEffects),
       ];
 
-      const transitionSoundEffects = Array.isArray(s.transitionSoundEffects)
-        ? s.transitionSoundEffects
+      const materializedTransitionSoundEffects =
+        await materializeTransitionSoundEffectsForRender(
+          s.transitionSoundEffects,
+        );
+
+      const transitionSoundEffects = Array.isArray(materializedTransitionSoundEffects)
+        ? materializedTransitionSoundEffects
           .filter((e) => Boolean(e?.url))
           .map((e) => ({
             src: String(e.url).trim(),
@@ -3172,7 +3363,7 @@ export function GeneratePageInner() {
         ...soundEffectsAlignPatch,
         ...transitionSoundEffectsPatch,
       };
-    });
+    }));
   };
 
   const prepareImageUploadsForRender = async (sourceSentences: SentenceItem[]) => {
@@ -3971,15 +4162,12 @@ export function GeneratePageInner() {
         useLocalRenderTransport,
       );
 
-      form.append(
-        'sentences',
-        JSON.stringify(
-          buildRenderSentencePayload(selectedSentences, {
-            clearLastTransition: true,
-            overlayTransportByIndex: overlayTransportAssets,
-          }),
-        ),
-      );
+      const testSentencePayload = await buildRenderSentencePayload(selectedSentences, {
+        clearLastTransition: true,
+        overlayTransportByIndex: overlayTransportAssets,
+      });
+
+      form.append('sentences', JSON.stringify(testSentencePayload));
       form.append('scriptLength', scriptLength);
       form.append('language', scriptLanguage);
       if (audioDurationSeconds && audioDurationSeconds > 0) {
@@ -5012,28 +5200,45 @@ export function GeneratePageInner() {
         return cached;
       }
 
-      const rendered = await renderEditedAudioFile({
-        sourceUrl: normalizedItem.url,
-        values: {
-          name: normalizedItem.title,
-          volumePercent: 100,
-          audioSettings:
-            normalizedItem.audio_settings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
-        },
-        fallbackName: normalizedItem.title || 'background-soundtrack',
-      });
+      const inFlight = backgroundSoundtrackAssetInFlightRef.current.get(cacheKey);
+      if (inFlight) {
+        return await inFlight;
+      }
 
-      const asset: MaterializedBackgroundSoundtrackAsset = {
-        cacheKey,
-        soundtrackId: normalizedItem.id,
-        sourceUrl: normalizedItem.url,
-        title: normalizedItem.title,
-        file: rendered.file,
-        objectUrl: URL.createObjectURL(rendered.file),
-      };
+      const request = (async () => {
+        const rendered = await renderEditedAudioFile({
+          sourceUrl: normalizedItem.url,
+          values: {
+            name: normalizedItem.title,
+            volumePercent: 100,
+            audioSettings:
+              normalizedItem.audio_settings ?? DEFAULT_SOUND_EFFECT_AUDIO_SETTINGS,
+          },
+          fallbackName: normalizedItem.title || 'background-soundtrack',
+        });
 
-      backgroundSoundtrackAssetCacheRef.current.set(cacheKey, asset);
-      return asset;
+        const asset: MaterializedBackgroundSoundtrackAsset = {
+          cacheKey,
+          soundtrackId: normalizedItem.id,
+          sourceUrl: normalizedItem.url,
+          title: normalizedItem.title,
+          file: rendered.file,
+          objectUrl: URL.createObjectURL(rendered.file),
+        };
+
+        backgroundSoundtrackAssetCacheRef.current.set(cacheKey, asset);
+        return asset;
+      })();
+
+      backgroundSoundtrackAssetInFlightRef.current.set(cacheKey, request);
+
+      try {
+        return await request;
+      } finally {
+        if (backgroundSoundtrackAssetInFlightRef.current.get(cacheKey) === request) {
+          backgroundSoundtrackAssetInFlightRef.current.delete(cacheKey);
+        }
+      }
     },
     [buildBackgroundSoundtrackMaterializationCacheKey],
   );
@@ -5110,7 +5315,10 @@ export function GeneratePageInner() {
   ]);
 
   useEffect(() => {
+    const inFlightBackgroundSoundtrackAssets = backgroundSoundtrackAssetInFlightRef.current;
+
     return () => {
+      inFlightBackgroundSoundtrackAssets.clear();
       revokeCachedBackgroundSoundtrackAssets();
     };
   }, [revokeCachedBackgroundSoundtrackAssets]);
@@ -5282,26 +5490,64 @@ export function GeneratePageInner() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
-    fetchBackgroundSoundtracks();
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) {
+    if (!authenticatedUserId) {
+      generateLibrariesBootstrapRef.current = {
+        userId: null,
+        status: 'idle',
+      };
+      setBackgroundSoundtracks([]);
+      setBackgroundSoundtracksError(null);
+      setIsLoadingBackgroundSoundtracks(false);
+      setSelectedBackgroundSoundtrackValue('__default__');
+      setBackgroundSoundtrackVolumePercent(100);
       setImageFilterPresets([]);
       setMotionEffectPresets([]);
       setTextAnimationPresets([]);
       setOverlayPresets([]);
+      setIsLoadingImageFilterPresets(false);
+      setIsLoadingMotionEffectPresets(false);
+      setIsLoadingTextAnimationPresets(false);
+      setIsLoadingOverlayPresets(false);
       return;
     }
 
-    void Promise.all([
-      fetchImageFilterPresets(),
-      fetchMotionEffectPresets(),
-      fetchTextAnimationPresets(),
-      fetchOverlayPresets(),
-    ]);
-  }, [user]);
+    const bootstrapState = generateLibrariesBootstrapRef.current;
+    if (
+      bootstrapState.userId === authenticatedUserId &&
+      bootstrapState.status !== 'idle'
+    ) {
+      return;
+    }
+
+    bootstrapState.userId = authenticatedUserId;
+    bootstrapState.status = 'loading';
+
+    let cancelled = false;
+
+    const bootstrapLibraries = async () => {
+      await Promise.all([
+        fetchBackgroundSoundtracks(),
+        fetchImageFilterPresets(),
+        fetchMotionEffectPresets(),
+        fetchTextAnimationPresets(),
+        fetchOverlayPresets(),
+      ]);
+
+      if (cancelled) return;
+      if (generateLibrariesBootstrapRef.current.userId !== authenticatedUserId) {
+        return;
+      }
+
+      generateLibrariesBootstrapRef.current.status = 'loaded';
+    };
+
+    void bootstrapLibraries();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticatedUserId]);
 
   const stopVoicePreview = () => {
     try {
@@ -6768,7 +7014,7 @@ export function GeneratePageInner() {
         sentences,
         useLocalRenderTransport,
       );
-      const sentencePayload = buildRenderSentencePayload(sentences, {
+      const sentencePayload = await buildRenderSentencePayload(sentences, {
         overlayTransportByIndex: overlayTransportAssets,
       });
       const requiresMultipartTextBackgroundVideos =
