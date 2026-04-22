@@ -59,7 +59,7 @@ export function VideosPageInner({
     videoPlatforms.find((item) => item.category === activePlatform) ??
     videoPlatforms[0];
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [videos, setVideos] = useState<VideoListItem[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -543,12 +543,17 @@ export function VideosPageInner({
 
   return (
     <div className="flex min-h-screen bg-slate-100">
-      <Sidebar user={user} isOpen={isSidebarOpen} onLogout={handleLogout} />
+      <Sidebar
+        user={user}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        onLogout={handleLogout}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <HeaderBar onToggleSidebar={() => setIsSidebarOpen((current) => !current)} />
-
         <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.16),transparent_24%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+          <HeaderBar onToggleSidebar={() => setIsSidebarOpen((current) => !current)} />
+
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 xl:px-8">
             <section className="relative overflow-hidden rounded-[36px] border border-white/80 bg-white/90 p-6 shadow-[0_30px_80px_-42px_rgba(15,23,42,0.55)] lg:p-8">
               <div className="absolute -left-20 top-0 h-48 w-48 rounded-full bg-sky-300/20 blur-3xl" />

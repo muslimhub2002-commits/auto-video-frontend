@@ -1594,7 +1594,7 @@ export function GeneratePageInner() {
   const [isLoadingScriptHandoff, setIsLoadingScriptHandoff] = useState(
     () => Boolean(pendingScriptHandoffId),
   );
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // When a draft is saved/loaded, we keep its script id so we can attach
   // sentence-level media (start/end frames, per-sentence video) without
@@ -4804,6 +4804,7 @@ export function GeneratePageInner() {
                   'slideCutFast',
                   effectiveIsShort,
                 ),
+                textSoundEffects: [],
               }
             : sentence,
         ),
@@ -11669,15 +11670,17 @@ export function GeneratePageInner() {
       <Sidebar
         user={user}
         isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
         onLogout={handleLogout}
       />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        <HeaderBar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
-
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+        <div className="flex-1 overflow-y-auto bg-gray-50">
+          <HeaderBar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
+
+          <div className="p-4">
           <div className="max-w-4xl mx-auto space-y-6">
             {/* Header */}
             <div className="text-center py-12 relative">
@@ -12340,6 +12343,7 @@ export function GeneratePageInner() {
                 >
                   {isSyncingVoices && (
                     <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+            </div>
                   )}
                   {isSyncingVoices ? 'Syncing...' : 'Sync Voices Now'}
                 </button>
@@ -12348,6 +12352,7 @@ export function GeneratePageInner() {
                 <p className="text-xs text-gray-600">{syncVoicesResult}</p>
               )}
             </div> */}
+          </div>
           </div>
         </div>
       </div>

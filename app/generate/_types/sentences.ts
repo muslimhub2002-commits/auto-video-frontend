@@ -50,7 +50,15 @@ export type SentenceItem = {
   imageEffectsMode?: 'quick' | 'detailed';
   alignSoundEffectsToSceneEnd?: boolean;
   textAnimationEffect?:
+    | 'popInBounceHook'
     | 'slideCutFast'
+    | 'scalePunchZoom'
+    | 'maskReveal'
+    | 'glitchFlashHook'
+    | 'kineticTypography'
+    | 'softRiseFade'
+    | 'centerWipeReveal'
+    | 'trackingSnapHook'
     | null;
   textAnimationText?: string | null;
   customTextAnimationId?: string | null;

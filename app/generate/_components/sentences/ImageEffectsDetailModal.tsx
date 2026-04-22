@@ -84,6 +84,7 @@ import {
   DEFAULT_TEXT_ANIMATION_WORD_DELAY,
   getDefaultTextAnimationSettings,
   getTextAnimationEffectLabel,
+  normalizeTextAnimationText,
   normalizeTextAnimationSettings,
   resolveTextAnimationEffectFromSettings,
   resolveTextAnimationText,
@@ -1712,6 +1713,7 @@ export function ImageEffectsDetailModal({
     setDraftTextAnimationEffect(effect);
     setDraftCustomTextAnimationId(null);
     setDraftTextAnimationSettings(getDefaultTextAnimationSettings(effect, isShortVideo));
+    setDraftTextSoundEffects([]);
     setTextActionError(null);
   };
 
@@ -2129,6 +2131,7 @@ export function ImageEffectsDetailModal({
         setDraftTextAnimationSettings(
           getDefaultTextAnimationSettings(fallbackEffect, isShortVideo),
         );
+        setDraftTextSoundEffects([]);
         setTextSaveTitle('');
         setDeletePresetKind(null);
       }
@@ -2919,8 +2922,10 @@ export function ImageEffectsDetailModal({
                   <label className="space-y-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Hook text</span>
                     <Input
-                      value={draftTextAnimationText}
-                      onChange={(e) => setDraftTextAnimationText(e.target.value)}
+                      value={normalizeTextAnimationText(draftTextAnimationText)}
+                      onChange={(e) =>
+                        setDraftTextAnimationText(normalizeTextAnimationText(e.target.value))
+                      }
                       placeholder={resolveTextAnimationText(null, sentenceText)}
                       className="h-11 rounded-xl border-slate-200"
                     />
