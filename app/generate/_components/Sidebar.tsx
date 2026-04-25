@@ -125,12 +125,18 @@ export function Sidebar({ user, isOpen, onClose, onLogout }: SidebarProps) {
         >
           <div className="space-y-2">
             {utilityItems.map((item) => {
+              const isUtilityActive = item.href
+                ? pathname === item.href || pathname.startsWith(`${item.href}/`)
+                : false;
+
               return (
                 <SidebarItemButton
                   key={item.label}
                   label={item.label}
                   description={item.description}
                   icon={item.icon}
+                  href={item.href}
+                  isActive={isUtilityActive}
                   badgeClassName="border-slate-200 bg-white text-slate-700"
                 />
               );

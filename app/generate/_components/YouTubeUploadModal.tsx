@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Loader2, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { youtubeApi } from '@/lib/api';
+import { api, youtubeApi } from '@/lib/api';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import {
   formatVideoDuration,
@@ -27,6 +28,12 @@ import {
   YOUTUBE_WALLPAPER_THEME,
   type SocialUploadScriptCharacter,
 } from './social/WallpaperGeneratorSection';
+import {
+  getInitialUploadSocialAccountId,
+  getUploadSocialAccountStatusLabel,
+  type UploadSocialAccountProviderResponse,
+  type UploadSocialAccountSummaryItem,
+} from './social/social-account-upload';
 
 interface YouTubeUploadModalProps {
   isOpen: boolean;
@@ -55,6 +62,7 @@ export function YouTubeUploadModal({
   scriptCharacters,
   onUploaded,
 }: YouTubeUploadModalProps) {
+  const router = useRouter();
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -88,6 +96,12 @@ export function YouTubeUploadModal({
     useState<number | null>(videoDurationSeconds ?? null);
   const [isResolvingVideoFormat, setIsResolvingVideoFormat] = useState(false);
   const [videoFormatError, setVideoFormatError] = useState<string | null>(null);
+  const [youtubeAccounts, setYouTubeAccounts] = useState<
+    UploadSocialAccountSummaryItem[]
+  >([]);
+  const [selectedYouTubeAccountId, setSelectedYouTubeAccountId] = useState('');
+  const [isCheckingSavedYouTubeAccounts, setIsCheckingSavedYouTubeAccounts] =
+    useState(false);
 
   const effectiveVideoDurationSeconds =
     typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
@@ -224,6 +238,52 @@ export function YouTubeUploadModal({
   }, [isOpen, scheduledDate]);
 
   useEffect(() => {
+    if (!isOpen) {
+      setYouTubeAccounts([]);
+      setSelectedYouTubeAccountId('');
+      setIsCheckingSavedYouTubeAccounts(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsCheckingSavedYouTubeAccounts(true);
+
+    void api
+      .get<UploadSocialAccountProviderResponse>('/social-accounts/youtube')
+      .then((response) => {
+        if (!cancelled) {
+          setYouTubeAccounts(response.data.items ?? []);
+          setSelectedYouTubeAccountId((currentValue) => {
+            const availableIds = new Set(
+              (response.data.items ?? []).map((account) => account.id),
+            );
+
+            if (currentValue && availableIds.has(currentValue)) {
+              return currentValue;
+            }
+
+            return getInitialUploadSocialAccountId(response.data);
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setYouTubeAccounts([]);
+          setSelectedYouTubeAccountId('');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCheckingSavedYouTubeAccounts(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) onClose();
     };
@@ -320,9 +380,22 @@ export function YouTubeUploadModal({
   const handleConnectYouTube = async () => {
     setUploadError(null);
     setUploadedYoutubeUrl(null);
+
+    if (isMissingSavedYouTubeAccount) {
+      setUploadError(
+        'Add a YouTube social account from the Social Accounts page before connecting or uploading.',
+      );
+      return;
+    }
+
+    if (!selectedYouTubeAccountId) {
+      setUploadError('Select a saved YouTube account before connecting.');
+      return;
+    }
+
     setIsConnectingYouTube(true);
     try {
-      await startYoutubeReconnect();
+      await startYoutubeReconnect(selectedYouTubeAccountId);
     } catch (err: unknown) {
       setUploadError(
         getApiErrorMessage(err, 'Failed to start YouTube connection.'),
@@ -335,6 +408,18 @@ export function YouTubeUploadModal({
   const handleYouTubeUpload = async () => {
     setUploadError(null);
     setUploadedYoutubeUrl(null);
+
+    if (isMissingSavedYouTubeAccount) {
+      setUploadError(
+        'Add a YouTube social account from the Social Accounts page before uploading.',
+      );
+      return;
+    }
+
+    if (!selectedYouTubeAccountId) {
+      setUploadError('Select a saved YouTube account before uploading.');
+      return;
+    }
 
     if (!videoUrl) {
       setUploadError('Missing video URL. Generate the video first.');
@@ -392,6 +477,7 @@ export function YouTubeUploadModal({
         scriptId?: string | null;
       }>('/youtube/upload', {
           videoUrl: publicVideoUrl,
+          socialAccountId: selectedYouTubeAccountId,
           title: youtubeTitle,
           description: youtubeDescription,
           tags,
@@ -442,6 +528,12 @@ export function YouTubeUploadModal({
     cloudinaryStage !== 'idle' ||
     isConnectingYouTube ||
     isWallpaperBusy;
+  const hasSavedYouTubeAccount = youtubeAccounts.length > 0;
+  const selectedYouTubeAccount = youtubeAccounts.find(
+    (account) => account.id === selectedYouTubeAccountId,
+  );
+  const isMissingSavedYouTubeAccount =
+    !isCheckingSavedYouTubeAccounts && !hasSavedYouTubeAccount;
 
   return (
     <div
@@ -521,6 +613,85 @@ export function YouTubeUploadModal({
                   Videos shorter than 3 minutes are treated as short-form. Long-form-only options stay hidden for short videos.
                 </p>
 
+                {isCheckingSavedYouTubeAccounts ? (
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white/90 px-3 py-2 text-sm text-blue-800">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Checking saved YouTube accounts...
+                  </div>
+                ) : null}
+
+                {isMissingSavedYouTubeAccount ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-semibold">Add a saved YouTube social account before uploading.</p>
+                    <p className="mt-1 leading-6">
+                      This modal stays blocked until the user saves YouTube credentials in Social Accounts.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          onClose();
+                          router.push('/social-accounts');
+                        }}
+                        className="bg-blue-700 text-white hover:bg-blue-800"
+                      >
+                        Open Social Accounts
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          window.open(
+                            '/social-accounts/guides/youtube',
+                            '_blank',
+                            'noopener,noreferrer',
+                          );
+                        }}
+                        className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                      >
+                        Open setup guide
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {hasSavedYouTubeAccount ? (
+                  <div className="mt-3 space-y-2 rounded-2xl border border-blue-200 bg-white/80 p-4">
+                    <Label className="text-sm font-semibold text-blue-900">
+                      Publishing account
+                    </Label>
+                    <Select
+                      value={selectedYouTubeAccountId}
+                      onValueChange={setSelectedYouTubeAccountId}
+                      disabled={isBusy || isCheckingSavedYouTubeAccounts}
+                    >
+                      <SelectTrigger className="h-11 border-blue-200 bg-white text-blue-900">
+                        <SelectValue placeholder="Select a saved YouTube account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {youtubeAccounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {`${account.label}${account.isDefault ? ' (Default)' : ''} - ${getUploadSocialAccountStatusLabel(account.connectionStatus)}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedYouTubeAccount ? (
+                      <p className="text-xs text-blue-700">
+                        Using {selectedYouTubeAccount.label}
+                        {selectedYouTubeAccount.isDefault ? ' as the default saved account.' : '.'}{' '}
+                        Status:{' '}
+                        {getUploadSocialAccountStatusLabel(
+                          selectedYouTubeAccount.connectionStatus,
+                        )}
+                        .
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {videoFormatError ? (
                   <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     {videoFormatError}
@@ -531,7 +702,11 @@ export function YouTubeUploadModal({
                   <Button
                     type="button"
                     onClick={handleConnectYouTube}
-                    disabled={isBusy}
+                    disabled={
+                      isBusy ||
+                      isCheckingSavedYouTubeAccounts ||
+                      isMissingSavedYouTubeAccount
+                    }
                     variant="outline"
                     className="border-2 border-blue-200 hover:border-blue-300 hover:bg-white text-blue-900"
                     size="sm"
@@ -542,7 +717,12 @@ export function YouTubeUploadModal({
                         Connecting...
                       </>
                     ) : (
-                      <>Connect YouTube</>
+                      <>
+                        {selectedYouTubeAccount &&
+                        selectedYouTubeAccount.connectionStatus !== 'not_connected'
+                          ? 'Reconnect YouTube'
+                          : 'Connect YouTube'}
+                      </>
                     )}
                   </Button>
 
@@ -943,7 +1123,13 @@ export function YouTubeUploadModal({
             </Button>
             <Button
               onClick={handleYouTubeUpload}
-              disabled={isBusy || !youtubeTitle.trim()}
+              disabled={
+                isBusy ||
+                !youtubeTitle.trim() ||
+                isCheckingSavedYouTubeAccounts ||
+                isMissingSavedYouTubeAccount ||
+                !selectedYouTubeAccountId
+              }
               className="flex-1 h-12 bg-linear-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white hover:text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-lg"
             >
               {cloudinaryStage === 'downloading' ? (

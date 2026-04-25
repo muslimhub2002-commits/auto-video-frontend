@@ -32,6 +32,7 @@ export type UtilityItem = {
   label: string;
   description: string;
   icon: LucideIcon;
+  href?: string;
 };
 
 export function normalizeScriptCategory(value?: string | null): ScriptCategory {
@@ -169,5 +170,6 @@ export const utilityItems: readonly UtilityItem[] = [
     label: 'Social Accounts',
     description: 'Connected platforms and publishing access',
     icon: Link2,
+    href: '/social-accounts',
   },
 ] as const;

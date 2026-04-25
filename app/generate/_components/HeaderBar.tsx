@@ -2,7 +2,14 @@
 
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Clapperboard, FileText, Menu, Sparkles, Video, type LucideIcon } from 'lucide-react';
+import {
+  Clapperboard,
+  FileText,
+  Link2,
+  Menu,
+  Video,
+  type LucideIcon,
+} from 'lucide-react';
 
 interface HeaderBarProps {
   onToggleSidebar: () => void;
@@ -32,6 +39,16 @@ function resolveHeaderMeta(pathname: string): {
       subtitle: 'Track generated videos, monitor platform delivery, and manage publishing workflows.',
       icon: Clapperboard,
       accentClassName: 'from-sky-400 via-blue-500 to-indigo-600',
+    };
+  }
+
+  if (pathname.startsWith('/social-accounts')) {
+    return {
+      eyebrow: 'Publishing Workspace',
+      title: 'Social Accounts',
+      subtitle: 'Manage per-platform credentials, setup guides, and account readiness before upload.',
+      icon: Link2,
+      accentClassName: 'from-emerald-400 via-teal-500 to-cyan-600',
     };
   }
 

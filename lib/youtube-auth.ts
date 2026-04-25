@@ -27,8 +27,10 @@ export function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-export async function startYoutubeReconnect() {
-  const response = await youtubeApi.get<{ url?: string }>('/youtube/auth-url');
+export async function startYoutubeReconnect(socialAccountId?: string | null) {
+  const response = await youtubeApi.get<{ url?: string }>('/youtube/auth-url', {
+    params: socialAccountId ? { socialAccountId } : undefined,
+  });
   const url = String(response.data?.url ?? '').trim();
 
   if (!url) {

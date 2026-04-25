@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -19,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { youtubeApi } from '@/lib/api';
+import { api, youtubeApi } from '@/lib/api';
 import { getBackendAccessToken } from '@/lib/client-session';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import {
@@ -33,6 +34,12 @@ import {
   WallpaperGeneratorSection,
   type SocialUploadScriptCharacter,
 } from './social/WallpaperGeneratorSection';
+import {
+  getInitialUploadSocialAccountId,
+  getUploadSocialAccountStatusLabel,
+  type UploadSocialAccountProviderResponse,
+  type UploadSocialAccountSummaryItem,
+} from './social/social-account-upload';
 
 interface TikTokUploadModalProps {
   isOpen: boolean;
@@ -81,6 +88,7 @@ export function TikTokUploadModal({
   scriptCharacters,
   onUploaded,
 }: TikTokUploadModalProps) {
+  const router = useRouter();
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
   const [caption, setCaption] = useState('');
@@ -111,6 +119,12 @@ export function TikTokUploadModal({
     useState<number | null>(videoDurationSeconds ?? null);
   const [isResolvingVideoFormat, setIsResolvingVideoFormat] = useState(false);
   const [videoFormatError, setVideoFormatError] = useState<string | null>(null);
+  const [tiktokAccounts, setTikTokAccounts] = useState<
+    UploadSocialAccountSummaryItem[]
+  >([]);
+  const [selectedTikTokAccountId, setSelectedTikTokAccountId] = useState('');
+  const [isCheckingSavedTikTokAccounts, setIsCheckingSavedTikTokAccounts] =
+    useState(false);
 
   const effectiveVideoDurationSeconds =
     typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
@@ -152,6 +166,52 @@ export function TikTokUploadModal({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setTikTokAccounts([]);
+      setSelectedTikTokAccountId('');
+      setIsCheckingSavedTikTokAccounts(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsCheckingSavedTikTokAccounts(true);
+
+    void api
+      .get<UploadSocialAccountProviderResponse>('/social-accounts/tiktok')
+      .then((response) => {
+        if (!cancelled) {
+          setTikTokAccounts(response.data.items ?? []);
+          setSelectedTikTokAccountId((currentValue) => {
+            const availableIds = new Set(
+              (response.data.items ?? []).map((account) => account.id),
+            );
+
+            if (currentValue && availableIds.has(currentValue)) {
+              return currentValue;
+            }
+
+            return getInitialUploadSocialAccountId(response.data);
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTikTokAccounts([]);
+          setSelectedTikTokAccountId('');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCheckingSavedTikTokAccounts(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
   const stopPopupMonitor = useCallback(() => {
     if (popupIntervalRef.current !== null) {
       window.clearInterval(popupIntervalRef.current);
@@ -177,17 +237,29 @@ export function TikTokUploadModal({
   }, [privacyLevel]);
 
   const loadCreatorInfo = useCallback(async (silent = false) => {
+    if (!selectedTikTokAccountId) {
+      setCreatorInfo(null);
+      setCreatorInfoError(null);
+      return;
+    }
+
     if (!silent) setIsLoadingCreatorInfo(true);
 
     try {
       const token = await getBackendAccessToken();
-      const response = await fetch(`${TIKTOK_API_URL}/tiktok/creator-info`, {
+      const query = new URLSearchParams({
+        socialAccountId: selectedTikTokAccountId,
+      });
+      const response = await fetch(
+        `${TIKTOK_API_URL}/tiktok/creator-info?${query.toString()}`,
+        {
         method: 'GET',
         headers: {
           Accept: 'application/json',
           Authorization: token ? `Bearer ${token}` : '',
         },
-      });
+      },
+      );
 
       const data = (await response.json().catch(() => null)) as
         | TikTokCreatorInfo
@@ -218,7 +290,7 @@ export function TikTokUploadModal({
     } finally {
       if (!silent) setIsLoadingCreatorInfo(false);
     }
-  }, [TIKTOK_API_URL, applyCreatorInfo]);
+  }, [TIKTOK_API_URL, applyCreatorInfo, selectedTikTokAccountId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -227,8 +299,15 @@ export function TikTokUploadModal({
     setUploadError(null);
     setUploadResult(null);
     setConsentConfirmed(false);
+
+    if (!selectedTikTokAccountId) {
+      setCreatorInfo(null);
+      setCreatorInfoError(null);
+      return;
+    }
+
     void loadCreatorInfo();
-  }, [isOpen, loadCreatorInfo]);
+  }, [isOpen, loadCreatorInfo, selectedTikTokAccountId]);
 
   useEffect(() => {
     if (!discloseCommercialContent) {
@@ -323,6 +402,12 @@ export function TikTokUploadModal({
     isGeneratingSeo ||
     cloudinaryStage !== 'idle' ||
     isWallpaperBusy;
+  const hasSavedTikTokAccount = tiktokAccounts.length > 0;
+  const selectedTikTokAccount = tiktokAccounts.find(
+    (account) => account.id === selectedTikTokAccountId,
+  );
+  const isMissingSavedTikTokAccount =
+    !isCheckingSavedTikTokAccounts && !hasSavedTikTokAccount;
 
   const privacyOptions = Array.isArray(creatorInfo?.privacy_level_options)
     ? creatorInfo.privacy_level_options
@@ -433,16 +518,35 @@ export function TikTokUploadModal({
 
   const handleConnectTikTok = async () => {
     setUploadError(null);
+
+    if (isMissingSavedTikTokAccount) {
+      setUploadError(
+        'Add a TikTok social account from the Social Accounts page before connecting or uploading.',
+      );
+      return;
+    }
+
+    if (!selectedTikTokAccountId) {
+      setUploadError('Select a saved TikTok account before connecting.');
+      return;
+    }
+
     setIsConnectingTikTok(true);
     try {
       const token = await getBackendAccessToken();
-      const response = await fetch(`${TIKTOK_API_URL}/tiktok/auth-url`, {
+      const query = new URLSearchParams({
+        socialAccountId: selectedTikTokAccountId,
+      });
+      const response = await fetch(
+        `${TIKTOK_API_URL}/tiktok/auth-url?${query.toString()}`,
+        {
         method: 'GET',
         headers: {
           Accept: 'application/json',
           Authorization: token ? `Bearer ${token}` : '',
         },
-      });
+      },
+      );
 
       const data = (await response.json().catch(() => null)) as { url?: string; message?: string } | null;
       if (!response.ok || !data?.url) {
@@ -477,6 +581,16 @@ export function TikTokUploadModal({
   const handleUpload = async () => {
     setUploadError(null);
     setUploadResult(null);
+
+    if (isMissingSavedTikTokAccount) {
+      setUploadError('Add a TikTok social account from the Social Accounts page before uploading.');
+      return;
+    }
+
+    if (!selectedTikTokAccountId) {
+      setUploadError('Select a saved TikTok account before uploading.');
+      return;
+    }
 
     if (!videoUrl) {
       setUploadError('Missing video URL. Generate the video first.');
@@ -548,6 +662,7 @@ export function TikTokUploadModal({
         },
         body: JSON.stringify({
           videoUrl: publicVideoUrl,
+          socialAccountId: selectedTikTokAccountId,
           caption: formattedCaption,
           privacyLevel,
           disableComment: creatorInfo.comment_disabled ? true : !allowComment,
@@ -662,11 +777,94 @@ export function TikTokUploadModal({
                   </div>
                 ) : null}
 
+                {isCheckingSavedTikTokAccounts ? (
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white/90 px-3 py-2 text-sm text-rose-700">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Checking saved TikTok accounts...
+                  </div>
+                ) : null}
+
+                {isMissingSavedTikTokAccount ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-semibold">Add a saved TikTok social account before uploading.</p>
+                    <p className="mt-1 leading-6">
+                      This modal stays blocked until the user saves TikTok client credentials in Social Accounts.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          onClose();
+                          router.push('/social-accounts');
+                        }}
+                        className="bg-neutral-950 text-white hover:bg-neutral-800"
+                      >
+                        Open Social Accounts
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          window.open(
+                            '/social-accounts/guides/tiktok',
+                            '_blank',
+                            'noopener,noreferrer',
+                          );
+                        }}
+                        className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                      >
+                        Open setup guide
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {hasSavedTikTokAccount ? (
+                  <div className="space-y-2 rounded-2xl border border-rose-200 bg-white/80 p-4">
+                    <Label className="text-sm font-semibold text-rose-900">
+                      Publishing account
+                    </Label>
+                    <Select
+                      value={selectedTikTokAccountId}
+                      onValueChange={setSelectedTikTokAccountId}
+                      disabled={isBusy || isCheckingSavedTikTokAccounts}
+                    >
+                      <SelectTrigger className="h-11 border-rose-200 bg-white text-rose-900">
+                        <SelectValue placeholder="Select a saved TikTok account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tiktokAccounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {`${account.label}${account.isDefault ? ' (Default)' : ''} - ${getUploadSocialAccountStatusLabel(account.connectionStatus)}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedTikTokAccount ? (
+                      <p className="text-xs text-rose-700">
+                        Using {selectedTikTokAccount.label}
+                        {selectedTikTokAccount.isDefault ? ' as the default saved account.' : '.'}{' '}
+                        Status:{' '}
+                        {getUploadSocialAccountStatusLabel(
+                          selectedTikTokAccount.connectionStatus,
+                        )}
+                        .
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     type="button"
                     onClick={handleConnectTikTok}
-                    disabled={isBusy}
+                    disabled={
+                      isBusy ||
+                      isCheckingSavedTikTokAccounts ||
+                      isMissingSavedTikTokAccount
+                    }
                     className="bg-black hover:bg-neutral-800 text-white"
                     size="sm"
                   >
@@ -687,7 +885,7 @@ export function TikTokUploadModal({
                     variant="outline"
                     size="sm"
                     onClick={() => void loadCreatorInfo()}
-                    disabled={isBusy}
+                    disabled={isBusy || !selectedTikTokAccountId}
                     className="border-rose-200 text-rose-700 hover:bg-rose-50"
                   >
                     {isLoadingCreatorInfo ? (
@@ -1030,7 +1228,13 @@ export function TikTokUploadModal({
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={isBusy || !creatorInfo}
+                disabled={
+                  isBusy ||
+                  !creatorInfo ||
+                  isCheckingSavedTikTokAccounts ||
+                  isMissingSavedTikTokAccount ||
+                  !selectedTikTokAccountId
+                }
                 className="rounded-xl bg-linear-to-r bg-rose-600 hover:bg-rose-700 text-white"
               >
                 {cloudinaryStage === 'downloading' ? (

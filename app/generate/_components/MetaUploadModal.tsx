@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircle,
@@ -15,9 +16,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
-import { youtubeApi } from '@/lib/api';
+import { api, youtubeApi } from '@/lib/api';
 import { getBackendAccessToken } from '@/lib/client-session';
 import {
   formatVideoDuration,
@@ -30,6 +38,12 @@ import {
   WallpaperGeneratorSection,
   type SocialUploadScriptCharacter,
 } from './social/WallpaperGeneratorSection';
+import {
+  getInitialUploadSocialAccountId,
+  getUploadSocialAccountStatusLabel,
+  type UploadSocialAccountProviderResponse,
+  type UploadSocialAccountSummaryItem,
+} from './social/social-account-upload';
 
 type MetaPlatform = 'facebook' | 'instagram';
 
@@ -90,6 +104,9 @@ type MetaCredentialStatus = {
   requiresReconnectAt: string | null;
   minimumRecommendedLifetimeDays: number;
   targetRefreshWindowDays: number;
+  scope?: string;
+  socialAccountId?: string | null;
+  accountLabel?: string | null;
 };
 
 function formatStatusDate(value: string | null | undefined): string {
@@ -113,27 +130,30 @@ function getCredentialTone(connectionStatus: MetaConnectionStatus): string {
   }
 }
 
-function getCredentialHeadline(status: MetaCredentialStatus): string {
+function getCredentialHeadline(
+  status: MetaCredentialStatus,
+  subjectLabel: string,
+): string {
   switch (status.connectionStatus) {
     case 'healthy':
       return status.daysUntilExpiry !== null
-        ? `Shared Meta connection healthy with about ${status.daysUntilExpiry} days remaining.`
-        : 'Shared Meta connection healthy.';
+        ? `${subjectLabel} healthy with about ${status.daysUntilExpiry} days remaining.`
+        : `${subjectLabel} healthy.`;
     case 'attention':
       return status.daysUntilExpiry !== null
-        ? `Shared Meta connection is inside the ${status.targetRefreshWindowDays}-day refresh window.`
-        : 'Shared Meta connection needs attention soon.';
+        ? `${subjectLabel} is inside the ${status.targetRefreshWindowDays}-day refresh window.`
+        : `${subjectLabel} needs attention soon.`;
     case 'error':
       return status.lastError?.trim()
-        ? `Shared Meta connection hit an error: ${status.lastError}`
-        : 'Shared Meta connection hit an error and should be checked.';
+        ? `${subjectLabel} hit an error: ${status.lastError}`
+        : `${subjectLabel} hit an error and should be checked.`;
     case 'reconnect_required':
       return status.lastError?.trim()
         ? `Reconnect required before upload: ${status.lastError}`
         : `Reconnect required before the token falls under the ${status.minimumRecommendedLifetimeDays}-day minimum lifetime.`;
     case 'not_connected':
     default:
-      return 'No shared Meta connection is configured yet.';
+      return `No connection is configured yet for ${subjectLabel}.`;
   }
 }
 
@@ -148,6 +168,7 @@ export function MetaUploadModal({
   scriptCharacters,
   onUploaded,
 }: MetaUploadModalProps) {
+  const router = useRouter();
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isVisible, setIsVisible] = useState(false);
   const [selectedPlatforms, setSelectedPlatforms] = useState<MetaPlatform[]>(['facebook','instagram']);
@@ -176,6 +197,10 @@ export function MetaUploadModal({
     useState<number | null>(videoDurationSeconds ?? null);
   const [isResolvingVideoFormat, setIsResolvingVideoFormat] = useState(false);
   const [videoFormatError, setVideoFormatError] = useState<string | null>(null);
+  const [metaAccounts, setMetaAccounts] = useState<UploadSocialAccountSummaryItem[]>([]);
+  const [selectedMetaAccountId, setSelectedMetaAccountId] = useState('');
+  const [isCheckingSavedMetaAccounts, setIsCheckingSavedMetaAccounts] =
+    useState(false);
 
   const effectiveVideoDurationSeconds =
     typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
@@ -213,16 +238,73 @@ export function MetaUploadModal({
     return () => clearTimeout(timer);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setMetaAccounts([]);
+      setSelectedMetaAccountId('');
+      setIsCheckingSavedMetaAccounts(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsCheckingSavedMetaAccounts(true);
+
+    void api
+      .get<UploadSocialAccountProviderResponse>('/social-accounts/meta')
+      .then((response) => {
+        if (!cancelled) {
+          setMetaAccounts(response.data.items ?? []);
+          setSelectedMetaAccountId((currentValue) => {
+            const availableIds = new Set(
+              (response.data.items ?? []).map((account) => account.id),
+            );
+
+            if (currentValue && availableIds.has(currentValue)) {
+              return currentValue;
+            }
+
+            return getInitialUploadSocialAccountId(response.data);
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMetaAccounts([]);
+          setSelectedMetaAccountId('');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCheckingSavedMetaAccounts(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
   const loadCredentialStatus = useCallback(async () => {
+    if (!selectedMetaAccountId) {
+      setCredentialStatus(null);
+      setIsLoadingCredStatus(false);
+      return;
+    }
+
     setIsLoadingCredStatus(true);
     try {
       const token = await getBackendAccessToken();
-      const res = await fetch(`${META_API_URL}/meta/credentials`, {
+      const res = await fetch(
+        `${META_API_URL}/meta/credentials?${new URLSearchParams({
+          socialAccountId: selectedMetaAccountId,
+        }).toString()}`,
+        {
         headers: {
           Accept: 'application/json',
           Authorization: token ? `Bearer ${token}` : '',
         },
-      });
+      },
+      );
       if (res.ok) {
         const data = await res.json() as MetaCredentialStatus;
         setCredentialStatus(data);
@@ -239,7 +321,7 @@ export function MetaUploadModal({
     } finally {
       setIsLoadingCredStatus(false);
     }
-  }, [META_API_URL]);
+  }, [META_API_URL, selectedMetaAccountId]);
 
   const handleExchangeToken = async () => {
     setTokenExchangeError(null);
@@ -252,14 +334,19 @@ export function MetaUploadModal({
     setIsExchangingToken(true);
     try {
       const authToken = await getBackendAccessToken();
-      const res = await fetch(`${META_API_URL}/meta/credentials/exchange-token`, {
+      const res = await fetch(
+        `${META_API_URL}/meta/credentials/exchange-token?${new URLSearchParams({
+          socialAccountId: selectedMetaAccountId,
+        }).toString()}`,
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: authToken ? `Bearer ${authToken}` : '',
         },
         body: JSON.stringify({ shortLivedToken: trimmed }),
-      });
+      },
+      );
       const data = (await res.json().catch(() => null)) as {
         exchanged?: boolean;
         status?: typeof credentialStatus;
@@ -276,7 +363,7 @@ export function MetaUploadModal({
         setCredentialStatus(data.status as typeof credentialStatus);
       }
       setCredentialActionNotice(
-        'Shared Meta connection updated. The backend will now keep it inside the monthly safety window when auto-refresh is available.',
+        `${credentialSubjectLabel} updated. The backend will now keep it inside the monthly safety window when auto-refresh is available.`,
       );
       setNewShortToken('');
       setShowTokenPanel(false);
@@ -297,12 +384,17 @@ export function MetaUploadModal({
     setIsRefreshingCredentials(true);
     try {
       const authToken = await getBackendAccessToken();
-      const res = await fetch(`${META_API_URL}/meta/credentials/refresh`, {
+      const res = await fetch(
+        `${META_API_URL}/meta/credentials/refresh?${new URLSearchParams({
+          socialAccountId: selectedMetaAccountId,
+        }).toString()}`,
+        {
         method: 'POST',
         headers: {
           Authorization: authToken ? `Bearer ${authToken}` : '',
         },
-      });
+      },
+      );
       const data = (await res.json().catch(() => null)) as {
         refreshed?: boolean;
         status?: MetaCredentialStatus;
@@ -318,7 +410,7 @@ export function MetaUploadModal({
       if (data?.status) {
         setCredentialStatus(data.status);
       }
-      setCredentialActionNotice('Shared Meta connection refreshed successfully.');
+      setCredentialActionNotice(`${credentialSubjectLabel} refreshed successfully.`);
     } catch (err: unknown) {
       setTokenExchangeError(
         err instanceof Error && err.message.trim()
@@ -338,6 +430,7 @@ export function MetaUploadModal({
     setUploadResult(null);
     setTokenExchangeError(null);
     setCredentialActionNotice(null);
+    setShowTokenPanel(false);
     void loadCredentialStatus();
   }, [isOpen, loadCredentialStatus]);
 
@@ -406,6 +499,13 @@ export function MetaUploadModal({
     isExchangingToken ||
     isRefreshingCredentials ||
     isWallpaperBusy;
+  const hasSavedMetaAccount = metaAccounts.length > 0;
+  const selectedMetaAccount = metaAccounts.find(
+    (account) => account.id === selectedMetaAccountId,
+  );
+  const credentialSubjectLabel = selectedMetaAccount?.label?.trim() || 'this Meta account';
+  const isMissingSavedMetaAccount =
+    !isCheckingSavedMetaAccounts && !hasSavedMetaAccount;
 
   const togglePlatform = (platform: MetaPlatform) => {
     setSelectedPlatforms((current) => {
@@ -513,6 +613,16 @@ export function MetaUploadModal({
     setUploadError(null);
     setUploadResult(null);
 
+    if (isMissingSavedMetaAccount) {
+      setUploadError('Add a Meta social account from the Social Accounts page before uploading.');
+      return;
+    }
+
+    if (!selectedMetaAccountId) {
+      setUploadError('Select a saved Meta account before uploading.');
+      return;
+    }
+
     if (!videoUrl) {
       setUploadError('Missing video URL. Generate the video first.');
       return;
@@ -536,6 +646,7 @@ export function MetaUploadModal({
         },
         body: JSON.stringify({
           videoUrl: publicVideoUrl,
+          socialAccountId: selectedMetaAccountId,
           platforms: selectedPlatforms,
           title: facebookTitle.trim() || undefined,
           caption: formattedCaption,
@@ -640,6 +751,85 @@ export function MetaUploadModal({
                   Videos shorter than 3 minutes are treated as short-form. Long-form-only helpers stay hidden for short uploads.
                 </p>
 
+                {isCheckingSavedMetaAccounts ? (
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-white/90 px-3 py-2 text-sm text-sky-800">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Checking saved Meta accounts...
+                  </div>
+                ) : null}
+
+                {isMissingSavedMetaAccount ? (
+                  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-semibold">Add a saved Meta social account before uploading.</p>
+                    <p className="mt-1 leading-6">
+                      Upload stays blocked until the user saves a Meta account in Social Accounts, even if the legacy shared Meta token still exists.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          onClose();
+                          router.push('/social-accounts');
+                        }}
+                        className="bg-sky-700 text-white hover:bg-sky-800"
+                      >
+                        Open Social Accounts
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          window.open(
+                            '/social-accounts/guides/meta',
+                            '_blank',
+                            'noopener,noreferrer',
+                          );
+                        }}
+                        className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                      >
+                        Open setup guide
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {hasSavedMetaAccount ? (
+                  <div className="mt-3 space-y-2 rounded-2xl border border-sky-200 bg-white/80 p-4">
+                    <Label className="text-sm font-semibold text-sky-900">
+                      Publishing account
+                    </Label>
+                    <Select
+                      value={selectedMetaAccountId}
+                      onValueChange={setSelectedMetaAccountId}
+                      disabled={isBusy || isCheckingSavedMetaAccounts}
+                    >
+                      <SelectTrigger className="h-11 border-sky-200 bg-white text-sky-900">
+                        <SelectValue placeholder="Select a saved Meta account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {metaAccounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {`${account.label}${account.isDefault ? ' (Default)' : ''} - ${getUploadSocialAccountStatusLabel(account.connectionStatus)}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedMetaAccount ? (
+                      <p className="text-xs text-sky-700">
+                        Uploads will use {selectedMetaAccount.label}
+                        {selectedMetaAccount.isDefault ? ' as the default saved account.' : '.'}{' '}
+                        Status:{' '}
+                        {getUploadSocialAccountStatusLabel(
+                          selectedMetaAccount.connectionStatus,
+                        )}
+                            . The credential panel below reflects the currently selected saved account.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {videoFormatError ? (
                   <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     {videoFormatError}
@@ -720,7 +910,7 @@ export function MetaUploadModal({
                   ) : (
                     <AlertCircle className="h-4 w-4 shrink-0" />
                   )}
-                  <span>{getCredentialHeadline(credentialStatus)}</span>
+                  <span>{getCredentialHeadline(credentialStatus, credentialSubjectLabel)}</span>
                 </div>
                 <div className="text-xs opacity-90 space-y-1">
                   <p>
@@ -775,7 +965,7 @@ export function MetaUploadModal({
                 </div>
                 <div>
                   <h4 className="text-sm font-semibold text-blue-900">
-                    Reconnect the shared Meta account
+                    Reconnect {credentialSubjectLabel}
                   </h4>
                   <p className="text-xs text-blue-700 mt-1 leading-relaxed">
                     Open the{' '}
@@ -792,7 +982,7 @@ export function MetaUploadModal({
                     +{' '}
                     <code className="bg-blue-100 px-1 rounded text-xs">pages_read_engagement</code>{' '}
                     permissions. Paste the short-lived token below — the backend will exchange it
-                    for a long-lived token and keep the shared connection above the monthly
+                    for a long-lived token and keep this saved account above the monthly
                     safety threshold whenever automatic refresh is available.
                   </p>
                 </div>
@@ -1028,7 +1218,14 @@ export function MetaUploadModal({
           <Button
             type="button"
             onClick={() => void handleUpload()}
-            disabled={isBusy || selectedPlatforms.length === 0 || Boolean(credentialStatus?.requiresReconnect)}
+            disabled={
+              isBusy ||
+              selectedPlatforms.length === 0 ||
+              Boolean(credentialStatus?.requiresReconnect) ||
+              isCheckingSavedMetaAccounts ||
+              isMissingSavedMetaAccount ||
+              !selectedMetaAccountId
+            }
             className="bg-linear-to-r from-sky-700 to-indigo-700 hover:from-sky-800 hover:to-indigo-800 text-white shadow-lg"
           >
             {isUploading ? (
