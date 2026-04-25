@@ -131,6 +131,11 @@ export type SentenceItem = {
     | 'flash'
     | 'fade'
     | 'chromaLeak'
+    | 'impactZoom'
+    | 'slicePush'
+    | 'irisReveal'
+    | 'echoStutter'
+    | 'tiltSnap'
     | null;
 
   // When set, image generation will reference ONLY these canonical character key(s)

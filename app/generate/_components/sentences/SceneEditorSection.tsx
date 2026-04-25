@@ -164,14 +164,7 @@ type SceneEditorSectionProps = {
 
   onTransitionToNextChange: (
     index: number,
-    value:
-      | 'none'
-      | 'glitch'
-      | 'whip'
-      | 'flash'
-      | 'fade'
-      | 'chromaLeak'
-      | null,
+    value: NonNullable<SentenceItem['transitionToNext']> | null,
   ) => void;
   onOpenTransitionSoundEditor: (index: number) => void;
 
@@ -440,14 +433,7 @@ type SentenceRowProps = {
   ) => void;
   onTransitionToNextChange: (
     index: number,
-    value:
-      | 'none'
-      | 'glitch'
-      | 'whip'
-      | 'flash'
-      | 'fade'
-      | 'chromaLeak'
-      | null,
+    value: NonNullable<SentenceItem['transitionToNext']> | null,
   ) => void;
   onOpenTransitionSoundEditor: (index: number) => void;
   onInsertEmptySentenceAfter: (index: number) => string;
@@ -733,13 +719,7 @@ const SentenceRow = memo(function SentenceRow({
                       }
                       onTransitionToNextChange(
                         index,
-                        nextValue as
-                        | 'none'
-                        | 'glitch'
-                        | 'whip'
-                        | 'flash'
-                        | 'fade'
-                        | 'chromaLeak',
+                        nextValue as NonNullable<SentenceItem['transitionToNext']>,
                       );
                     }}
                   >
@@ -757,6 +737,11 @@ const SentenceRow = memo(function SentenceRow({
                       <SelectItem value="flash">Flash</SelectItem>
                       <SelectItem value="fade">Fade</SelectItem>
                       <SelectItem value="chromaLeak">Chroma leak</SelectItem>
+                      <SelectItem value="impactZoom">Impact zoom</SelectItem>
+                      <SelectItem value="slicePush">Slice push</SelectItem>
+                      <SelectItem value="irisReveal">Iris reveal</SelectItem>
+                      <SelectItem value="echoStutter">Echo stutter</SelectItem>
+                      <SelectItem value="tiltSnap">Tilt snap</SelectItem>
                     </SelectContent>
                   </Select>
 

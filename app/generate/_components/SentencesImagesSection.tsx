@@ -198,14 +198,7 @@ type SentencesImagesSectionProps = {
   onSentenceImageMotionSpeedChange: (index: number, value: number) => void;
   onTransitionToNextChange: (
     index: number,
-    value:
-      | 'none'
-      | 'glitch'
-      | 'whip'
-      | 'flash'
-      | 'fade'
-      | 'chromaLeak'
-      | null,
+    value: NonNullable<SentenceItem['transitionToNext']> | null,
   ) => void;
   onOpenTransitionSoundEditor: (index: number) => void;
   imagePromptModel: string;
