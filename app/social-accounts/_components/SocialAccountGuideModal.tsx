@@ -161,18 +161,7 @@ export function SocialAccountGuideModal({
               <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
                 Critical Notes
               </h3>
-              <div className="mt-4 space-y-3">
-                {section.setupNotes.map((note) => (
-                  <div key={note.label} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                      {note.label}
-                    </p>
-                    <p className="mt-2 break-words text-sm font-semibold text-slate-900">
-                      {note.value}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              
             </div>
 
             <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-5">

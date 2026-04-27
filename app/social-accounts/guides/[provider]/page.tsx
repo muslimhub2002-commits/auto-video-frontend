@@ -87,18 +87,7 @@ export default async function SocialAccountGuidePage({
               <ArrowUpRight className="h-4 w-4" />
               Critical Notes
             </div>
-            <div className="mt-4 space-y-3">
-              {section.setupNotes.map((note) => (
-                <div key={note.label} className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-                    {note.label}
-                  </p>
-                  <p className="mt-2 break-words text-sm font-semibold text-slate-900">
-                    {note.value}
-                  </p>
-                </div>
-              ))}
-            </div>
+          
           </div>
         </section>
 

@@ -44,6 +44,7 @@ type ToastType = 'success' | 'error' | 'warning' | 'info';
 
 interface BackgroundSoundtrackSectionProps {
   isGenerating: boolean;
+  isGeneratingVoice?: boolean;
   videoJobStatus: string | null;
   voiceOver: File | null;
   voicePreviewUrl?: string | null;
@@ -79,6 +80,7 @@ interface BackgroundSoundtrackSectionProps {
 export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionProps) {
   const {
     isGenerating,
+    isGeneratingVoice,
     videoJobStatus,
     voiceOver,
     voicePreviewUrl,
@@ -236,6 +238,9 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
 
   const mixPreviewBlockedReason = useMemo(() => {
     if (soundtrackUploadDisabled) return 'Preview is disabled while a job is running.';
+    if (isGeneratingVoice) {
+      return 'Wait for voice regeneration to finish before previewing the mix.';
+    }
     if (isMixPreviewPlaying) return null;
     if (isMaterializingSelectedBackgroundSoundtrack) {
       return 'Preparing soundtrack preview...';
@@ -250,6 +255,7 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
     }
     return null;
   }, [
+    isGeneratingVoice,
     isMaterializingSelectedBackgroundSoundtrack,
     isMixPreviewPlaying,
     selectedSoundtrack,
@@ -285,6 +291,16 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
       mixBackgroundGainRef.current.gain.value = normalizedBackgroundVolume;
     }
   }, [isMixPreviewPlaying, isSoundtrackPreviewPlaying, normalizedBackgroundVolume]);
+
+  useEffect(() => {
+    if (isGeneratingVoice) {
+      void stopMixPreview();
+    }
+  }, [isGeneratingVoice]);
+
+  useEffect(() => {
+    void stopMixPreview();
+  }, [voiceOver, voicePreviewUrl]);
 
   const handlePickSoundtrack = () => {
     soundtrackInputRef.current?.click();
@@ -845,6 +861,7 @@ export function BackgroundSoundtrackSection(props: BackgroundSoundtrackSectionPr
                       onClick={() => void handlePreviewMix()}
                       disabled={
                         soundtrackUploadDisabled ||
+                        Boolean(isGeneratingVoice) ||
                         isMixPreviewLoading ||
                         Boolean(isMaterializingSelectedBackgroundSoundtrack)
                       }

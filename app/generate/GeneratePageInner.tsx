@@ -5732,6 +5732,7 @@ export function GeneratePageInner() {
 
   const handleVoiceUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
+      stopVoicePreview();
       const file = e.target.files[0];
       setVoiceOver(file);
       setVoiceOverChunks([]);
@@ -6304,6 +6305,7 @@ export function GeneratePageInner() {
       return;
     }
 
+    stopVoicePreview();
     setVoiceError(null);
     setIsGeneratingVoice(true);
     setVoiceGenerationProgress(null);
@@ -6357,6 +6359,8 @@ export function GeneratePageInner() {
   };
 
   const removeVoice = () => {
+    stopVoicePreview();
+
     if (voiceGenerationMode === 'perSentence') {
       setSentences((prev) => prev.map((sentence) => clearSentenceVoiceOverState(sentence)));
     }
@@ -6830,7 +6834,7 @@ export function GeneratePageInner() {
     try {
       const saved = await persistVoiceToLibrary(voiceOver);
       setSavedVoiceId(saved.id);
-      setVoiceLibraryUrl(null);
+      setVoiceLibraryUrl(saved.url);
 
       const currentScriptId = String(activeScriptId ?? '').trim() || null;
       if (currentScriptId && hasPersistableVoiceChunks(voiceOverChunks)) {
@@ -6859,6 +6863,7 @@ export function GeneratePageInner() {
 
   const handleVoiceLibrarySelect = async (voiceUrl: string, id: string) => {
     try {
+      stopVoicePreview();
       setVoiceOver(null);
       setVoiceOverChunks([]);
       setSavedVoiceId(id);
@@ -7003,9 +7008,7 @@ export function GeneratePageInner() {
         addBackgroundSoundtrack && normalizedBackgroundMusicVolume !== 1;
 
       const useLocalRenderTransport = shouldUseLocalRenderTransport();
-      const audioUrl = voiceOver
-        ? null
-        : await resolveRenderAudioUrl(useLocalRenderTransport);
+      const audioUrl = await resolveRenderAudioUrl(useLocalRenderTransport);
       const imageUrls = await buildRenderImageUrls(sentences, useLocalRenderTransport);
       const secondaryImageUrls = await buildRenderSecondaryImageUrls(
         sentences,
@@ -7020,7 +7023,7 @@ export function GeneratePageInner() {
       });
       const requiresMultipartTextBackgroundVideos =
         hasTextBackgroundVideoUploadsForRender(sentences);
-      const requiresMultipartVoiceOver = Boolean(voiceOver);
+      const requiresMultipartVoiceOver = false;
       const requiresMultipartBackgroundMusic = Boolean(backgroundMusicFile);
 
       let res: Response | null = null;
@@ -11979,7 +11982,11 @@ export function GeneratePageInner() {
                   onRemoveVoice={removeVoice}
                   onSaveVoice={handleSaveVoice}
                   onOpenLibrary={handleOpenVoiceLibrary}
-                  onOpenVoiceEditor={voiceOver ? () => setIsVoiceOverEditorOpen(true) : undefined}
+                  onOpenVoiceEditor={
+                    String(voiceOverPreviewUrl ?? '').trim()
+                      ? () => setIsVoiceOverEditorOpen(true)
+                      : undefined
+                  }
                   onOpenElevenLabsSettings={() => setIsElevenLabsSettingsModalOpen(true)}
                   canManageVoiceChunks={voiceGenerationMode !== 'perSentence' && voiceOverChunks.length > 1}
                   onOpenVoiceChunkManager={() => {
@@ -12018,6 +12025,7 @@ export function GeneratePageInner() {
               {addBackgroundSoundtrack ? (
                 <BackgroundSoundtrackSection
                   isGenerating={isGenerating}
+                  isGeneratingVoice={isGeneratingVoice}
                   videoJobStatus={videoJobStatus}
                   voiceOver={voiceOver}
                   voicePreviewUrl={voiceOverPreviewUrl}

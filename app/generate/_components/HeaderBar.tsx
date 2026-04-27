@@ -7,6 +7,7 @@ import {
   FileText,
   Link2,
   Menu,
+  UserRound,
   Video,
   type LucideIcon,
 } from 'lucide-react';
@@ -49,6 +50,16 @@ function resolveHeaderMeta(pathname: string): {
       subtitle: 'Manage per-platform credentials, setup guides, and account readiness before upload.',
       icon: Link2,
       accentClassName: 'from-emerald-400 via-teal-500 to-cyan-600',
+    };
+  }
+
+  if (pathname.startsWith('/profile')) {
+    return {
+      eyebrow: 'Workspace Overview',
+      title: 'Profile',
+      subtitle: 'Review account details, content totals, publishing coverage, and connected platform health.',
+      icon: UserRound,
+      accentClassName: 'from-slate-700 via-slate-900 to-cyan-700',
     };
   }
 

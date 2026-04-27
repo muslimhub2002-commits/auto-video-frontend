@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { API_URL } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -110,6 +110,7 @@ export function VoiceOverSection({
   onOpenSentenceVoiceManager,
 }: VoiceOverSectionProps) {
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const styleAbortRef = useRef<AbortController | null>(null);
   const selectedVoice = voices.find((v) => v.voice_id === selectedVoiceId) || null;
   const providerLabel = voiceProvider === 'google' ? 'AI Studio' : 'ElevenLabs';
@@ -126,6 +127,41 @@ export function VoiceOverSection({
   const [importElevenLabsError, setImportElevenLabsError] = useState<string | null>(
     null,
   );
+
+  const stopVoicePlayback = () => {
+    try {
+      previewAudioRef.current?.pause();
+      if (previewAudioRef.current) {
+        previewAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      currentVoiceAudioRef.current?.pause();
+      if (currentVoiceAudioRef.current) {
+        currentVoiceAudioRef.current.currentTime = 0;
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (!isGeneratingVoice) return;
+    stopVoicePlayback();
+  }, [isGeneratingVoice]);
+
+  useEffect(() => {
+    stopVoicePlayback();
+  }, [voicePreviewUrl]);
+
+  useEffect(() => {
+    return () => {
+      stopVoicePlayback();
+    };
+  }, []);
 
   const handleImportElevenLabsVoice = async () => {
     if (voiceProvider !== 'elevenlabs') return;
@@ -272,6 +308,7 @@ export function VoiceOverSection({
   const isPreviewDisabled =
     !selectedVoice ||
     !canPreview ||
+    Boolean(isGeneratingVoice) ||
     Boolean(isPreviewingVoice) ||
     Boolean(isSettingFavoriteVoice);
   const generateVoiceLabel = isGeneratingVoice
@@ -871,12 +908,21 @@ export function VoiceOverSection({
 
                       {/* Audio Player */}
                       <div className="mt-3">
-                        <audio
-                          controls
-                          src={voicePreviewUrl ?? undefined}
-                          className="w-full h-8"
-                          style={{ maxWidth: '100%' }}
-                        />
+                        {isGeneratingVoice ? (
+                          <div className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs text-amber-800">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Regenerating voice-over. Playback is temporarily disabled.</span>
+                          </div>
+                        ) : (
+                          <audio
+                            key={voicePreviewUrl ?? 'voice-preview-empty'}
+                            ref={currentVoiceAudioRef}
+                            controls
+                            src={voicePreviewUrl ?? undefined}
+                            className="w-full h-8"
+                            style={{ maxWidth: '100%' }}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -934,7 +980,7 @@ export function VoiceOverSection({
                     size="sm"
                     variant="outline"
                     onClick={onOpenVoiceEditor}
-                    disabled={!onOpenVoiceEditor}
+                    disabled={!onOpenVoiceEditor || isGeneratingVoice}
                     className="flex-1 gap-1.5 text-xs border-sky-200 text-sky-700 hover:bg-sky-50 hover:border-sky-300"
                   >
                     <SlidersHorizontal className="h-3 w-3" />

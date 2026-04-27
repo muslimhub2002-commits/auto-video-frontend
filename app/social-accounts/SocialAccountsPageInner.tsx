@@ -449,38 +449,9 @@ export function SocialAccountsPageInner() {
                       </Button>
                     </div>
 
-                    <div className="mt-5 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
-                      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-                        <KeyRound className="h-4 w-4" />
-                        Keys To Collect
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {section.requiredKeys.map((key) => (
-                          <span
-                            key={key}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${section.badgeClassName}`}
-                          >
-                            {key}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                  
 
-                    <div className="mt-4 space-y-3">
-                      {section.setupNotes.map((note) => (
-                        <div
-                          key={note.label}
-                          className="rounded-[24px] border border-slate-200 bg-white px-4 py-3"
-                        >
-                          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-                            {note.label}
-                          </p>
-                          <p className="mt-2 break-words text-sm font-semibold text-slate-900">
-                            {note.value}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
+                  
 
                     <div className="mt-4 rounded-[28px] border border-slate-200 bg-slate-50/70 p-4">
                       <div className="flex items-center justify-between gap-3">

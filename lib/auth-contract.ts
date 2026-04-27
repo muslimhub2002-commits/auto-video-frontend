@@ -9,6 +9,57 @@ export interface AppUser {
   updated_at: string;
 }
 
+export type ProfilePublishedPlatform =
+  | 'youtube'
+  | 'facebook'
+  | 'instagram'
+  | 'tiktok';
+
+export type ProfileSocialProvider = 'youtube' | 'meta' | 'tiktok';
+
+export interface AppProfileSummary {
+  user: AppUser;
+  generation: {
+    videosGenerated: number;
+    imagesGenerated: number;
+    voicesGenerated: number;
+  };
+  workspace: {
+    totalScripts: number;
+    draftScripts: number;
+    videoLibraryCount: number;
+    publishedVideoCount: number;
+    publishedByPlatform: Record<ProfilePublishedPlatform, number>;
+    recentActivity: {
+      latestScript: {
+        id: string;
+        title: string | null;
+        createdAt: string;
+        updatedAt: string;
+      } | null;
+      latestPublishedVideo: {
+        id: string;
+        title: string | null;
+        updatedAt: string;
+        publishedPlatforms: ProfilePublishedPlatform[];
+      } | null;
+    };
+  };
+  socialAccounts: {
+    totalAccounts: number;
+    providersConfigured: number;
+    defaultsConfigured: number;
+    attentionCount: number;
+    providers: Array<{
+      provider: ProfileSocialProvider;
+      providerLabel: string;
+      total: number;
+      defaultAccountId: string | null;
+      attentionCount: number;
+    }>;
+  };
+}
+
 export interface AuthResponse {
   access_token: string;
   user: AppUser;

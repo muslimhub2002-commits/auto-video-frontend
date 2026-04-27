@@ -165,6 +165,7 @@ export const utilityItems: readonly UtilityItem[] = [
     label: 'Profile',
     description: 'Personal details and workspace settings',
     icon: UserRound,
+    href: '/profile',
   },
   {
     label: 'Social Accounts',
