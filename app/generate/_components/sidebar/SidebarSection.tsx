@@ -27,7 +27,7 @@ export function SidebarSection({
           <div className={`rounded-2xl bg-linear-to-br p-2.5 text-white shadow-lg ${iconGradient}`}>
             <Icon className="h-4 w-4" />
           </div>
-          <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-900">{title}</h3>
+          <h3 className="text-sm font-black uppercase tracking-[0.04em]">{title}</h3>
         </div>
       </AccordionTrigger>
       <AccordionContent className="pb-4 pt-1">{children}</AccordionContent>

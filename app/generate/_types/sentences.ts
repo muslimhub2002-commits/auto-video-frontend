@@ -52,6 +52,7 @@ export type SentenceItem = {
   textAnimationEffect?:
     | 'popInBounceHook'
     | 'slideCutFast'
+    | 'typewriter'
     | 'scalePunchZoom'
     | 'maskReveal'
     | 'glitchFlashHook'

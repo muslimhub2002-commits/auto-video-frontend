@@ -688,6 +688,11 @@ export function ImageEffectsDetailModal({
       ),
     [draftTextAnimationEffect, draftTextAnimationSettings, isShortVideo],
   );
+  const resolvedDraftTextEffect = useMemo(
+    () => resolveTextAnimationEffectFromSettings(resolvedText, draftTextAnimationEffect),
+    [draftTextAnimationEffect, resolvedText],
+  );
+  const isTypewriterTextEffect = resolvedDraftTextEffect === 'typewriter';
   const resolvedOverlay = useMemo(
     () => normalizeOverlaySettings(draftOverlaySettings, 'image'),
     [draftOverlaySettings],
@@ -1781,10 +1786,21 @@ export function ImageEffectsDetailModal({
       ...patch,
       presetKey: 'custom',
     };
-    setDraftTextAnimationEffect(
-      resolveTextAnimationEffectFromSettings(nextSettings, draftTextAnimationEffect),
+    const nextEffect = resolveTextAnimationEffectFromSettings(
+      nextSettings,
+      draftTextAnimationEffect,
     );
-    setDraftTextAnimationSettings(nextSettings);
+    const sanitizedSettings: TextAnimationSettings =
+      nextEffect === 'typewriter'
+        ? {
+            ...nextSettings,
+            animatePerWord: false,
+            textBoxEnabled: false,
+          }
+        : nextSettings;
+
+    setDraftTextAnimationEffect(nextEffect);
+    setDraftTextAnimationSettings(sanitizedSettings);
     setTextActionError(null);
   };
 
@@ -2983,7 +2999,8 @@ export function ImageEffectsDetailModal({
                   <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={resolvedText.animatePerWord === true}
+                      checked={!isTypewriterTextEffect && resolvedText.animatePerWord === true}
+                      disabled={isTypewriterTextEffect}
                       onChange={(e) =>
                         updateTextSettings({
                           animatePerWord: e.target.checked,
@@ -2997,10 +3014,62 @@ export function ImageEffectsDetailModal({
                     <span className="space-y-1">
                       <span className="block text-sm font-semibold text-slate-900">Animate words one by one</span>
                       <span className="block text-xs text-slate-500">
-                        Staggers the Slide + cut animation so each word enters after the previous one.
+                        {isTypewriterTextEffect
+                          ? 'Typewriter always reveals characters one by one, so word staggering is disabled for this effect.'
+                          : 'Staggers the current text animation so each word enters after the previous one.'}
                       </span>
                     </span>
                   </label>
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={!isTypewriterTextEffect && resolvedText.textBoxEnabled === true}
+                      disabled={isTypewriterTextEffect}
+                      onChange={(e) =>
+                        updateTextSettings({
+                          textBoxEnabled: e.target.checked,
+                        })
+                      }
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="space-y-1">
+                      <span className="block text-sm font-semibold text-slate-900">Enable text background box</span>
+                      <span className="block text-xs text-slate-500">
+                        {isTypewriterTextEffect
+                          ? 'Typewriter does not support the text background box, so this option is disabled for this effect.'
+                          : 'Wraps the animated text block in a padded background with rounded corners.'}
+                      </span>
+                    </span>
+                  </label>
+                  {resolvedText.textBoxEnabled === true && !isTypewriterTextEffect ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <RangeField
+                        label="Text box padding"
+                        value={resolvedText.textBoxPaddingPx ?? 12}
+                        min={0}
+                        max={48}
+                        step={1}
+                        onChange={(value) => updateTextSettings({ textBoxPaddingPx: value })}
+                      />
+                      <RangeField
+                        label="Text box radius"
+                        value={resolvedText.textBoxRadiusPx ?? 12}
+                        min={0}
+                        max={48}
+                        step={1}
+                        onChange={(value) => updateTextSettings({ textBoxRadiusPx: value })}
+                      />
+                      <div className="space-y-2 sm:col-span-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text box color</span>
+                        <Input
+                          type="color"
+                          value={resolvedText.textBoxColor ?? '#0f172a'}
+                          onChange={(e) => updateTextSettings({ textBoxColor: e.target.value })}
+                          className="h-11 rounded-xl border-slate-200 p-2"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
                       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text color</span>
@@ -3010,6 +3079,24 @@ export function ImageEffectsDetailModal({
                       <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Accent color</span>
                       <Input type="color" value={resolvedText.accentColor ?? '#facc15'} onChange={(e) => updateTextSettings({ accentColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
                     </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <RangeField
+                      label="Shadow opacity"
+                      value={resolvedText.shadowOpacity ?? 0.34}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      onChange={(value) => updateTextSettings({ shadowOpacity: value })}
+                    />
+                    <RangeField
+                      label="Shadow blur"
+                      value={resolvedText.shadowBlurPx ?? 18}
+                      min={0}
+                      max={48}
+                      step={1}
+                      onChange={(value) => updateTextSettings({ shadowBlurPx: value })}
+                    />
                   </div>
                   <div className="space-y-2">
                     <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Background mode</div>
@@ -3184,7 +3271,7 @@ export function ImageEffectsDetailModal({
                   />
                   <RangeField label="Font size" value={resolvedText.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateTextSettings({ fontSizePercent: value })} />
                   <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
-                  {resolvedText.animatePerWord === true ? (
+                  {resolvedText.animatePerWord === true && !isTypewriterTextEffect ? (
                     <RangeField
                       label="Word delay"
                       value={resolvedText.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY}

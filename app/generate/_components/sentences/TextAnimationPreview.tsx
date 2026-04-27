@@ -14,6 +14,7 @@ import {
 export const TEXT_ANIMATION_EFFECT_VALUES = [
   'popInBounceHook',
   'slideCutFast',
+  'typewriter',
   'scalePunchZoom',
   'maskReveal',
   'glitchFlashHook',
@@ -107,6 +108,10 @@ export type TextAnimationSettings = {
   animatePerWord?: boolean;
   wordDelaySeconds?: number;
   textCase?: TextCaseMode;
+  textBoxEnabled?: boolean;
+  textBoxPaddingPx?: number;
+  textBoxRadiusPx?: number;
+  textBoxColor?: string;
 };
 
 export type TextAnimationPresetDto = {
@@ -168,6 +173,31 @@ function getWords(value: string) {
     .trim()
     .split(/\s+/u)
     .filter(Boolean);
+}
+
+function getGraphemes(value: string) {
+  const text = String(value ?? '');
+  if (!text) {
+    return [] as string[];
+  }
+
+  const IntlWithSegmenter = Intl as typeof Intl & {
+    Segmenter?: new (
+      locales?: string | string[],
+      options?: { granularity?: 'grapheme' | 'word' | 'sentence' },
+    ) => {
+      segment(input: string): Iterable<{ segment: string }>;
+    };
+  };
+
+  if (typeof IntlWithSegmenter.Segmenter === 'function') {
+    const segmenter = new IntlWithSegmenter.Segmenter(undefined, {
+      granularity: 'grapheme',
+    });
+    return Array.from(segmenter.segment(text), (item) => item.segment);
+  }
+
+  return Array.from(text);
 }
 
 function stripBracketedText(value: string | null | undefined) {
@@ -234,6 +264,7 @@ export function getTextAnimationEffectLabel(effect: SentenceItem['textAnimationE
   const resolvedEffect = resolveLegacyTextAnimationEffect(effect);
 
   if (resolvedEffect === 'popInBounceHook') return 'Pop in bounce';
+  if (resolvedEffect === 'typewriter') return 'Typewriter';
   if (resolvedEffect === 'scalePunchZoom') return 'Scale punch zoom';
   if (resolvedEffect === 'maskReveal') return 'Mask reveal';
   if (resolvedEffect === 'glitchFlashHook') return 'Glitch flash hook';
@@ -284,6 +315,10 @@ export function getDefaultTextAnimationSettings(
     animatePerWord: false,
     wordDelaySeconds: DEFAULT_TEXT_ANIMATION_WORD_DELAY,
     textCase: 'uppercase',
+    textBoxEnabled: false,
+    textBoxPaddingPx: isShortVideo ? 12 : 10,
+    textBoxRadiusPx: isShortVideo ? 12 : 10,
+    textBoxColor: '#0f172a',
   };
 
   if (normalizedEffect === 'popInBounceHook') {
@@ -293,6 +328,17 @@ export function getDefaultTextAnimationSettings(
       offsetY: -10,
       animationIntensity: 1.02,
       shadowOpacity: 0.4,
+    };
+  }
+
+  if (normalizedEffect === 'typewriter') {
+    return {
+      ...defaults,
+      speed: 0.95,
+      fontWeight: 780,
+      letterSpacingEm: 0.01,
+      animationIntensity: 0.76,
+      maxWidthPercent: isShortVideo ? 74 : 48,
     };
   }
 
@@ -384,6 +430,10 @@ export function normalizeTextAnimationSettings(
   );
   const resolvedPresetKey =
     resolveLegacyTextAnimationEffect(settings?.presetKey) ?? defaults.presetKey;
+  const animatePerWord =
+    resolvedPresetKey !== 'typewriter' && settings?.animatePerWord === true;
+  const textBoxEnabled =
+    resolvedPresetKey !== 'typewriter' && settings?.textBoxEnabled === true;
 
   return {
     presetKey: resolvedPresetKey,
@@ -417,7 +467,7 @@ export function normalizeTextAnimationSettings(
       TEXT_ANIMATION_START_DELAY_MIN,
       TEXT_ANIMATION_START_DELAY_MAX,
     ),
-    animatePerWord: settings?.animatePerWord === true,
+    animatePerWord,
     wordDelaySeconds: getNumeric(
       settings?.wordDelaySeconds,
       defaults.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY,
@@ -425,6 +475,10 @@ export function normalizeTextAnimationSettings(
       TEXT_ANIMATION_WORD_DELAY_MAX,
     ),
     textCase: getEnumValue(settings?.textCase, TEXT_CASE_MODE_VALUES, defaults.textCase ?? 'uppercase'),
+    textBoxEnabled,
+    textBoxPaddingPx: getNumeric(settings?.textBoxPaddingPx, defaults.textBoxPaddingPx ?? 12, 0, 48),
+    textBoxRadiusPx: getNumeric(settings?.textBoxRadiusPx, defaults.textBoxRadiusPx ?? 12, 0, 48),
+    textBoxColor: getColor(settings?.textBoxColor, defaults.textBoxColor ?? '#0f172a'),
   };
 }
 
@@ -661,6 +715,51 @@ function buildAnimatedTextFilter(params: {
   return parts.join(' ') || undefined;
 }
 
+function getTypewriterVisibleGraphemeCount(
+  elapsedMs: number,
+  durationMs: number,
+  totalGraphemes: number,
+) {
+  if (totalGraphemes <= 0) {
+    return 0;
+  }
+
+  const progress = clamp(elapsedMs / Math.max(durationMs, 1), 0, 1);
+  if (progress <= 0) {
+    return 0;
+  }
+  if (progress >= 1) {
+    return totalGraphemes;
+  }
+
+  return Math.min(totalGraphemes, Math.max(1, Math.ceil(progress * totalGraphemes)));
+}
+
+function buildTextBoxStyle(settings: TextAnimationSettings): CSSProperties | null {
+  if (settings.textBoxEnabled !== true) {
+    return null;
+  }
+
+  return {
+    backgroundColor: settings.textBoxColor,
+    padding: `${(settings.textBoxPaddingPx ?? 12).toFixed(1)}px`,
+    borderRadius: `${(settings.textBoxRadiusPx ?? 12).toFixed(1)}px`,
+  };
+}
+
+function renderAccentText(displayText: string, accentBoundary: number, accentColor?: string) {
+  const safeBoundary = clamp(accentBoundary, 0, displayText.length);
+
+  return (
+    <>
+      <span style={{ color: accentColor }}>
+        {displayText.slice(0, safeBoundary)}
+      </span>
+      {displayText.slice(safeBoundary)}
+    </>
+  );
+}
+
 function getAnimatedTextStyle(
   effect: TextAnimationEffect,
   elapsedMs: number,
@@ -676,6 +775,12 @@ function getAnimatedTextStyle(
     SLIDE_CUT_EASING[3],
   );
   const normalizedIntensity = clamp(animationIntensity, 0, 1.2);
+
+  if (effect === 'typewriter') {
+    return {
+      opacity: progress <= 0 ? 0 : 1,
+    };
+  }
 
   if (effect === 'popInBounceHook') {
     const startScale = 0.58 - normalizedIntensity * 0.06;
@@ -916,7 +1021,10 @@ export function TextAnimationPreview({
   );
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
   const words = resolvedText.split(/\s+/u).filter(Boolean);
-  const animatePerWord = resolvedSettings.animatePerWord === true && words.length > 1;
+  const animatePerWord =
+    resolvedEffect !== 'typewriter' &&
+    resolvedSettings.animatePerWord === true &&
+    words.length > 1;
   const startDelayMs = getStartDelayMs(resolvedSettings);
   const wordDelayMs = getWordDelayMs(resolvedSettings);
   const totalAnimationWindowMs =
@@ -938,9 +1046,13 @@ export function TextAnimationPreview({
     normalizedVisualEffect === 'glassReflections' ||
     normalizedVisualEffect === 'glassStrong' ||
     (resolvedBackgroundLook.glassOverlayOpacity ?? 0) > 0.001;
+  const accentBoundary = words[0]?.length ?? resolvedText.length;
   const previewSeed = getStablePreviewSeed(
     `${resolvedText}|${resolvedBackgroundImageUrl ?? ''}|${resolvedBackgroundVideoUrl ?? ''}|${String(motionResetKey ?? '')}`,
   );
+  const typewriterGraphemes =
+    resolvedEffect === 'typewriter' ? getGraphemes(resolvedText) : [];
+  const textBoxStyle = buildTextBoxStyle(resolvedSettings);
   const lightingX = ((previewSeed * 320) % 100 + 100) % 100;
   const lightingY = (35 + 25 * Math.sin(previewSeed * 8) + 100) % 100;
   const lightingAlpha =
@@ -977,6 +1089,19 @@ export function TextAnimationPreview({
   }, [enableMotion, motionResetKey, repeatMotion, totalAnimationWindowMs]);
 
   const delayedAnimationElapsedMs = Math.max(0, animationElapsedMs - startDelayMs);
+  const typewriterVisibleText =
+    resolvedEffect === 'typewriter'
+      ? typewriterGraphemes
+          .slice(
+            0,
+            getTypewriterVisibleGraphemeCount(
+              delayedAnimationElapsedMs,
+              animationDurationMs,
+              typewriterGraphemes.length,
+            ),
+          )
+          .join('')
+      : '';
 
   const blockAnimatedStyle = enableMotion
     ? getAnimatedTextStyle(
@@ -987,17 +1112,29 @@ export function TextAnimationPreview({
       )
     : null;
   const textStyle: CSSProperties = {
+    display: 'inline-block',
     color: resolvedSettings.textColor,
     fontWeight: resolvedSettings.fontWeight,
     fontSize: `clamp(1.2rem, ${(resolvedSettings.fontSizePercent ?? 12).toFixed(2)}cqw, 5.8rem)`,
     lineHeight: String(resolvedSettings.lineHeight ?? 0.92),
     letterSpacing: `${(resolvedSettings.letterSpacingEm ?? 0.02).toFixed(3)}em`,
     textAlign: contentAlign,
-    maxWidth: `${(resolvedSettings.maxWidthPercent ?? 76).toFixed(1)}%`,
+    maxWidth: '100%',
     fontFamily: resolvedFontFamily,
     textShadow: `0 ${(6 + (resolvedSettings.animationIntensity ?? 0.82) * 6).toFixed(1)}px ${(resolvedSettings.shadowBlurPx ?? 18).toFixed(1)}px rgba(2, 6, 23, ${(resolvedSettings.shadowOpacity ?? 0.34).toFixed(3)})`,
     WebkitTextStroke: strokeWidthPx > 0 ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
     whiteSpace: 'pre-wrap',
+  };
+  const blockWrapperStyle: CSSProperties = {
+    display: 'inline-block',
+    maxWidth: `${(resolvedSettings.maxWidthPercent ?? 76).toFixed(1)}%`,
+    boxSizing: 'content-box',
+    position: resolvedEffect === 'typewriter' ? 'relative' : undefined,
+    ...(textBoxStyle ?? null),
+    ...(animatePerWord ? null : blockAnimatedStyle),
+    willChange: enableMotion && !animatePerWord
+      ? 'transform, opacity, clip-path, filter'
+      : undefined,
   };
 
   return (
@@ -1104,47 +1241,73 @@ export function TextAnimationPreview({
         }}
       >
         <div
-          style={{
-            ...textStyle,
-            ...(animatePerWord ? null : blockAnimatedStyle),
-            willChange: enableMotion && !animatePerWord
-              ? 'transform, opacity, clip-path, filter'
-              : undefined,
-          }}
+          style={blockWrapperStyle}
         >
           {animatePerWord
-            ? words.map((word, index) => {
-                const animatedWordStyle = enableMotion
-                ? getAnimatedTextStyle(
-                  resolvedEffect,
-                      Math.max(0, delayedAnimationElapsedMs - index * wordDelayMs),
-                      animationDurationMs,
-                      resolvedSettings.animationIntensity ?? 0.82,
-                    )
-                  : null;
-                const isAccentWord = index === 0;
-                return (
-                  <span key={`${word}-${index}`}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
-                        ...(animatedWordStyle ?? null),
-                        willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
-                      }}
-                    >
-                      {word}
+            ? (
+              <div style={textStyle}>
+                {words.map((word, index) => {
+                  const animatedWordStyle = enableMotion
+                    ? getAnimatedTextStyle(
+                        resolvedEffect,
+                        Math.max(0, delayedAnimationElapsedMs - index * wordDelayMs),
+                        animationDurationMs,
+                        resolvedSettings.animationIntensity ?? 0.82,
+                      )
+                    : null;
+                  const isAccentWord = index === 0;
+                  return (
+                    <span key={`${word}-${index}`}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
+                          ...(animatedWordStyle ?? null),
+                          willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
+                        }}
+                      >
+                        {word}
+                      </span>
+                      {index < words.length - 1 ? ' ' : null}
                     </span>
-                    {index < words.length - 1 ? ' ' : null}
-                  </span>
-                );
-              })
-            : (
+                  );
+                })}
+              </div>
+            )
+            : resolvedEffect === 'typewriter'
+              ? (
+                <>
+                  <div style={{ ...textStyle, opacity: 0 }}>
+                    {renderAccentText(
+                      resolvedText,
+                      accentBoundary,
+                      resolvedSettings.accentColor,
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      ...textStyle,
+                      position: 'absolute',
+                      inset: 0,
+                    }}
+                  >
+                    {renderAccentText(
+                      typewriterVisibleText,
+                      accentBoundary,
+                      resolvedSettings.accentColor,
+                    )}
+                  </div>
+                </>
+              )
+              : (
               <>
-                <span style={{ color: resolvedSettings.accentColor }}>
-                  {words.slice(0, 1).join(' ')}
-                </span>
-                {words.length > 1 ? ` ${words.slice(1).join(' ')}` : ''}
+                <div style={textStyle}>
+                  {renderAccentText(
+                    resolvedText,
+                    accentBoundary,
+                    resolvedSettings.accentColor,
+                  )}
+                </div>
               </>
             )}
         </div>
