@@ -351,6 +351,16 @@ const serializeDetachedSentenceSoundEffects = (
     }));
 };
 
+const areDetachedSentenceSoundEffectsEqual = (
+  left: SentenceSoundEffectItem[] | null | undefined,
+  right: SentenceSoundEffectItem[] | null | undefined,
+) => {
+  return (
+    JSON.stringify(serializeDetachedSentenceSoundEffects(left)) ===
+    JSON.stringify(serializeDetachedSentenceSoundEffects(right))
+  );
+};
+
 const normalizeTextAnimationPresetItem = (
   item: BackendTextAnimationPresetDto | null | undefined,
 ): TextAnimationPresetDto | null => {
@@ -4222,14 +4232,10 @@ export function GeneratePageInner() {
     setIsLoadingVoicesByProvider((prev) => ({ ...prev, [provider]: true }));
     setVoicesErrorByProvider((prev) => ({ ...prev, [provider]: null }));
     try {
-      const res = await fetch(
-        `${API_URL}/voice-overs?provider=${encodeURIComponent(provider)}`,
-      );
-      if (!res.ok) {
-        throw new Error('Failed to load voices');
-      }
-
-      const data = (await res.json()) as VoiceOverOption[];
+      const res = await api.get<VoiceOverOption[]>('/voice-overs', {
+        params: { provider },
+      });
+      const data = Array.isArray(res.data) ? res.data : [];
       setVoicesByProvider((prev) => ({ ...prev, [provider]: data }));
 
       setSelectedVoiceIdByProvider((prev) => {
@@ -5655,23 +5661,15 @@ export function GeneratePageInner() {
         return;
       }
 
-      const response = await fetch(
-        `${API_URL}/voice-overs/preview/${encodeURIComponent(voiceId)}`,
+      const response = await api.post<{ preview_url?: string }>(
+        `/voice-overs/preview/${encodeURIComponent(voiceId)}`,
+        undefined,
         {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
           signal: controller.signal,
         },
       );
 
-      if (!response.ok) {
-        throw new Error('Failed to generate preview');
-      }
-
-      const data = (await response.json()) as { preview_url?: string };
-      const url = String(data?.preview_url ?? '').trim();
+      const url = String(response.data?.preview_url ?? '').trim();
       if (!url) {
         throw new Error('Missing preview_url from server');
       }
@@ -10377,21 +10375,13 @@ export function GeneratePageInner() {
     setSyncVoicesResult(null);
     setIsSyncingVoices(true);
     try {
-      const res = await fetch(`${API_URL}/voice-overs/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to sync voices');
-      }
-
-      const data = (await res.json()) as {
+      const res = await api.post<{
         imported: number;
         updated: number;
-      };
+      }>('/voice-overs/sync', undefined, {
+        params: { provider: voiceProvider },
+      });
+      const data = res.data;
       setSyncVoicesResult(
         `Synced voices successfully. Imported: ${data.imported}, Updated: ${data.updated}`,
       );
@@ -10627,7 +10617,11 @@ export function GeneratePageInner() {
                 currentOverlayPreset.url !== overlaySourceUrl ||
                 JSON.stringify(
                   normalizeOverlaySettings(currentOverlayPreset.settings ?? null),
-                ) !== JSON.stringify(normalizedOverlaySettings)),
+                ) !== JSON.stringify(normalizedOverlaySettings) ||
+                !areDetachedSentenceSoundEffectsEqual(
+                  currentOverlayPreset.soundEffects,
+                  s.overlaySoundEffects,
+                )),
           );
           const savedOverlayPreset = overlayPresetNeedsCreate
             ? await saveOverlayPresetRequest({
@@ -10635,6 +10629,7 @@ export function GeneratePageInner() {
                 settings: normalizedOverlaySettings ?? getDefaultOverlaySettings('image'),
                 file: s.overlayFile ?? null,
                 sourceUrl: overlaySourceUrl,
+                soundEffects: s.overlaySoundEffects,
               })
             : currentOverlayPreset;
           const overlayId = savedOverlayPreset?.id ?? s.customOverlayId ?? null;

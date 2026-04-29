@@ -1049,17 +1049,14 @@ export function SceneEditorSection({
               disabled={!onGenerateAllImages || isGeneratingAllImages}
               className="gap-2 h-10 px-5 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {isGeneratingAllImages ? (
-                <>
+              <>
+                {isGeneratingAllImages ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm font-semibold">Generating...</span>
-                </>
-              ) : (
-                <>
+                ) : (
                   <Sparkles className="h-4 w-4" />
-                  <span className="text-sm font-semibold">Generate All Images</span>
-                </>
-              )}
+                )}
+                <span className="text-sm font-semibold">Generate All Images</span>
+              </>
             </Button>
             <div className="flex h-10 overflow-hidden rounded-lg border border-fuchsia-200 bg-white shadow-sm transition-all hover:shadow">
               <Button
@@ -1071,17 +1068,14 @@ export function SceneEditorSection({
                 className="h-full gap-2 rounded-none px-4 text-fuchsia-700 hover:bg-fuchsia-50 hover:text-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-70"
                 title="Use AI to apply look settings to all eligible image scenes"
               >
-                {isApplyingBulkLookEffects ? (
-                  <>
+                <>
+                  {isApplyingBulkLookEffects ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm font-semibold">Applying Look...</span>
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <Sparkles className="h-4 w-4" />
-                    <span className="text-sm font-semibold">AI Look</span>
-                  </>
-                )}
+                  )}
+                  <span className="text-sm font-semibold">AI Look</span>
+                </>
               </Button>
               <div className="my-1.5 w-px bg-fuchsia-200" />
               <Button
@@ -1107,17 +1101,14 @@ export function SceneEditorSection({
                 className="h-full gap-2 rounded-none px-4 text-sky-700 hover:bg-sky-50 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
                 title="Use AI to apply motion settings to all eligible image scenes"
               >
-                {isApplyingBulkMotionEffects ? (
-                  <>
+                <>
+                  {isApplyingBulkMotionEffects ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm font-semibold">Applying Motion...</span>
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <Clapperboard className="h-4 w-4" />
-                    <span className="text-sm font-semibold">AI Motion</span>
-                  </>
-                )}
+                  )}
+                  <span className="text-sm font-semibold">AI Motion</span>
+                </>
               </Button>
               <div className="my-1.5 w-px bg-sky-200" />
               <Button

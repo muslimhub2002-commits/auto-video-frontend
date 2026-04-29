@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { API_URL } from '@/lib/api';
+import { API_URL, api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -176,33 +176,11 @@ export function VoiceOverSection({
     setImportElevenLabsError(null);
 
     try {
-      const res = await fetch(`${API_URL}/voice-overs/elevenlabs/import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ voiceId: trimmed }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        let message = 'Failed to import voice.';
-        try {
-          const maybeJson = text ? JSON.parse(text) : null;
-          if (maybeJson && typeof maybeJson.message === 'string') {
-            message = maybeJson.message;
-          }
-        } catch {
-          // ignore JSON parse errors
-        }
-
-        console.error('Import ElevenLabs voice failed', res.status, text);
-        setImportElevenLabsError(message);
-        return;
-      }
-
-      const data = (await res.json()) as { voice_id?: string };
-      const importedVoiceId = String(data.voice_id ?? '').trim();
+      const res = await api.post<{ voice_id?: string }>(
+        '/voice-overs/elevenlabs/import',
+        { voiceId: trimmed },
+      );
+      const importedVoiceId = String(res.data?.voice_id ?? '').trim();
       if (importedVoiceId) {
         onSelectVoice(importedVoiceId);
       }
@@ -213,7 +191,21 @@ export function VoiceOverSection({
       onRefreshVoices();
     } catch (error) {
       console.error('Import ElevenLabs voice failed', error);
-      setImportElevenLabsError('Failed to import voice. Please try again.');
+      const message = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+      if (Array.isArray(message)) {
+        const firstMessage = message.find(
+          (item) => typeof item === 'string' && item.trim().length > 0,
+        );
+        setImportElevenLabsError(
+          typeof firstMessage === 'string'
+            ? firstMessage.trim()
+            : 'Failed to import voice. Please try again.',
+        );
+      } else if (typeof message === 'string' && message.trim().length > 0) {
+        setImportElevenLabsError(message.trim());
+      } else {
+        setImportElevenLabsError('Failed to import voice. Please try again.');
+      }
     } finally {
       setIsImportingElevenLabsVoice(false);
     }

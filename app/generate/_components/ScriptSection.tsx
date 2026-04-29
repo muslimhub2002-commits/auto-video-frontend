@@ -525,17 +525,14 @@ export function ScriptSection(props: ScriptSectionProps) {
               disabled={isRandomScriptLoading || isScriptIdeasLoading}
               className="gap-2 bg-linear-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white shadow-md hover:shadow-lg transition-all"
             >
-              {isRandomScriptLoading ? (
-                <>
+              <>
+                {isRandomScriptLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Generating script...
-                </>
-              ) : (
-                <>
+                ) : (
                   <Sparkles className="h-4 w-4" />
-                  Generate AI Script
-                </>
-              )}
+                )}
+                Generate AI Script
+              </>
             </Button>
             <Button
               type="button"
@@ -544,17 +541,14 @@ export function ScriptSection(props: ScriptSectionProps) {
               disabled={isScriptIdeasLoading || isRandomScriptLoading}
               className="gap-2 bg-linear-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-md hover:shadow-lg transition-all"
             >
-              {isScriptIdeasLoading ? (
-                <>
+              <>
+                {isScriptIdeasLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Generating ideas...
-                </>
-              ) : (
-                <>
+                ) : (
                   <Lightbulb className="h-4 w-4" />
-                  Generate Script Ideas
-                </>
-              )}
+                )}
+                Generate Script Ideas
+              </>
             </Button>
             {shouldShowEnhanceButton && (
               <Button
@@ -564,17 +558,14 @@ export function ScriptSection(props: ScriptSectionProps) {
                 disabled={isEnhanceDisabled}
                 className="gap-2 bg-linear-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isEnhancingScript ? (
-                  <>
+                <>
+                  {isEnhancingScript ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Enhancing script...
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <Sparkles className="h-4 w-4" />
-                    Enhance
-                  </>
-                )}
+                  )}
+                  Enhance
+                </>
               </Button>
             )}
             <Button
@@ -584,17 +575,14 @@ export function ScriptSection(props: ScriptSectionProps) {
               disabled={isSplitting || !script.trim() || isRandomScriptLoading}
               className="gap-2 bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-md hover:shadow-lg transition-all"
             >
-              {isSplitting ? (
-                <>
+              <>
+                {isSplitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Splitting...
-                </>
-              ) : (
-                <>
+                ) : (
                   <FileText className="h-4 w-4" />
-                  Split into Sentences
-                </>
-              )}
+                )}
+                Split into Sentences
+              </>
             </Button>
 
             <Button
@@ -614,17 +602,14 @@ export function ScriptSection(props: ScriptSectionProps) {
               disabled={isSavingDraft || !script.trim()}
               className="gap-2 bg-linear-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black text-white shadow-md hover:shadow-lg transition-all"
             >
-              {isSavingDraft ? (
-                <>
+              <>
+                {isSavingDraft ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Saving draft...
-                </>
-              ) : (
-                <>
+                ) : (
                   <Save className="h-4 w-4" />
-                  Save as Draft
-                </>
-              )}
+                )}
+                Save as Draft
+              </>
             </Button>
             <Button
               type="button"
