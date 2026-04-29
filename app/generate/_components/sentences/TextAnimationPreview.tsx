@@ -93,6 +93,7 @@ export type TextAnimationSettings = {
   lineHeight?: number;
   textColor?: string;
   accentColor?: string;
+  strokeEnabled?: boolean;
   strokeColor?: string;
   strokeWidthPx?: number;
   shadowOpacity?: number;
@@ -113,6 +114,26 @@ export type TextAnimationSettings = {
   textBoxRadiusPx?: number;
   textBoxColor?: string;
 };
+
+export function getTextAnimationSettingsForEffectChange(
+  effect: SentenceItem['textAnimationEffect'] | null | undefined,
+  currentSettings: Record<string, unknown> | TextAnimationSettings | null | undefined,
+  isShortVideo = true,
+): TextAnimationSettings {
+  const nextEffect = resolveLegacyTextAnimationEffect(effect) ?? 'slideCutFast';
+  const defaults = getDefaultTextAnimationSettings(nextEffect, isShortVideo);
+  const current = normalizeTextAnimationSettings(currentSettings, nextEffect, isShortVideo);
+
+  return normalizeTextAnimationSettings(
+    {
+      ...defaults,
+      ...current,
+      presetKey: nextEffect,
+    },
+    nextEffect,
+    isShortVideo,
+  );
+}
 
 export type TextAnimationPresetDto = {
   id: string;
@@ -247,9 +268,8 @@ export function getTextAnimationFontSizePx(containerWidth: number, fontSizePerce
 }
 
 export function normalizeTextAnimationText(value: string | null | undefined, sentenceText?: string | null) {
-  const raw = stripBracketedText(value);
-  const words = getWords(raw);
-  if (words.length > 0) {
+  const raw = String(value ?? '');
+  if (raw.trim().length > 0) {
     return raw;
   }
   return getDefaultTextAnimationText(sentenceText);
@@ -284,15 +304,15 @@ export function getDefaultTextAnimationSettings(
   isShortVideo = true,
 ): TextAnimationSettings {
   const normalizedEffect = resolveLegacyTextAnimationEffect(effect) ?? 'slideCutFast';
-  const baseFontSize = isShortVideo ? 13.2 : 8.6;
+  const baseFontSize = 12;
   const defaults: TextAnimationSettings = {
     presetKey: normalizedEffect,
     speed: DEFAULT_TEXT_ANIMATION_SPEED,
-    horizontalAlign: 'left',
-    contentAlign: 'left',
+    horizontalAlign: 'center',
+    contentAlign: 'center',
     verticalAlign: 'middle',
-    offsetX: -5,
-    offsetY: -14,
+    offsetX: 0,
+    offsetY: 0,
     fontSizePercent: baseFontSize,
     maxWidthPercent: isShortVideo ? 72 : 46,
     fontWeight: 820,
@@ -300,6 +320,7 @@ export function getDefaultTextAnimationSettings(
     lineHeight: 0.92,
     textColor: '#ffffff',
     accentColor: '#ffd60a',
+    strokeEnabled: false,
     strokeColor: '#0f172a',
     strokeWidthPx: 0,
     shadowOpacity: 0.34,
@@ -434,6 +455,10 @@ export function normalizeTextAnimationSettings(
     resolvedPresetKey !== 'typewriter' && settings?.animatePerWord === true;
   const textBoxEnabled =
     resolvedPresetKey !== 'typewriter' && settings?.textBoxEnabled === true;
+  const strokeWidthPx = getNumeric(settings?.strokeWidthPx, defaults.strokeWidthPx ?? 0, 0, 8);
+  const strokeEnabled =
+    settings?.strokeEnabled === true ||
+    (settings?.strokeEnabled == null && strokeWidthPx > 0);
 
   return {
     presetKey: resolvedPresetKey,
@@ -450,8 +475,9 @@ export function normalizeTextAnimationSettings(
     lineHeight: getNumeric(settings?.lineHeight, defaults.lineHeight ?? 0.92, 0.75, 1.5),
     textColor: getColor(settings?.textColor, defaults.textColor ?? '#ffffff'),
     accentColor: getColor(settings?.accentColor, defaults.accentColor ?? '#facc15'),
+    strokeEnabled,
     strokeColor: getColor(settings?.strokeColor, defaults.strokeColor ?? '#0f172a'),
-    strokeWidthPx: getNumeric(settings?.strokeWidthPx, defaults.strokeWidthPx ?? 0, 0, 8),
+    strokeWidthPx,
     shadowOpacity: getNumeric(settings?.shadowOpacity, defaults.shadowOpacity ?? 0.34, 0, 1),
     shadowBlurPx: getNumeric(settings?.shadowBlurPx, defaults.shadowBlurPx ?? 18, 0, 48),
     backgroundMode: getEnumValue(settings?.backgroundMode, TEXT_BACKGROUND_MODE_VALUES, defaults.backgroundMode ?? 'inheritImage'),
@@ -1020,6 +1046,7 @@ export function TextAnimationPreview({
     BACKGROUND_PREVIEW_MOTION_DURATION_MS / getDefaultImageMotionSpeed(isShortVideo),
   );
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
+  const strokeEnabled = resolvedSettings.strokeEnabled === true && strokeWidthPx > 0;
   const words = resolvedText.split(/\s+/u).filter(Boolean);
   const animatePerWord =
     resolvedEffect !== 'typewriter' &&
@@ -1122,7 +1149,8 @@ export function TextAnimationPreview({
     maxWidth: '100%',
     fontFamily: resolvedFontFamily,
     textShadow: `0 ${(6 + (resolvedSettings.animationIntensity ?? 0.82) * 6).toFixed(1)}px ${(resolvedSettings.shadowBlurPx ?? 18).toFixed(1)}px rgba(2, 6, 23, ${(resolvedSettings.shadowOpacity ?? 0.34).toFixed(3)})`,
-    WebkitTextStroke: strokeWidthPx > 0 ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
+    WebkitTextStroke: strokeEnabled ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
+    paintOrder: 'stroke fill',
     whiteSpace: 'pre-wrap',
   };
   const blockWrapperStyle: CSSProperties = {

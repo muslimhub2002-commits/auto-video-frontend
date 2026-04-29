@@ -89,6 +89,7 @@ import {
 } from './ImageEffectPreview';
 import {
   getDefaultTextAnimationSettings,
+  getTextAnimationSettingsForEffectChange,
   getTextAnimationEffectLabel,
   normalizeTextAnimationText,
   normalizeTextAnimationSettings,
@@ -1611,7 +1612,11 @@ function SentenceEditorCardComponent({
     onSentencePatch({
       textAnimationEffect: effect,
       customTextAnimationId: null,
-      textAnimationSettings: getDefaultTextAnimationSettings(effect, isShortVideo),
+      textAnimationSettings: getTextAnimationSettingsForEffectChange(
+        effect,
+        item.textAnimationSettings,
+        isShortVideo,
+      ),
       textSoundEffects: [],
     });
   };
@@ -2984,10 +2989,10 @@ function SentenceEditorCardComponent({
                       Hook text
                     </label>
                     <Input
-                      value={normalizeTextAnimationText(item.textAnimationText)}
+                      value={String(item.textAnimationText ?? '')}
                       onChange={(event) => {
-                        const nextText = normalizeTextAnimationText(event.target.value);
-                        onSentencePatch({ textAnimationText: nextText || null });
+                        const nextText = event.target.value;
+                        onSentencePatch({ textAnimationText: nextText.trim().length > 0 ? nextText : null });
                       }}
                       placeholder={resolveTextAnimationText(null, item.text)}
                       className="h-11 rounded-xl border-amber-200 bg-white"

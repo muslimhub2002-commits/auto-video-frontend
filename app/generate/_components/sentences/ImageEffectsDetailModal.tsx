@@ -83,6 +83,7 @@ import {
   DEFAULT_TEXT_ANIMATION_START_DELAY,
   DEFAULT_TEXT_ANIMATION_WORD_DELAY,
   getDefaultTextAnimationSettings,
+  getTextAnimationSettingsForEffectChange,
   getTextAnimationEffectLabel,
   normalizeTextAnimationText,
   normalizeTextAnimationSettings,
@@ -548,6 +549,10 @@ export function ImageEffectsDetailModal({
   const [isLoadingMixEditor, setIsLoadingMixEditor] = useState(false);
   const [isApplyingSingleSoundEffectEdit, setIsApplyingSingleSoundEffectEdit] = useState(false);
   const [isApplyingMixEdit, setIsApplyingMixEdit] = useState(false);
+  const [isSavingMixByKind, setIsSavingMixByKind] = useState<{
+    text: boolean;
+    overlay: boolean;
+  }>({ text: false, overlay: false });
   const [soundEffectEditError, setSoundEffectEditError] = useState<string | null>(null);
   const [soundEffectMixError, setSoundEffectMixError] = useState<string | null>(null);
   const [textSoundEffectsError, setTextSoundEffectsError] = useState<string | null>(null);
@@ -1186,6 +1191,55 @@ export function ImageEffectsDetailModal({
     }
   };
 
+  const handleSaveMix = async (kind: 'text' | 'overlay') => {
+    const items = getDraftSoundEffects(kind);
+    if (items.length < 2) {
+      return;
+    }
+
+    setIsSavingMixByKind((prev) => ({ ...prev, [kind]: true }));
+    setSoundEffectsPanelError(kind, null);
+
+    try {
+      const response = await api.post<{
+        id: string;
+        title: string;
+        url: string;
+        volume_percent?: number;
+        audio_settings?: Record<string, unknown> | null;
+        duration_seconds?: number | null;
+      }>('/sound-effects/merge', {
+        title: kind === 'text' ? 'Text sound effects mix' : 'Overlay sound effects mix',
+        items: buildSoundEffectMergeItems(items),
+      });
+
+      const merged = response.data;
+      commitDraftSoundEffects(kind, [
+        {
+          id: merged.id,
+          title: String(merged.title ?? '').trim() || (kind === 'text' ? 'Text sound effects mix' : 'Overlay sound effects mix'),
+          url: merged.url,
+          delaySeconds: 0,
+          volumePercent: Math.max(0, Math.min(300, Number(merged.volume_percent ?? 100) || 100)),
+          audioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
+          defaultAudioSettings: cloneSoundEffectAudioSettings(merged.audio_settings),
+          timingMode: 'withPrevious',
+          durationSeconds:
+            typeof merged.duration_seconds === 'number' && Number.isFinite(merged.duration_seconds)
+              ? Math.max(0, merged.duration_seconds)
+              : null,
+        },
+      ]);
+    } catch (error) {
+      setSoundEffectsPanelError(
+        kind,
+        getApiErrorMessage(error, 'Failed to save mix. Try again.'),
+      );
+    } finally {
+      setIsSavingMixByKind((prev) => ({ ...prev, [kind]: false }));
+    }
+  };
+
   const handleStartFromBeginning = (kind: 'text' | 'overlay') => {
     setPreviewRestartNonce((prev) => prev + 1);
     const items = getDraftSoundEffects(kind);
@@ -1717,7 +1771,9 @@ export function ImageEffectsDetailModal({
     const effect = value.replace('builtin:', '') as SentenceItem['textAnimationEffect'];
     setDraftTextAnimationEffect(effect);
     setDraftCustomTextAnimationId(null);
-    setDraftTextAnimationSettings(getDefaultTextAnimationSettings(effect, isShortVideo));
+    setDraftTextAnimationSettings(
+      getTextAnimationSettingsForEffectChange(effect, draftTextAnimationSettings, isShortVideo),
+    );
     setDraftTextSoundEffects([]);
     setTextActionError(null);
   };
@@ -2390,6 +2446,23 @@ export function ImageEffectsDetailModal({
             Edit whole group
           </Button>
 
+          {items.length > 1 ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSaveMix(kind)}
+              disabled={!canManage || isSavingMixByKind[kind]}
+              className="h-10 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+            >
+              {isSavingMixByKind[kind] ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              Save mix
+            </Button>
+          ) : null}
+
           <Button
             type="button"
             variant="outline"
@@ -2938,10 +3011,8 @@ export function ImageEffectsDetailModal({
                   <label className="space-y-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Hook text</span>
                     <Input
-                      value={normalizeTextAnimationText(draftTextAnimationText)}
-                      onChange={(e) =>
-                        setDraftTextAnimationText(normalizeTextAnimationText(e.target.value))
-                      }
+                      value={String(draftTextAnimationText ?? '')}
+                      onChange={(e) => setDraftTextAnimationText(e.target.value)}
                       placeholder={resolveTextAnimationText(null, sentenceText)}
                       className="h-11 rounded-xl border-slate-200"
                     />
@@ -3080,6 +3151,48 @@ export function ImageEffectsDetailModal({
                       <Input type="color" value={resolvedText.accentColor ?? '#facc15'} onChange={(e) => updateTextSettings({ accentColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
                     </div>
                   </div>
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={resolvedText.strokeEnabled === true}
+                      onChange={(e) =>
+                        updateTextSettings({
+                          strokeEnabled: e.target.checked,
+                          strokeWidthPx: e.target.checked
+                            ? Math.max(1, Number(resolvedText.strokeWidthPx ?? 0) || 2)
+                            : resolvedText.strokeWidthPx ?? 2,
+                        })
+                      }
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="space-y-1">
+                      <span className="block text-sm font-semibold text-slate-900">Enable text stroke</span>
+                      <span className="block text-xs text-slate-500">
+                        Adds an outline around the text and lets you tune its color and strength.
+                      </span>
+                    </span>
+                  </label>
+                  {resolvedText.strokeEnabled === true ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Stroke color</span>
+                        <Input
+                          type="color"
+                          value={resolvedText.strokeColor ?? '#0f172a'}
+                          onChange={(e) => updateTextSettings({ strokeColor: e.target.value })}
+                          className="h-11 rounded-xl border-slate-200 p-2"
+                        />
+                      </div>
+                      <RangeField
+                        label="Stroke strength"
+                        value={Math.max(1, Number(resolvedText.strokeWidthPx ?? 0) || 2)}
+                        min={1}
+                        max={8}
+                        step={0.5}
+                        onChange={(value) => updateTextSettings({ strokeWidthPx: value, strokeEnabled: true })}
+                      />
+                    </div>
+                  ) : null}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <RangeField
                       label="Shadow opacity"

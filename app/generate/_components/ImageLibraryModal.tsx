@@ -114,16 +114,6 @@ const getImageAspectClass = (orientation?: 'portrait' | 'landscape' | null) =>
 const getFreestockImageAspectClass = (orientation?: 'portrait' | 'landscape' | null) =>
   orientation === 'portrait' ? 'aspect-5/6' : 'aspect-square';
 
-const downloadAsset = (url: string, filename: string) => {
-  const link = document.createElement('a');
-  link.href = url;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-};
 
 const toSummaryText = (value: string) => value.trim().replace(/\s+/g, ' ');
 
@@ -1158,12 +1148,12 @@ export function ImageLibraryModal({
                             ) : null}
                           </div>
 
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-2 gap-2">
                             <Button
                               type="button"
                               size="sm"
                               onClick={() => handleSelectFreestockImage(image)}
-                              className="gap-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+                              className="gap-1 w-full bg-indigo-600 hover:bg-indigo-700 text-white"
                             >
                               <Check className="h-3.5 w-3.5" />
                               Select
@@ -1174,7 +1164,7 @@ export function ImageLibraryModal({
                               variant="outline"
                               onClick={() => void handleSaveFreestockImage(image)}
                               disabled={isSaving || isSaved}
-                              className="gap-1"
+                              className="gap-1 w-full"
                             >
                               {isSaving ? (
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1183,16 +1173,7 @@ export function ImageLibraryModal({
                               )}
                               {isSaved ? 'Saved' : 'Save'}
                             </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => downloadAsset(image.downloadUrl, `${image.externalId}.jpg`)}
-                              className="gap-1"
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                              Download
-                            </Button>
+                           
                           </div>
                         </div>
                       </div>
