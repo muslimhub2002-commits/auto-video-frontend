@@ -92,10 +92,14 @@ type SentencesImagesSectionProps = {
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
   isApplyingBulkLookEffects?: boolean;
   onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
+  onOpenBulkLookPresetModal?: (() => void) | (() => Promise<void>);
   onResetBulkLookEffects?: () => void;
+  isApplyingBulkLookPreset?: boolean;
   isApplyingBulkMotionEffects?: boolean;
   onGenerateBulkMotionEffects?: (() => void) | (() => Promise<void>);
+  onOpenBulkMotionPresetModal?: (() => void) | (() => Promise<void>);
   onResetBulkMotionEffects?: () => void;
+  isApplyingBulkMotionPreset?: boolean;
 
   imageAspectRatio: '16:9' | '9:16' | '1:1';
   onImageAspectRatioChange: (value: '16:9' | '9:16' | '1:1') => void;
@@ -305,10 +309,14 @@ export function SentencesImagesSection({
   onGenerateAllImages,
   isApplyingBulkLookEffects = false,
   onGenerateBulkLookEffects,
+  onOpenBulkLookPresetModal,
   onResetBulkLookEffects,
+  isApplyingBulkLookPreset = false,
   isApplyingBulkMotionEffects = false,
   onGenerateBulkMotionEffects,
+  onOpenBulkMotionPresetModal,
   onResetBulkMotionEffects,
+  isApplyingBulkMotionPreset = false,
 
   isLongForm = false,
   shortsTabs = [],
@@ -714,10 +722,14 @@ export function SentencesImagesSection({
               onGenerateAllImages={onGenerateAllImages}
               isApplyingBulkLookEffects={isApplyingBulkLookEffects}
               onGenerateBulkLookEffects={onGenerateBulkLookEffects}
+              onOpenBulkLookPresetModal={onOpenBulkLookPresetModal}
               onResetBulkLookEffects={onResetBulkLookEffects}
+              isApplyingBulkLookPreset={isApplyingBulkLookPreset}
               isApplyingBulkMotionEffects={isApplyingBulkMotionEffects}
               onGenerateBulkMotionEffects={onGenerateBulkMotionEffects}
+              onOpenBulkMotionPresetModal={onOpenBulkMotionPresetModal}
               onResetBulkMotionEffects={onResetBulkMotionEffects}
+              isApplyingBulkMotionPreset={isApplyingBulkMotionPreset}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
               onSaveSentenceVideoToLibrary={onSaveSentenceVideoToLibrary}
               isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryBySentenceId}

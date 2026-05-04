@@ -72,6 +72,9 @@ import {
   getDefaultImageMotionSettings,
   getDefaultImageMotionSpeed,
   getDefaultOverlaySettings,
+  getImageMotionEffectLabel,
+  getVisualEffectLabel,
+  IMAGE_MOTION_EFFECT_SELECT_VALUES,
   normalizeImageFilterSettings,
   normalizeImageMotionSettings,
   normalizeOverlaySettings,
@@ -95,7 +98,21 @@ import type {
   TextAnimationPresetDto,
   TextAnimationSettings,
 } from './_components/sentences/TextAnimationPreview';
-import { hasCustomLookSelection, hasCustomMotionSelection } from './_utils/imageEffectSelection';
+import {
+  buildLookPresetSelectionPatch,
+  buildMotionPresetSelectionPatch,
+  hasCustomLookSelection,
+  hasCustomMotionSelection,
+  VISUAL_EFFECT_SELECT_VALUES,
+} from './_utils/imageEffectSelection';
+import {
+  BulkSceneEffectPresetModal,
+  type BulkSceneEffectPresetOption,
+} from './_components/sentences/BulkSceneEffectPresetModal';
+import {
+  BulkSceneEffectScenePickerModal,
+  type BulkSceneEffectScenePickerItem,
+} from './_components/sentences/BulkSceneEffectScenePickerModal';
 
 type ScriptCharacter = {
   key: string;
@@ -421,6 +438,17 @@ type BulkMotionEffectResponse = {
 
 type BulkAiEffectKind = 'look' | 'motion';
 
+type BulkManualEffectModalState = {
+  kind: BulkAiEffectKind;
+  selectedValue: string;
+};
+
+type BulkManualEffectScenePickerState = {
+  kind: BulkAiEffectKind;
+  selectedValue: string;
+  selectedSentenceIds: string[];
+};
+
 type BulkLookEffectRequestItem = {
   index: number;
   sentenceId: string;
@@ -683,6 +711,67 @@ function resolveOverlaySceneRenderAsset(
     file: sentence.overlayFile ?? null,
     url: String(sentence.overlayUrl ?? '').trim() || null,
     mimeType: String(sentence.overlayMimeType ?? '').trim() || null,
+  };
+}
+
+type BulkSceneEffectPreviewAsset = {
+  transport: 'image' | 'video' | 'none';
+  file: File | null;
+  url: string | null;
+};
+
+function getFirstNonEmptyUrl(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    const resolved = String(candidate ?? '').trim();
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
+function resolveBulkSceneEffectPreviewAsset(
+  sentence: Pick<
+    SentenceItem,
+    | 'sceneTab'
+    | 'mediaMode'
+    | 'image'
+    | 'imageUrl'
+    | 'startImage'
+    | 'startImageUrl'
+    | 'endImage'
+    | 'endImageUrl'
+    | 'video'
+    | 'videoUrl'
+  >,
+): BulkSceneEffectPreviewAsset {
+  const sceneTab = resolveSentenceSceneTab(sentence);
+
+  if (sceneTab === 'video') {
+    return {
+      transport: 'video',
+      file: sentence.video ?? null,
+      url: getFirstNonEmptyUrl(sentence.videoUrl),
+    };
+  }
+
+  if (sceneTab === 'image') {
+    return {
+      transport: 'image',
+      file: sentence.image ?? sentence.startImage ?? sentence.endImage ?? null,
+      url: getFirstNonEmptyUrl(
+        sentence.imageUrl,
+        sentence.startImageUrl,
+        sentence.endImageUrl,
+      ),
+    };
+  }
+
+  return {
+    transport: 'none',
+    file: null,
+    url: null,
   };
 }
 
@@ -1836,6 +1925,13 @@ export function GeneratePageInner() {
       existingCount: number;
       uneditedCount: number;
     }
+  >(null);
+  const [isApplyingManualBulkEffect, setIsApplyingManualBulkEffect] = useState<BulkAiEffectKind | null>(null);
+  const [bulkManualEffectModal, setBulkManualEffectModal] = useState<
+    BulkManualEffectModalState | null
+  >(null);
+  const [bulkManualEffectScenePicker, setBulkManualEffectScenePicker] = useState<
+    BulkManualEffectScenePickerState | null
   >(null);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [libraryTarget, setLibraryTarget] = useState<
@@ -9378,6 +9474,301 @@ export function GeneratePageInner() {
     }, []);
   }, [sentences]);
 
+  const bulkLookPresetOptions = useMemo<BulkSceneEffectPresetOption[]>(
+    () => [
+      { value: 'builtin:none', label: 'None', group: 'built-in' },
+      ...VISUAL_EFFECT_SELECT_VALUES.map((value) => ({
+        value: `builtin:${value}`,
+        label: getVisualEffectLabel(value),
+        group: 'built-in' as const,
+      })),
+      ...imageFilterPresets.map((preset) => ({
+        value: `custom:${preset.id}`,
+        label: preset.title,
+        group: 'saved' as const,
+      })),
+    ],
+    [imageFilterPresets],
+  );
+  const bulkMotionPresetOptions = useMemo<BulkSceneEffectPresetOption[]>(
+    () => [
+      ...IMAGE_MOTION_EFFECT_SELECT_VALUES.map((value) => ({
+        value: `builtin:${value}`,
+        label: getImageMotionEffectLabel(value),
+        group: 'built-in' as const,
+      })),
+      ...motionEffectPresets.map((preset) => ({
+        value: `custom:${preset.id}`,
+        label: preset.title,
+        group: 'saved' as const,
+      })),
+    ],
+    [motionEffectPresets],
+  );
+
+  const getDefaultBulkManualEffectValue = useCallback(
+    (kind: BulkAiEffectKind) =>
+      kind === 'look'
+        ? `builtin:${VISUAL_EFFECT_SELECT_VALUES[0] ?? 'colorGrading'}`
+        : 'builtin:default',
+    [],
+  );
+
+  const getBulkManualEffectSceneItems = useCallback(
+    (kind: BulkAiEffectKind): BulkSceneEffectScenePickerItem[] => {
+      return sentences.map((sentence, index) => {
+        const sceneTab = resolveSentenceSceneTab(sentence);
+        const previewAsset = resolveBulkSceneEffectPreviewAsset(sentence);
+        let disabled = false;
+        let disabledReason: string | undefined;
+
+        if (kind === 'motion') {
+          if (sceneTab === 'video') {
+            disabled = true;
+            disabledReason = 'Video scenes do not use image motion effects.';
+          } else if (sceneTab === 'text') {
+            const backgroundMode = resolveTextSceneBackgroundMode(sentence, effectiveIsShort);
+            if (backgroundMode === 'video' || backgroundMode === 'inheritVideo') {
+              disabled = true;
+              disabledReason = 'This text scene currently uses a video background.';
+            } else if (backgroundMode === 'solid' || backgroundMode === 'gradient') {
+              disabled = true;
+              disabledReason = 'This text scene currently uses a non-image background.';
+            }
+          } else if (sceneTab === 'overlay') {
+            const backgroundMode = resolveOverlaySceneBackgroundMode(sentence);
+            if (backgroundMode === 'video') {
+              disabled = true;
+              disabledReason = 'This overlay scene currently uses a video background.';
+            } else if (backgroundMode === 'solid' || backgroundMode === 'gradient') {
+              disabled = true;
+              disabledReason = 'This overlay scene currently uses a non-image background.';
+            }
+          }
+        }
+
+        const sceneKindLabel =
+          sceneTab === 'image'
+            ? 'Image'
+            : sceneTab === 'video'
+              ? 'Video'
+              : sceneTab === 'text'
+                ? 'Text'
+                : 'Overlay';
+        const text = String(sentence.text ?? '').trim();
+        const textPreview = !text
+          ? 'No sentence text yet.'
+          : text.length > 160
+            ? `${text.slice(0, 157).trimEnd()}...`
+            : text;
+
+        return {
+          sentenceId: sentence.id,
+          title: `Scene ${index + 1}`,
+          textPreview,
+          sceneKindLabel,
+          mediaTransport: previewAsset.transport,
+          mediaFile: previewAsset.file,
+          mediaUrl: previewAsset.url,
+          disabled,
+          disabledReason,
+        } satisfies BulkSceneEffectScenePickerItem;
+      });
+    },
+    [effectiveIsShort, sentences],
+  );
+
+  const getBulkManualSelectableSentenceIds = useCallback(
+    (kind: BulkAiEffectKind) =>
+      getBulkManualEffectSceneItems(kind)
+        .filter((item) => !item.disabled)
+        .map((item) => item.sentenceId),
+    [getBulkManualEffectSceneItems],
+  );
+
+  const applyManualBulkEffect = useCallback(
+    async (kind: BulkAiEffectKind, selectedValue: string, sentenceIds: string[]) => {
+      const uniqueSentenceIds = Array.from(new Set(sentenceIds.filter(Boolean)));
+      if (!uniqueSentenceIds.length) {
+        showToast(
+          kind === 'look'
+            ? 'Choose at least one scene for the look preset.'
+            : 'Choose at least one eligible scene for the motion preset.',
+          'warning',
+        );
+        return;
+      }
+
+      const sceneById = new Map(
+        getBulkManualEffectSceneItems(kind).map((item) => [item.sentenceId, item]),
+      );
+      const sentenceById = new Map(sentences.map((sentence) => [sentence.id, sentence]));
+
+      let appliedCount = 0;
+      let skippedCount = 0;
+
+      try {
+        setIsApplyingManualBulkEffect(kind);
+
+        uniqueSentenceIds.forEach((sentenceId) => {
+          const sentence = sentenceById.get(sentenceId);
+          if (!sentence) {
+            skippedCount += 1;
+            return;
+          }
+
+          if (kind === 'motion' && sceneById.get(sentenceId)?.disabled) {
+            skippedCount += 1;
+            return;
+          }
+
+          const patch =
+            kind === 'look'
+              ? buildLookPresetSelectionPatch({
+                  value: selectedValue,
+                  sentence: {
+                    visualEffect: sentence.visualEffect ?? null,
+                    imageFilterSettings: sentence.imageFilterSettings ?? null,
+                  },
+                  imageFilterPresets,
+                })
+              : buildMotionPresetSelectionPatch({
+                  value: selectedValue,
+                  sentence: {
+                    imageMotionEffect: sentence.imageMotionEffect ?? 'default',
+                    imageMotionSettings: sentence.imageMotionSettings ?? null,
+                    imageMotionSpeed: sentence.imageMotionSpeed ?? null,
+                  },
+                  motionEffectPresets,
+                  isShortVideo: effectiveIsShort,
+                });
+
+          if (!patch) {
+            skippedCount += 1;
+            return;
+          }
+
+          patchSentenceById(sentenceId, patch);
+          appliedCount += 1;
+        });
+
+        if (!appliedCount) {
+          showToast(
+            kind === 'look'
+              ? 'No scenes were updated by the selected look preset.'
+              : 'No scenes were updated by the selected motion preset.',
+            'warning',
+          );
+          return;
+        }
+
+        showToast(
+          skippedCount > 0
+            ? kind === 'look'
+              ? `Look preset applied to ${appliedCount} scenes. Skipped ${skippedCount} scene${skippedCount === 1 ? '' : 's'}.`
+              : `Motion preset applied to ${appliedCount} scenes. Skipped ${skippedCount} scene${skippedCount === 1 ? '' : 's'}.`
+            : kind === 'look'
+              ? `Look preset applied to ${appliedCount} scenes.`
+              : `Motion preset applied to ${appliedCount} scenes.`,
+          'success',
+        );
+      } finally {
+        setIsApplyingManualBulkEffect(null);
+      }
+    },
+    [
+      effectiveIsShort,
+      getBulkManualEffectSceneItems,
+      imageFilterPresets,
+      motionEffectPresets,
+      patchSentenceById,
+      sentences,
+      showToast,
+    ],
+  );
+
+  const handleOpenBulkManualEffectModal = useCallback(
+    (kind: BulkAiEffectKind) => {
+      if (isApplyingBulkAiEffect || isApplyingManualBulkEffect) return;
+
+      const selectableSentenceIds = getBulkManualSelectableSentenceIds(kind);
+      if (!selectableSentenceIds.length) {
+        showToast(
+          kind === 'look'
+            ? 'No scenes are available for bulk look presets.'
+            : 'No eligible scenes currently support bulk motion presets.',
+          'warning',
+        );
+        return;
+      }
+
+      setBulkManualEffectScenePicker(null);
+      setBulkManualEffectModal({
+        kind,
+        selectedValue: getDefaultBulkManualEffectValue(kind),
+      });
+    },
+    [
+      getBulkManualSelectableSentenceIds,
+      getDefaultBulkManualEffectValue,
+      isApplyingBulkAiEffect,
+      isApplyingManualBulkEffect,
+      showToast,
+    ],
+  );
+
+  const handleOpenBulkManualScenePicker = useCallback(() => {
+    if (!bulkManualEffectModal || isApplyingManualBulkEffect) return;
+
+    const selectableSentenceIds = getBulkManualSelectableSentenceIds(bulkManualEffectModal.kind);
+    if (!selectableSentenceIds.length) {
+      showToast(
+        bulkManualEffectModal.kind === 'look'
+          ? 'No scenes are available for bulk look presets.'
+          : 'No eligible scenes currently support bulk motion presets.',
+        'warning',
+      );
+      return;
+    }
+
+    setBulkManualEffectScenePicker({
+      kind: bulkManualEffectModal.kind,
+      selectedValue: bulkManualEffectModal.selectedValue,
+      selectedSentenceIds: selectableSentenceIds,
+    });
+    setBulkManualEffectModal(null);
+  }, [
+    bulkManualEffectModal,
+    getBulkManualSelectableSentenceIds,
+    isApplyingManualBulkEffect,
+    showToast,
+  ]);
+
+  const handleApplyManualBulkEffectToAllScenes = useCallback(() => {
+    if (!bulkManualEffectModal || isApplyingManualBulkEffect) return;
+
+    const { kind, selectedValue } = bulkManualEffectModal;
+    const selectableSentenceIds = getBulkManualSelectableSentenceIds(kind);
+    setBulkManualEffectModal(null);
+    void applyManualBulkEffect(kind, selectedValue, selectableSentenceIds);
+  }, [
+    applyManualBulkEffect,
+    bulkManualEffectModal,
+    getBulkManualSelectableSentenceIds,
+    isApplyingManualBulkEffect,
+  ]);
+
+  const handleApplyManualBulkEffectToSelectedScenes = useCallback(
+    (selectedSentenceIds: string[]) => {
+      if (!bulkManualEffectScenePicker || isApplyingManualBulkEffect) return;
+
+      const { kind, selectedValue } = bulkManualEffectScenePicker;
+      setBulkManualEffectScenePicker(null);
+      void applyManualBulkEffect(kind, selectedValue, selectedSentenceIds);
+    },
+    [applyManualBulkEffect, bulkManualEffectScenePicker, isApplyingManualBulkEffect],
+  );
+
   const requestAiLookEffects = useCallback(async (
     payload: BulkLookEffectRequestItem[],
   ): Promise<BulkLookEffectItem[]> => {
@@ -11932,9 +12323,13 @@ export function GeneratePageInner() {
                   isGeneratingAllImages={isGeneratingAllImages}
                   onGenerateBulkLookEffects={() => handleOpenBulkAiEffects('look')}
                   isApplyingBulkLookEffects={isApplyingBulkAiEffect === 'look'}
+                  onOpenBulkLookPresetModal={() => handleOpenBulkManualEffectModal('look')}
+                  isApplyingBulkLookPreset={isApplyingManualBulkEffect === 'look'}
                   onResetBulkLookEffects={handleResetBulkLookEffects}
                   onGenerateBulkMotionEffects={() => handleOpenBulkAiEffects('motion')}
                   isApplyingBulkMotionEffects={isApplyingBulkAiEffect === 'motion'}
+                  onOpenBulkMotionPresetModal={() => handleOpenBulkManualEffectModal('motion')}
+                  isApplyingBulkMotionPreset={isApplyingManualBulkEffect === 'motion'}
                   onResetBulkMotionEffects={handleResetBulkMotionEffects}
                   onSentenceTextChange={handleSentenceTextChange}
                   onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
@@ -12480,6 +12875,59 @@ export function GeneratePageInner() {
         onTranslateAndSave={handleTranslateAndSave}
         isLoading={isTranslatingScript}
         loadingAction={translateLoadingAction}
+      />
+
+      <BulkSceneEffectPresetModal
+        isOpen={Boolean(bulkManualEffectModal)}
+        kind={bulkManualEffectModal?.kind ?? 'look'}
+        selectedValue={
+          bulkManualEffectModal?.selectedValue ?? getDefaultBulkManualEffectValue('look')
+        }
+        options={
+          bulkManualEffectModal?.kind === 'motion'
+            ? bulkMotionPresetOptions
+            : bulkLookPresetOptions
+        }
+        selectableSceneCount={
+          bulkManualEffectModal
+            ? getBulkManualSelectableSentenceIds(bulkManualEffectModal.kind).length
+            : 0
+        }
+        onClose={() => {
+          if (isApplyingManualBulkEffect) return;
+          setBulkManualEffectModal(null);
+        }}
+        onSelectedValueChange={(value) => {
+          setBulkManualEffectModal((prev) => {
+            if (!prev) return prev;
+            return { ...prev, selectedValue: value };
+          });
+        }}
+        onApplyAllScenes={handleApplyManualBulkEffectToAllScenes}
+        onApplyCertainScenes={handleOpenBulkManualScenePicker}
+        isLoading={Boolean(isApplyingManualBulkEffect)}
+      />
+
+      <BulkSceneEffectScenePickerModal
+        key={
+          bulkManualEffectScenePicker
+            ? `${bulkManualEffectScenePicker.kind}:${bulkManualEffectScenePicker.selectedSentenceIds.join(',')}`
+            : 'bulk-manual-scene-picker-closed'
+        }
+        isOpen={Boolean(bulkManualEffectScenePicker)}
+        kind={bulkManualEffectScenePicker?.kind ?? 'look'}
+        scenes={
+          bulkManualEffectScenePicker
+            ? getBulkManualEffectSceneItems(bulkManualEffectScenePicker.kind)
+            : []
+        }
+        selectedSentenceIds={bulkManualEffectScenePicker?.selectedSentenceIds ?? []}
+        onClose={() => {
+          if (isApplyingManualBulkEffect) return;
+          setBulkManualEffectScenePicker(null);
+        }}
+        onApply={handleApplyManualBulkEffectToSelectedScenes}
+        isLoading={Boolean(isApplyingManualBulkEffect)}
       />
 
       {/* Generate All Images Confirmation */}

@@ -100,7 +100,12 @@ import {
   type TextAnimationPresetDto,
   type TextAnimationSettings,
 } from './TextAnimationPreview';
-import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
+import {
+  buildLookPresetSelectionPatch,
+  buildMotionPresetSelectionPatch,
+  TEMPORARY_CUSTOM_PRESET_ID,
+  VISUAL_EFFECT_SELECT_VALUES,
+} from '../../_utils/imageEffectSelection';
 import { ImageEffectsDetailModal } from './ImageEffectsDetailModal';
 import { OverlayScenePreview } from './OverlayScenePreview';
 import { TextPreviewOverlay } from './TextPreviewOverlay';
@@ -118,15 +123,6 @@ import { useManagedObjectUrl } from './useManagedObjectUrl';
 import type { SentenceItem, SentenceSoundEffectItem } from '../../_types/sentences';
 
 type VisualEffectValue = SentenceItem['visualEffect'];
-
-const VISUAL_EFFECT_SELECT_VALUES = [
-  'colorGrading',
-  'animatedLighting',
-  'glassSubtle',
-  'glassReflections',
-  'glassStrong',
-] as const;
-
 type VisualEffectSelectValue = (typeof VISUAL_EFFECT_SELECT_VALUES)[number];
 
 function isVisualEffectSelectValue(value: string): value is VisualEffectSelectValue {
@@ -1500,92 +1496,33 @@ function SentenceEditorCardComponent({
   const videoModeMenuRef = useRef<HTMLDivElement | null>(null);
 
   const handleLookPresetSelect = (value: string) => {
-    if (value.startsWith('custom:')) {
-      const presetId = value.slice('custom:'.length);
-      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) {
-        if (!retainedTemporaryLook) return;
-
-        onSentencePatch({
-          visualEffect: retainedTemporaryLook.visualEffect,
-          customImageFilterId: null,
-          imageFilterSettings: {
-            ...retainedTemporaryLook.imageFilterSettings,
-            presetKey: 'custom',
-          },
-        });
-        return;
-      }
-      const preset = imageFilterPresets.find((item) => item.id === presetId);
-      if (!preset) return;
-
-      const nextSettings = normalizeImageFilterSettings(preset.settings, item.visualEffect ?? null);
-      onSentencePatch({
-        visualEffect: resolveVisualEffectFromSettings(nextSettings, item.visualEffect ?? null),
-        customImageFilterId: preset.id,
-        imageFilterSettings: { ...nextSettings, presetKey: 'custom' },
-      });
-      return;
-    }
-
-    const effect = value.slice('builtin:'.length) as SentenceItem['visualEffect'];
-    const normalizedEffect = effect === 'none' ? null : effect;
-    onSentencePatch({
-      visualEffect: normalizedEffect,
-      customImageFilterId: null,
-      imageFilterSettings: getDefaultImageFilterSettings(normalizedEffect),
+    const patch = buildLookPresetSelectionPatch({
+      value,
+      sentence: {
+        visualEffect: item.visualEffect ?? null,
+        imageFilterSettings: item.imageFilterSettings ?? null,
+      },
+      imageFilterPresets,
+      temporarySelection: retainedTemporaryLook,
     });
+    if (!patch) return;
+    onSentencePatch(patch);
   };
 
   const handleMotionPresetSelect = (value: string) => {
-    if (value.startsWith('custom:')) {
-      const presetId = value.slice('custom:'.length);
-      if (presetId === TEMPORARY_CUSTOM_PRESET_ID) {
-        if (!retainedTemporaryMotion) return;
-
-        onSentencePatch({
-          imageMotionEffect: retainedTemporaryMotion.imageMotionEffect,
-          customMotionEffectId: null,
-          imageMotionSettings: {
-            ...retainedTemporaryMotion.imageMotionSettings,
-            presetKey: 'custom',
-          },
-          imageMotionSpeed: retainedTemporaryMotion.imageMotionSpeed,
-        });
-        return;
-      }
-      const preset = motionEffectPresets.find((item) => item.id === presetId);
-      if (!preset) return;
-
-      const nextSettings = normalizeImageMotionSettings(
-        preset.settings,
-        item.imageMotionEffect ?? 'default',
-        resolveImageMotionSpeed(item.imageMotionSpeed, item.imageMotionSettings, isShortVideo),
-        isShortVideo,
-      );
-      onSentencePatch({
-        imageMotionEffect: resolveMotionEffectFromSettings(
-          nextSettings,
-          item.imageMotionEffect ?? 'default',
-        ),
-        customMotionEffectId: preset.id,
-        imageMotionSettings: { ...nextSettings, presetKey: 'custom' },
-        imageMotionSpeed: nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo),
-      });
-      return;
-    }
-
-    const effect = value.slice('builtin:'.length) as NonNullable<SentenceItem['imageMotionEffect']>;
-    const nextSettings = getDefaultImageMotionSettings(
-      effect,
-      resolveImageMotionSpeed(item.imageMotionSpeed, item.imageMotionSettings, isShortVideo),
+    const patch = buildMotionPresetSelectionPatch({
+      value,
+      sentence: {
+        imageMotionEffect: item.imageMotionEffect ?? 'default',
+        imageMotionSettings: item.imageMotionSettings ?? null,
+        imageMotionSpeed: item.imageMotionSpeed ?? null,
+      },
+      motionEffectPresets,
       isShortVideo,
-    );
-    onSentencePatch({
-      imageMotionEffect: effect,
-      customMotionEffectId: null,
-      imageMotionSettings: nextSettings,
-      imageMotionSpeed: nextSettings.speed ?? getDefaultImageMotionSpeed(isShortVideo),
+      temporarySelection: retainedTemporaryMotion,
     });
+    if (!patch) return;
+    onSentencePatch(patch);
   };
 
   const handleTextAnimationPresetSelect = (value: string) => {
@@ -2938,6 +2875,9 @@ function SentenceEditorCardComponent({
                     sceneVideoUrl={videoPreviewUrl}
                     visualEffect={item.visualEffect ?? null}
                     imageFilterSettings={item.imageFilterSettings ?? null}
+                    imageMotionEffect={item.imageMotionEffect ?? null}
+                    imageMotionSettings={item.imageMotionSettings ?? null}
+                    imageMotionSpeed={item.imageMotionSpeed ?? null}
                     overlayAssetUrl={overlayPreviewUrl}
                     overlayMimeType={item.overlayMimeType ?? null}
                     overlaySettings={resolvedOverlaySettings}
@@ -2975,6 +2915,9 @@ function SentenceEditorCardComponent({
                     settings={item.textAnimationSettings}
                     visualEffect={item.visualEffect ?? null}
                     imageFilterSettings={item.imageFilterSettings ?? null}
+                    imageMotionEffect={item.imageMotionEffect ?? null}
+                    imageMotionSettings={item.imageMotionSettings ?? null}
+                    imageMotionSpeed={item.imageMotionSpeed ?? null}
                     backgroundImageUrl={textPreviewBackgroundUrl}
                     backgroundVideoUrl={textPreviewBackgroundVideoUrl}
                     isShortVideo={isShortVideo}

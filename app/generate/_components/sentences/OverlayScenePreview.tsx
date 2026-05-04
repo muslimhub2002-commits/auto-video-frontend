@@ -11,6 +11,7 @@ import {
   OVERLAY_START_DELAY_MIN,
   type OverlaySettings,
 } from './ImageEffectPreview';
+import { buildPreviewImageMotionStyle } from '../../_utils/imageMotionPreview';
 import {
   TextAnimationPreview,
   normalizeTextAnimationSettings,
@@ -27,6 +28,9 @@ type OverlayScenePreviewProps = {
   sceneVideoUrl?: string | null;
   visualEffect?: SentenceItem['visualEffect'] | null;
   imageFilterSettings?: Record<string, unknown> | null;
+  imageMotionEffect?: SentenceItem['imageMotionEffect'] | null;
+  imageMotionSettings?: Record<string, unknown> | null;
+  imageMotionSpeed?: number | null;
   overlayAssetUrl?: string | null;
   overlayMimeType?: string | null;
   overlaySettings?: Record<string, unknown> | OverlaySettings | null;
@@ -117,6 +121,9 @@ export function OverlayScenePreview({
   sceneVideoUrl = null,
   visualEffect = null,
   imageFilterSettings = null,
+  imageMotionEffect = null,
+  imageMotionSettings = null,
+  imageMotionSpeed = null,
   overlayAssetUrl = null,
   overlayMimeType = null,
   overlaySettings,
@@ -195,6 +202,13 @@ export function OverlayScenePreview({
     overlaySettings: resolvedOverlay,
   });
   const [animationElapsedMs, setAnimationElapsedMs] = useState(0);
+  const backgroundMotionStyle = buildPreviewImageMotionStyle({
+    imageMotionEffect,
+    imageMotionSettings,
+    imageMotionSpeed,
+    isShortVideo,
+    elapsedMs: animationElapsedMs,
+  });
 
   useEffect(() => {
     let animationFrameId = 0;
@@ -266,6 +280,7 @@ export function OverlayScenePreview({
                 src={sceneImageUrl}
                 alt="Overlay background"
                 className="h-full w-full object-cover"
+                style={backgroundMotionStyle}
               />
             ) : null}
             {backgroundMode === 'video' && sceneVideoUrl ? (
@@ -336,6 +351,8 @@ export function OverlayScenePreview({
             text={text}
             effect={resolvedTextEffect}
             settings={overlayTextAnimationSettings}
+            visualEffect={visualEffect}
+            imageFilterSettings={imageFilterSettings}
             isShortVideo={isShortVideo}
             className="h-full w-full bg-transparent"
             contentClassName="p-[7%]"
@@ -378,6 +395,8 @@ export function OverlayScenePreview({
             text={text}
             effect={resolvedTextEffect}
             settings={overlayTextAnimationSettings}
+            visualEffect={visualEffect}
+            imageFilterSettings={imageFilterSettings}
             isShortVideo={isShortVideo}
             className="h-full w-full bg-transparent"
             contentClassName="p-[7%]"

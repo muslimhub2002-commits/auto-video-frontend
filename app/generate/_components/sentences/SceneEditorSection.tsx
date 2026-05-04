@@ -9,7 +9,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Sparkles, Images, Video as VideoIcon, Plus, Users, Music2, Clapperboard, MapPin, RotateCcw } from 'lucide-react';
+import {
+  Clapperboard,
+  Images,
+  ListFilter,
+  Loader2,
+  MapPin,
+  Music2,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Users,
+  Video as VideoIcon,
+} from 'lucide-react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import { AlertDialog } from '@/components/ui/alert-dialog';
@@ -46,10 +58,14 @@ type SceneEditorSectionProps = {
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
   isApplyingBulkLookEffects?: boolean;
   onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
+  onOpenBulkLookPresetModal?: (() => void) | (() => Promise<void>);
   onResetBulkLookEffects?: () => void;
+  isApplyingBulkLookPreset?: boolean;
   isApplyingBulkMotionEffects?: boolean;
   onGenerateBulkMotionEffects?: (() => void) | (() => Promise<void>);
+  onOpenBulkMotionPresetModal?: (() => void) | (() => Promise<void>);
   onResetBulkMotionEffects?: () => void;
+  isApplyingBulkMotionPreset?: boolean;
 
   onSelectVideoFromLibrary?: (index: number) => void;
   onSaveSentenceVideoToLibrary?: (index: number) => void | Promise<void>;
@@ -831,10 +847,14 @@ export function SceneEditorSection({
   onGenerateAllImages,
   isApplyingBulkLookEffects = false,
   onGenerateBulkLookEffects,
+  onOpenBulkLookPresetModal,
   onResetBulkLookEffects,
+  isApplyingBulkLookPreset = false,
   isApplyingBulkMotionEffects = false,
   onGenerateBulkMotionEffects,
+  onOpenBulkMotionPresetModal,
   onResetBulkMotionEffects,
+  isApplyingBulkMotionPreset = false,
 
   onSelectVideoFromLibrary,
   onSaveSentenceVideoToLibrary,
@@ -1082,8 +1102,20 @@ export function SceneEditorSection({
                 type="button"
                 size="sm"
                 variant="ghost"
+                onClick={onOpenBulkLookPresetModal}
+                disabled={!onOpenBulkLookPresetModal || isApplyingBulkLookEffects || isApplyingBulkLookPreset}
+                className="h-full w-9 rounded-none p-0 text-fuchsia-500 hover:bg-fuchsia-50 hover:text-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Choose a look preset to apply to all or selected scenes"
+              >
+                <ListFilter className="h-3.5 w-3.5" />
+              </Button>
+              <div className="my-1.5 w-px bg-fuchsia-200" />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
                 onClick={() => setPendingReset('look')}
-                disabled={!onResetBulkLookEffects || isApplyingBulkLookEffects}
+                disabled={!onResetBulkLookEffects || isApplyingBulkLookEffects || isApplyingBulkLookPreset}
                 className="h-full w-9 rounded-none p-0 text-fuchsia-400 hover:bg-fuchsia-50 hover:text-fuchsia-600 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Reset all image look effects to none"
               >
@@ -1115,8 +1147,20 @@ export function SceneEditorSection({
                 type="button"
                 size="sm"
                 variant="ghost"
+                onClick={onOpenBulkMotionPresetModal}
+                disabled={!onOpenBulkMotionPresetModal || isApplyingBulkMotionEffects || isApplyingBulkMotionPreset}
+                className="h-full w-9 rounded-none p-0 text-sky-500 hover:bg-sky-50 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Choose a motion preset to apply to all or selected scenes"
+              >
+                <ListFilter className="h-3.5 w-3.5" />
+              </Button>
+              <div className="my-1.5 w-px bg-sky-200" />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
                 onClick={() => setPendingReset('motion')}
-                disabled={!onResetBulkMotionEffects || isApplyingBulkMotionEffects}
+                disabled={!onResetBulkMotionEffects || isApplyingBulkMotionEffects || isApplyingBulkMotionPreset}
                 className="h-full w-9 rounded-none p-0 text-sky-400 hover:bg-sky-50 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Reset all image motion effects to default scale"
               >

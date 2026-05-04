@@ -5,11 +5,10 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { SentenceItem } from '../../_types/sentences';
 import type { SentenceSoundEffectItem } from '../../_types/sentences';
 import {
-  getDefaultImageMotionSettings,
-  getDefaultImageMotionSpeed,
   normalizeImageFilterSettings,
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
+import { buildPreviewImageMotionStyle } from '../../_utils/imageMotionPreview';
 
 export const TEXT_ANIMATION_EFFECT_VALUES = [
   'popInBounceHook',
@@ -71,7 +70,6 @@ export const TEXT_SCENE_FONT_MIN_PX = 19.2;
 export const TEXT_SCENE_FONT_MAX_PX = 92.8;
 export const TEXT_SCENE_DEFAULT_FONT_FAMILY = 'Oswald, system-ui, sans-serif';
 export const TEXT_SCENE_ARABIC_FONT_FAMILY = 'Noto Kufi Arabic, sans-serif';
-const BACKGROUND_PREVIEW_MOTION_DURATION_MS = 6200;
 const SLIDE_CUT_EASING = [0.12, 0.88, 0.24, 1] as const;
 const NEWTON_ITERATIONS = 4;
 const NEWTON_MIN_SLOPE = 0.001;
@@ -149,6 +147,9 @@ type TextAnimationPreviewProps = {
   settings?: Record<string, unknown> | TextAnimationSettings | null;
   visualEffect?: SentenceItem['visualEffect'] | null;
   imageFilterSettings?: Record<string, unknown> | null;
+  imageMotionEffect?: SentenceItem['imageMotionEffect'] | null;
+  imageMotionSettings?: Record<string, unknown> | null;
+  imageMotionSpeed?: number | null;
   backgroundImageUrl?: string | null;
   backgroundVideoUrl?: string | null;
   isShortVideo?: boolean;
@@ -1000,6 +1001,9 @@ export function TextAnimationPreview({
   settings,
   visualEffect,
   imageFilterSettings,
+  imageMotionEffect,
+  imageMotionSettings,
+  imageMotionSpeed,
   backgroundImageUrl,
   backgroundVideoUrl,
   isShortVideo = true,
@@ -1036,15 +1040,6 @@ export function TextAnimationPreview({
   const animationDurationMs = getTextAnimationIntroDurationMs(
     resolvedSettings.speed ?? DEFAULT_TEXT_ANIMATION_SPEED,
   );
-  const defaultBackgroundMotion = getDefaultImageMotionSettings(
-    'default',
-    getDefaultImageMotionSpeed(isShortVideo),
-    isShortVideo,
-  );
-  const backgroundMotionDurationMs = Math.max(
-    1800,
-    BACKGROUND_PREVIEW_MOTION_DURATION_MS / getDefaultImageMotionSpeed(isShortVideo),
-  );
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
   const strokeEnabled = resolvedSettings.strokeEnabled === true && strokeWidthPx > 0;
   const words = resolvedText.split(/\s+/u).filter(Boolean);
@@ -1077,6 +1072,13 @@ export function TextAnimationPreview({
   const previewSeed = getStablePreviewSeed(
     `${resolvedText}|${resolvedBackgroundImageUrl ?? ''}|${resolvedBackgroundVideoUrl ?? ''}|${String(motionResetKey ?? '')}`,
   );
+  const backgroundMotionStyle = buildPreviewImageMotionStyle({
+    imageMotionEffect,
+    imageMotionSettings,
+    imageMotionSpeed,
+    isShortVideo,
+    elapsedMs: animationElapsedMs,
+  });
   const typewriterGraphemes =
     resolvedEffect === 'typewriter' ? getGraphemes(resolvedText) : [];
   const textBoxStyle = buildTextBoxStyle(resolvedSettings);
@@ -1179,10 +1181,6 @@ export function TextAnimationPreview({
             0% { opacity: 0.35; }
             100% { opacity: 1; }
           }
-          @keyframes av-text-preview-default-scale {
-            0% { transform: scale(${(defaultBackgroundMotion.startScale ?? 1).toFixed(6)}); }
-            100% { transform: scale(${(defaultBackgroundMotion.endScale ?? 1.055).toFixed(6)}); }
-          }
         `}
       </style>
 
@@ -1199,13 +1197,7 @@ export function TextAnimationPreview({
               muted
               loop
               playsInline
-              style={{
-                transformOrigin: `${(defaultBackgroundMotion.originX ?? 50).toFixed(1)}% ${(defaultBackgroundMotion.originY ?? 50).toFixed(1)}%`,
-                animation: enableMotion
-                  ? `av-text-preview-default-scale ${backgroundMotionDurationMs}ms ease-in-out infinite`
-                  : undefined,
-                willChange: enableMotion ? 'transform' : undefined,
-              }}
+              style={undefined}
             />
           ) : null}
 
@@ -1214,13 +1206,7 @@ export function TextAnimationPreview({
               src={resolvedBackgroundImageUrl}
               alt="Text scene background"
               className="absolute inset-0 h-full w-full object-cover"
-              style={{
-                transformOrigin: `${(defaultBackgroundMotion.originX ?? 50).toFixed(1)}% ${(defaultBackgroundMotion.originY ?? 50).toFixed(1)}%`,
-                animation: enableMotion
-                  ? `av-text-preview-default-scale ${backgroundMotionDurationMs}ms ease-in-out infinite`
-                  : undefined,
-                willChange: enableMotion ? 'transform' : undefined,
-              }}
+              style={enableMotion ? backgroundMotionStyle : undefined}
             />
           ) : null}
 
