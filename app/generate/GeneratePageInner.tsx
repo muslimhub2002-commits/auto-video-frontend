@@ -10160,16 +10160,23 @@ export function GeneratePageInner() {
         duration_seconds?: number | null;
       }>('/sound-effects/merge', {
         title,
-        items: timedEffects.map((e) => ({
-          sound_effect_id: e.id,
-          delay_seconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
-          volume_percent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
-          trim_start_seconds: Math.max(0, Number(e.trimStartSeconds ?? 0) || 0),
-          duration_seconds:
-            typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
-              ? Math.max(0, e.durationSeconds)
-              : null,
-        })),
+        items: timedEffects.map((e) => {
+          const audioSettings = normalizeSoundEffectAudioSettings(
+            e.audioSettings ?? e.defaultAudioSettings,
+          );
+
+          return {
+            sound_effect_id: e.id,
+            delay_seconds: Math.max(0, Number(e.absoluteDelaySeconds ?? 0) || 0),
+            volume_percent: Math.max(0, Math.min(300, Number(e.volumePercent ?? 100) || 100)),
+            trim_start_seconds: Math.max(0, Number(e.trimStartSeconds ?? 0) || 0),
+            duration_seconds:
+              typeof e.durationSeconds === 'number' && Number.isFinite(e.durationSeconds)
+                ? Math.max(0, e.durationSeconds)
+                : null,
+            audio_settings_override: audioSettings,
+          };
+        }),
       });
 
       const merged = res.data;
@@ -10324,11 +10331,23 @@ export function GeneratePageInner() {
 
       const mergedRes = await api.post<SoundEffectDto>('/sound-effects/merge', {
         title: `Transition sound mix ${index + 1}`,
-        items: items.map((item) => ({
-          sound_effect_id: item.id,
-          delay_seconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
-          volume_percent: Math.max(0, Math.min(300, Number(item.volumePercent ?? 100) || 100)),
-        })),
+        items: items.map((item) => {
+          const audioSettings = normalizeSoundEffectAudioSettings(item.audioSettings);
+
+          return {
+            sound_effect_id: item.id,
+            delay_seconds: Math.max(0, Number(item.delaySeconds ?? 0) || 0),
+            volume_percent: Math.max(0, Math.min(300, Number(item.volumePercent ?? 100) || 100)),
+            trim_start_seconds: Math.max(0, Number(audioSettings.trim.startSeconds ?? 0) || 0),
+            duration_seconds:
+              typeof audioSettings.trim.durationSeconds === 'number' &&
+              Number.isFinite(audioSettings.trim.durationSeconds) &&
+              audioSettings.trim.durationSeconds > 0
+                ? Math.max(0, audioSettings.trim.durationSeconds)
+                : null,
+            audio_settings_override: audioSettings,
+          };
+        }),
       });
 
       const mergedId = String(mergedRes.data?.id ?? '').trim();

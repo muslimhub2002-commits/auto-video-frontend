@@ -1035,16 +1035,23 @@ export function ImageEffectsDetailModal({
   };
 
   const buildSoundEffectMergeItems = (items: SentenceSoundEffectItem[]) => {
-    return computeSentenceSoundEffectTiming(items).map((effect) => ({
-      sound_effect_id: effect.id,
-      delay_seconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
-      volume_percent: Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
-      trim_start_seconds: Math.max(0, Number(effect.trimStartSeconds ?? 0) || 0),
-      duration_seconds:
-        typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
-          ? Math.max(0, effect.durationSeconds)
-          : null,
-    }));
+    return computeSentenceSoundEffectTiming(items).map((effect) => {
+      const audioSettings = normalizeSoundEffectAudioSettings(
+        effect.audioSettings ?? effect.defaultAudioSettings,
+      );
+
+      return {
+        sound_effect_id: effect.id,
+        delay_seconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
+        volume_percent: Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
+        trim_start_seconds: Math.max(0, Number(effect.trimStartSeconds ?? 0) || 0),
+        duration_seconds:
+          typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
+            ? Math.max(0, effect.durationSeconds)
+            : null,
+        audio_settings_override: audioSettings,
+      };
+    });
   };
 
   const handleApplySoundEffectsFromLibrary = (items: SoundEffectDto[]) => {

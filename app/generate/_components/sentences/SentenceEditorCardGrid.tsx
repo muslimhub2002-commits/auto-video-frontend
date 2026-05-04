@@ -845,16 +845,23 @@ function SentenceEditorCardComponent({
       ignoreOffsets: isAlignSoundEffectsToSceneEndEnabled,
     });
 
-    return timedSoundEffects.map((effect) => ({
-      sound_effect_id: effect.id,
-      delay_seconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
-      volume_percent: Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
-      trim_start_seconds: Math.max(0, Number(effect.trimStartSeconds ?? 0) || 0),
-      duration_seconds:
-        typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
-          ? Math.max(0, effect.durationSeconds)
-          : null,
-    }));
+    return timedSoundEffects.map((effect) => {
+      const audioSettings = normalizeSoundEffectAudioSettings(
+        effect.audioSettings ?? effect.defaultAudioSettings,
+      );
+
+      return {
+        sound_effect_id: effect.id,
+        delay_seconds: Math.max(0, Number(effect.absoluteDelaySeconds ?? 0) || 0),
+        volume_percent: Math.max(0, Math.min(300, Number(effect.volumePercent ?? 100) || 100)),
+        trim_start_seconds: Math.max(0, Number(effect.trimStartSeconds ?? 0) || 0),
+        duration_seconds:
+          typeof effect.durationSeconds === 'number' && Number.isFinite(effect.durationSeconds)
+            ? Math.max(0, effect.durationSeconds)
+            : null,
+        audio_settings_override: audioSettings,
+      };
+    });
   };
 
   const handleOpenSoundEffectMixEditor = async () => {
@@ -2393,14 +2400,17 @@ function SentenceEditorCardComponent({
                           : 'Save these sound effects as one merged file'
                       }
                     >
-                      <>
-                        {isSavingSoundEffectsMix ? (
+                      {isSavingSoundEffectsMix ? (
+                        <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
+                          <span className="text-xs font-semibold">Saving...</span>
+                        </>
+                      ) : (
+                        <>
                           <Save className="h-4 w-4" />
-                        )}
-                        <span className="text-xs font-semibold">Save mix</span>
-                      </>
+                          <span className="text-xs font-semibold">Save mix</span>
+                        </>
+                      )}
                     </Button>
 
                     <button
@@ -2713,14 +2723,17 @@ function SentenceEditorCardComponent({
                       className="gap-2 h-9 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
                       title="Upload a sound effect"
                     >
-                      <>
-                        {isUploadingSoundEffectActive ? (
+                      {isUploadingSoundEffectActive ? (
+                        <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
+                          <span className="text-xs font-bold">Uploading...</span>
+                        </>
+                      ) : (
+                        <>
                           <Upload className="h-4 w-4" />
-                        )}
-                        <span className="text-xs font-bold">Upload</span>
-                      </>
+                          <span className="text-xs font-bold">Upload</span>
+                        </>
+                      )}
                     </Button>
 
                     <Button
@@ -3668,14 +3681,17 @@ function SentenceEditorCardComponent({
                         disabled={!onGenerateVideoPrompt || isGeneratingVideoPrompt}
                         className="h-9 w-full gap-2 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        <>
-                          {isGeneratingVideoPrompt ? (
+                        {isGeneratingVideoPrompt ? (
+                          <>
                             <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
+                            <span className="text-xs font-bold">Generating...</span>
+                          </>
+                        ) : (
+                          <>
                             <Sparkles className="h-4 w-4" />
-                          )}
-                          <span className="text-xs font-bold">Generate with AI</span>
-                        </>
+                            <span className="text-xs font-bold">Generate with AI</span>
+                          </>
+                        )}
                       </Button>
                       <p className="text-xs text-gray-500">Hint: Generates video directly from text (no frames needed).</p>
                       {!canGenerateVideo ? (
