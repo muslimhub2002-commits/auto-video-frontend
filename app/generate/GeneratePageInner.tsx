@@ -28,6 +28,7 @@ import type { ScriptReferenceDto } from './_components/ScriptReferencesModal';
 import { GeneratePageSkeleton } from './_components/GeneratePageSkeleton';
 import { RenderSettingsSection } from './_components/RenderSettingsSection';
 import { GenerateModalsHost } from './_components/GenerateModalsHost';
+import { SavedSequenceSaveModal } from './_components/SavedSequenceSaveModal';
 import { SoundEffectEditModal, type SoundEffectEditValues } from './_components/SoundEffectEditModal';
 import type { SoundEffectDto } from './_components/SoundEffectsLibraryModal';
 import {
@@ -66,6 +67,7 @@ import type {
   SentenceItem,
   SentenceSoundEffectItem,
 } from './_types/sentences';
+import type { SavedSequenceDetailDto } from './_types/saved-sequences';
 import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
 import {
   getDefaultImageFilterSettings,
@@ -105,6 +107,11 @@ import {
   hasCustomMotionSelection,
   VISUAL_EFFECT_SELECT_VALUES,
 } from './_utils/imageEffectSelection';
+import {
+  applySavedSequenceToSentences,
+  buildSavedSequenceSceneSnapshot,
+  hasUnsavedOverlaySequenceAsset,
+} from './_utils/savedSequences';
 import {
   BulkSceneEffectPresetModal,
   type BulkSceneEffectPresetOption,
@@ -1957,6 +1964,11 @@ export function GeneratePageInner() {
   const [isGeneratingVideoPromptBySentenceId, setIsGeneratingVideoPromptBySentenceId] = useState<Record<string, boolean>>({});
   const [isScriptLibraryOpen, setIsScriptLibraryOpen] = useState(false);
   const [isScriptReferencesOpen, setIsScriptReferencesOpen] = useState(false);
+  const [isSavedSequenceSaveModalOpen, setIsSavedSequenceSaveModalOpen] = useState(false);
+  const [savedSequenceSaveModalVersion, setSavedSequenceSaveModalVersion] = useState(0);
+  const [isSavedSequenceLibraryOpen, setIsSavedSequenceLibraryOpen] = useState(false);
+  const [isSavingSavedSequence, setIsSavingSavedSequence] = useState(false);
+  const [isApplyingSavedSequence, setIsApplyingSavedSequence] = useState(false);
   const [referenceScripts, setReferenceScripts] = useState<ReferenceScriptPayload[]>([]);
   // Render performance and transition options
   const [isShort, setIsShort] = useState(true);
@@ -4402,65 +4414,77 @@ export function GeneratePageInner() {
     }
   };
 
-  const fetchImageFilterPresets = async () => {
-    if (!user) {
-      setImageFilterPresets([]);
-      return;
-    }
+  const fetchImageFilterPresets = useCallback(
+    async (): Promise<ImageFilterPresetDto[] | null> => {
+      if (!user) {
+        setImageFilterPresets([]);
+        return [];
+      }
 
-    setIsLoadingImageFilterPresets(true);
-    try {
-      const res = await api.get<PresetLibraryResponse<ImageFilterPresetDto>>(
-        '/image-filters',
-        { params: { page: 1, limit: 100 } },
-      );
+      setIsLoadingImageFilterPresets(true);
+      try {
+        const res = await api.get<PresetLibraryResponse<ImageFilterPresetDto>>(
+          '/image-filters',
+          { params: { page: 1, limit: 100 } },
+        );
 
-      const items = Array.isArray(res.data?.items)
-        ? res.data.items.map((item) => ({
-          id: String(item.id ?? '').trim(),
-          title: String(item.title ?? '').trim() || 'Untitled look',
-          settings: normalizeSettingsObject(item.settings),
-        }))
-        : [];
+        const items = Array.isArray(res.data?.items)
+          ? res.data.items.map((item) => ({
+            id: String(item.id ?? '').trim(),
+            title: String(item.title ?? '').trim() || 'Untitled look',
+            settings: normalizeSettingsObject(item.settings),
+          }))
+          : [];
 
-      setImageFilterPresets(items.filter((item) => item.id));
-    } catch (error) {
-      console.error('Failed to load image filter presets', error);
-      showToast('Failed to load look presets.', 'error');
-    } finally {
-      setIsLoadingImageFilterPresets(false);
-    }
-  };
+        const normalizedItems = items.filter((item) => item.id);
+        setImageFilterPresets(normalizedItems);
+        return normalizedItems;
+      } catch (error) {
+        console.error('Failed to load image filter presets', error);
+        showToast('Failed to load look presets.', 'error');
+        return null;
+      } finally {
+        setIsLoadingImageFilterPresets(false);
+      }
+    },
+    [showToast, user],
+  );
 
-  const fetchMotionEffectPresets = async () => {
-    if (!user) {
-      setMotionEffectPresets([]);
-      return;
-    }
+  const fetchMotionEffectPresets = useCallback(
+    async (): Promise<MotionEffectPresetDto[] | null> => {
+      if (!user) {
+        setMotionEffectPresets([]);
+        return [];
+      }
 
-    setIsLoadingMotionEffectPresets(true);
-    try {
-      const res = await api.get<PresetLibraryResponse<MotionEffectPresetDto>>(
-        '/motion-effects',
-        { params: { page: 1, limit: 100 } },
-      );
+      setIsLoadingMotionEffectPresets(true);
+      try {
+        const res = await api.get<PresetLibraryResponse<MotionEffectPresetDto>>(
+          '/motion-effects',
+          { params: { page: 1, limit: 100 } },
+        );
 
-      const items = Array.isArray(res.data?.items)
-        ? res.data.items.map((item) => ({
-          id: String(item.id ?? '').trim(),
-          title: String(item.title ?? '').trim() || 'Untitled motion',
-          settings: normalizeSettingsObject(item.settings),
-        }))
-        : [];
+        const items = Array.isArray(res.data?.items)
+          ? res.data.items.map((item) => ({
+            id: String(item.id ?? '').trim(),
+            title: String(item.title ?? '').trim() || 'Untitled motion',
+            settings: normalizeSettingsObject(item.settings),
+          }))
+          : [];
 
-      setMotionEffectPresets(items.filter((item) => item.id));
-    } catch (error) {
-      console.error('Failed to load motion effect presets', error);
-      showToast('Failed to load motion presets.', 'error');
-    } finally {
-      setIsLoadingMotionEffectPresets(false);
-    }
-  };
+        const normalizedItems = items.filter((item) => item.id);
+        setMotionEffectPresets(normalizedItems);
+        return normalizedItems;
+      } catch (error) {
+        console.error('Failed to load motion effect presets', error);
+        showToast('Failed to load motion presets.', 'error');
+        return null;
+      } finally {
+        setIsLoadingMotionEffectPresets(false);
+      }
+    },
+    [showToast, user],
+  );
 
   const fetchTextAnimationPresets = async () => {
     if (!user) {
@@ -10103,6 +10127,125 @@ export function GeneratePageInner() {
     showToast('Motion effects reset to default scale for all scenes.', 'success');
   }, [setSentences, showToast]);
 
+  const handleSaveSceneSequence = useCallback(async (title: string) => {
+    if (sentences.length === 0) {
+      showToast('No scenes are available to save.', 'warning');
+      return;
+    }
+
+    const unsavedOverlaySceneIndex = sentences.findIndex((sentence) =>
+      hasUnsavedOverlaySequenceAsset(sentence),
+    );
+
+    if (unsavedOverlaySceneIndex >= 0) {
+      showToast(
+        `Scene ${unsavedOverlaySceneIndex + 1} has an unsaved overlay asset. Save the draft or overlay preset first.`,
+        'error',
+      );
+      return;
+    }
+
+    setIsSavingSavedSequence(true);
+    try {
+      await api.post('/saved-sequences', {
+        title,
+        scenes: sentences.map((sentence) =>
+          buildSavedSequenceSceneSnapshot(sentence, effectiveIsShort),
+        ),
+      });
+
+      setIsSavedSequenceSaveModalOpen(false);
+      showToast('Scene sequence saved.', 'success');
+    } catch (error) {
+      showToast(
+        getRequestErrorMessage(error, 'Failed to save scene sequence.'),
+        'error',
+      );
+    } finally {
+      setIsSavingSavedSequence(false);
+    }
+  }, [effectiveIsShort, sentences, showToast]);
+
+  const handleApplySavedSequence = useCallback(async (sequence: SavedSequenceDetailDto) => {
+    setIsApplyingSavedSequence(true);
+    try {
+      const sequenceScenes = Array.isArray(sequence.scenes) ? sequence.scenes : [];
+      const needsLookPresetRefresh = sequenceScenes.some((scene) =>
+        String(scene.custom_image_filter_id ?? scene.customImageFilterId ?? '').trim().length > 0,
+      );
+      const needsMotionPresetRefresh = sequenceScenes.some((scene) =>
+        String(scene.custom_motion_effect_id ?? scene.customMotionEffectId ?? '').trim().length > 0,
+      );
+
+      let nextImageFilterPresets = imageFilterPresets;
+      let nextMotionEffectPresets = motionEffectPresets;
+
+      if (needsLookPresetRefresh || needsMotionPresetRefresh) {
+        const [refreshedImageFilterPresets, refreshedMotionEffectPresets] = await Promise.all([
+          needsLookPresetRefresh
+            ? fetchImageFilterPresets()
+            : Promise.resolve<ImageFilterPresetDto[] | null>(null),
+          needsMotionPresetRefresh
+            ? fetchMotionEffectPresets()
+            : Promise.resolve<MotionEffectPresetDto[] | null>(null),
+        ]);
+
+        if (refreshedImageFilterPresets !== null) {
+          nextImageFilterPresets = refreshedImageFilterPresets;
+        }
+        if (refreshedMotionEffectPresets !== null) {
+          nextMotionEffectPresets = refreshedMotionEffectPresets;
+        }
+      }
+
+      const result = applySavedSequenceToSentences({
+        sentences,
+        sequence,
+        isShortVideo: effectiveIsShort,
+        imageFilterPresets: nextImageFilterPresets,
+        motionEffectPresets: nextMotionEffectPresets,
+      });
+
+      if (result.appliedCount === 0 && result.resetCount === 0) {
+        showToast('The selected saved sequence has no scenes to apply.', 'warning');
+        return;
+      }
+
+      setSentences(result.sentences);
+      setIsSavedSequenceLibraryOpen(false);
+
+      const messageParts: string[] = [];
+      if (result.appliedCount > 0) {
+        messageParts.push(
+          `Applied ${result.appliedCount} scene${result.appliedCount === 1 ? '' : 's'}`,
+        );
+      }
+      if (result.resetCount > 0) {
+        messageParts.push(
+          `reset ${result.resetCount} trailing scene${result.resetCount === 1 ? '' : 's'}`,
+        );
+      }
+      if (result.ignoredCount > 0) {
+        messageParts.push(
+          `ignored ${result.ignoredCount} extra saved scene${result.ignoredCount === 1 ? '' : 's'}`,
+        );
+      }
+
+      showToast(`${messageParts.join(', ')}.`, 'success');
+    } finally {
+      setIsApplyingSavedSequence(false);
+    }
+  }, [
+    effectiveIsShort,
+    fetchImageFilterPresets,
+    fetchMotionEffectPresets,
+    imageFilterPresets,
+    motionEffectPresets,
+    sentences,
+    setSentences,
+    showToast,
+  ]);
+
   const handleVideoModelChange = (next: 'gemini' | 'grok') => {
     setVideoModel(next);
     if (next !== 'grok') return;
@@ -12331,6 +12474,13 @@ export function GeneratePageInner() {
                   onOpenBulkMotionPresetModal={() => handleOpenBulkManualEffectModal('motion')}
                   isApplyingBulkMotionPreset={isApplyingManualBulkEffect === 'motion'}
                   onResetBulkMotionEffects={handleResetBulkMotionEffects}
+                  isSavingSceneSequence={isSavingSavedSequence}
+                  isApplyingSavedSequence={isApplyingSavedSequence}
+                  onOpenSaveSceneSequence={() => {
+                    setSavedSequenceSaveModalVersion((prev) => prev + 1);
+                    setIsSavedSequenceSaveModalOpen(true);
+                  }}
+                  onOpenLoadSceneSequence={() => setIsSavedSequenceLibraryOpen(true)}
                   onSentenceTextChange={handleSentenceTextChange}
                   onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
                   onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
@@ -12774,6 +12924,17 @@ export function GeneratePageInner() {
         </div>
       </div>
 
+      <SavedSequenceSaveModal
+        key={savedSequenceSaveModalVersion}
+        isOpen={isSavedSequenceSaveModalOpen}
+        isSaving={isSavingSavedSequence}
+        onClose={() => {
+          if (isSavingSavedSequence) return;
+          setIsSavedSequenceSaveModalOpen(false);
+        }}
+        onSave={handleSaveSceneSequence}
+      />
+
       <GenerateModalsHost
         isImageLibraryOpen={isLibraryModalOpen}
         libraryTarget={libraryTarget}
@@ -12814,6 +12975,11 @@ export function GeneratePageInner() {
           script: s.script,
         }))}
         onApplyReferenceScripts={handleApplyReferenceScripts}
+        isSavedSequenceLibraryOpen={isSavedSequenceLibraryOpen}
+        isApplyingSavedSequence={isApplyingSavedSequence}
+        onCloseSavedSequenceLibrary={() => setIsSavedSequenceLibraryOpen(false)}
+        onApplySavedSequence={handleApplySavedSequence}
+        onToast={showToast}
 
         isSoundEffectsLibraryOpen={isSoundEffectsLibraryOpen}
         onCloseSoundEffectsLibrary={() => {

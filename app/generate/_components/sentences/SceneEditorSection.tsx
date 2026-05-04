@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import {
   Clapperboard,
+  FolderOpen,
   Images,
   ListFilter,
   Loader2,
@@ -18,6 +19,7 @@ import {
   Music2,
   Plus,
   RotateCcw,
+  Save,
   Sparkles,
   Users,
   Video as VideoIcon,
@@ -66,6 +68,10 @@ type SceneEditorSectionProps = {
   onOpenBulkMotionPresetModal?: (() => void) | (() => Promise<void>);
   onResetBulkMotionEffects?: () => void;
   isApplyingBulkMotionPreset?: boolean;
+  isSavingSceneSequence?: boolean;
+  isApplyingSavedSequence?: boolean;
+  onOpenSaveSceneSequence?: () => void;
+  onOpenLoadSceneSequence?: () => void;
 
   onSelectVideoFromLibrary?: (index: number) => void;
   onSaveSentenceVideoToLibrary?: (index: number) => void | Promise<void>;
@@ -855,6 +861,10 @@ export function SceneEditorSection({
   onOpenBulkMotionPresetModal,
   onResetBulkMotionEffects,
   isApplyingBulkMotionPreset = false,
+  isSavingSceneSequence = false,
+  isApplyingSavedSequence = false,
+  onOpenSaveSceneSequence,
+  onOpenLoadSceneSequence,
 
   onSelectVideoFromLibrary,
   onSaveSentenceVideoToLibrary,
@@ -1060,6 +1070,40 @@ export function SceneEditorSection({
             >
               <Clapperboard className="h-4 w-4" />
               <span className="text-sm font-semibold">Generate Test Video</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onOpenSaveSceneSequence}
+              disabled={!onOpenSaveSceneSequence || isSavingSceneSequence || isApplyingSavedSequence}
+              className="gap-2 h-10 px-4 border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300 shadow-sm hover:shadow transition-all"
+              title="Save the current scene configuration as a reusable sequence"
+            >
+              {isSavingSceneSequence ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              <span className="text-sm font-semibold">Save Sequence</span>
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onOpenLoadSceneSequence}
+              disabled={!onOpenLoadSceneSequence || isSavingSceneSequence || isApplyingSavedSequence}
+              className="gap-2 h-10 px-4 border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm hover:shadow transition-all"
+              title="Load a saved scene sequence and apply it from the first scene"
+            >
+              {isApplyingSavedSequence ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FolderOpen className="h-4 w-4" />
+              )}
+              <span className="text-sm font-semibold">Load Sequence</span>
             </Button>
 
             <Button

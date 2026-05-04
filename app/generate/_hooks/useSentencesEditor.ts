@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import type { SentenceItem } from '../_types/sentences';
+import { getDefaultSentenceSequenceConfig } from '../_utils/defaultSentenceSceneConfig';
 
 type TransitionType = NonNullable<SentenceItem['transitionToNext']>;
 type VisualEffectType = NonNullable<SentenceItem['visualEffect']>;
@@ -302,38 +303,20 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
       const empty: SentenceItem = {
         id: newId,
         text: '',
-        sceneTab: 'image',
-        mediaMode: 'single',
-        textAnimationEffect: 'slideCutFast',
-        textAnimationText: null,
-        customTextAnimationId: null,
-        textAnimationSettings: null,
+        ...getDefaultSentenceSequenceConfig(),
         textBackgroundImage: null,
         textBackgroundImageUrl: null,
         textBackgroundSavedImageId: null,
         textBackgroundVideo: null,
         textBackgroundVideoUrl: null,
         textBackgroundSavedVideoId: null,
-        soundEffects: [],
-        transitionSoundEffects: [],
         characterKeys: null,
         locationKey: null,
         forcedLocationKey: null,
-        videoGenerationMode: 'referenceImage',
-        videoPrompt: null,
         referenceImage: null,
         referenceImageUrl: null,
         isGeneratingReferenceImage: false,
         forcedCharacterKeys: null,
-        transitionToNext: null,
-        imageEffectsMode: 'quick',
-        visualEffect: null,
-        customImageFilterId: null,
-        imageFilterSettings: null,
-        imageMotionEffect: 'default',
-        customMotionEffectId: null,
-        imageMotionSettings: null,
-        imageMotionSpeed: null,
         image: null,
         imageUrl: null,
         imagePrompt: null,
@@ -360,7 +343,6 @@ export function useSentencesEditor(initialSentences: SentenceItem[] = []) {
         isGeneratingEndImage: false,
         isSavingImage: false,
         isFromLibrary: false,
-        isSuspense: false,
       };
 
       const next = [...prev];

@@ -100,6 +100,10 @@ type SentencesImagesSectionProps = {
   onOpenBulkMotionPresetModal?: (() => void) | (() => Promise<void>);
   onResetBulkMotionEffects?: () => void;
   isApplyingBulkMotionPreset?: boolean;
+  isSavingSceneSequence?: boolean;
+  isApplyingSavedSequence?: boolean;
+  onOpenSaveSceneSequence?: () => void;
+  onOpenLoadSceneSequence?: () => void;
 
   imageAspectRatio: '16:9' | '9:16' | '1:1';
   onImageAspectRatioChange: (value: '16:9' | '9:16' | '1:1') => void;
@@ -317,6 +321,10 @@ export function SentencesImagesSection({
   onOpenBulkMotionPresetModal,
   onResetBulkMotionEffects,
   isApplyingBulkMotionPreset = false,
+  isSavingSceneSequence = false,
+  isApplyingSavedSequence = false,
+  onOpenSaveSceneSequence,
+  onOpenLoadSceneSequence,
 
   isLongForm = false,
   shortsTabs = [],
@@ -730,6 +738,10 @@ export function SentencesImagesSection({
               onOpenBulkMotionPresetModal={onOpenBulkMotionPresetModal}
               onResetBulkMotionEffects={onResetBulkMotionEffects}
               isApplyingBulkMotionPreset={isApplyingBulkMotionPreset}
+              isSavingSceneSequence={isSavingSceneSequence}
+              isApplyingSavedSequence={isApplyingSavedSequence}
+              onOpenSaveSceneSequence={onOpenSaveSceneSequence}
+              onOpenLoadSceneSequence={onOpenLoadSceneSequence}
               onSelectVideoFromLibrary={onSelectVideoFromLibrary}
               onSaveSentenceVideoToLibrary={onSaveSentenceVideoToLibrary}
               isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryBySentenceId}

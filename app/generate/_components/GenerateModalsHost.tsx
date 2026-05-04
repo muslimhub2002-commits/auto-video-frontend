@@ -6,9 +6,11 @@ import { ImageLibraryModal } from './ImageLibraryModal';
 import { VideoLibraryModal } from './VideoLibraryModal';
 import { ScriptLibraryModal, type ScriptDto } from './ScriptLibraryModal';
 import { ScriptReferencesModal, type ScriptReferenceDto } from './ScriptReferencesModal';
+import { SavedSequenceLibraryModal } from './SavedSequenceLibraryModal';
 import { TransitionSoundModal } from './TransitionSoundModal';
 import { VoiceLibraryModal } from './VoiceLibraryModal';
 import { SoundEffectsLibraryModal, type SoundEffectDto } from './SoundEffectsLibraryModal';
+import type { SavedSequenceDetailDto } from '../_types/saved-sequences';
 
 type LibraryTarget =
   | {
@@ -51,6 +53,12 @@ type GenerateModalsHostProps = {
   onCloseScriptReferences: () => void;
   initialSelectedReferenceScripts: ScriptReferenceDto[];
   onApplyReferenceScripts: (scripts: ScriptReferenceDto[]) => void;
+
+  isSavedSequenceLibraryOpen: boolean;
+  isApplyingSavedSequence?: boolean;
+  onCloseSavedSequenceLibrary: () => void;
+  onApplySavedSequence: (sequence: SavedSequenceDetailDto) => void | Promise<void>;
+  onToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
 
   isSoundEffectsLibraryOpen: boolean;
   onCloseSoundEffectsLibrary: () => void;
@@ -122,6 +130,12 @@ export function GenerateModalsHost({
   initialSelectedReferenceScripts,
   onApplyReferenceScripts,
 
+  isSavedSequenceLibraryOpen,
+  isApplyingSavedSequence = false,
+  onCloseSavedSequenceLibrary,
+  onApplySavedSequence,
+  onToast,
+
   isSoundEffectsLibraryOpen,
   onCloseSoundEffectsLibrary,
   onApplySoundEffects,
@@ -181,6 +195,14 @@ export function GenerateModalsHost({
         onClose={onCloseScriptReferences}
         initialSelected={initialSelectedReferenceScripts}
         onApply={onApplyReferenceScripts}
+      />
+
+      <SavedSequenceLibraryModal
+        isOpen={isSavedSequenceLibraryOpen}
+        isApplying={isApplyingSavedSequence}
+        onClose={onCloseSavedSequenceLibrary}
+        onApply={onApplySavedSequence}
+        onToast={onToast}
       />
 
       <SoundEffectsLibraryModal
