@@ -516,6 +516,12 @@ type MaterializedBackgroundSoundtrackAsset = {
   objectUrl: string;
 };
 
+type MaterializedRenderSoundEffectAsset = {
+  cacheKey: string;
+  uploadedUrl: string;
+  durationSeconds: number | null;
+};
+
 type RenderSoundEffectMaterializationSource = {
   title?: string | null;
   url?: string | null;
@@ -1818,6 +1824,10 @@ export function GeneratePageInner() {
     useRef<Map<string, MaterializedBackgroundSoundtrackAsset>>(new Map());
   const backgroundSoundtrackAssetInFlightRef =
     useRef<Map<string, Promise<MaterializedBackgroundSoundtrackAsset | null>>>(new Map());
+  const renderSoundEffectAssetCacheRef =
+    useRef<Map<string, MaterializedRenderSoundEffectAsset>>(new Map());
+  const renderSoundEffectAssetInFlightRef =
+    useRef<Map<string, Promise<MaterializedRenderSoundEffectAsset>>>(new Map());
   const generateLibrariesBootstrapRef = useRef<GenerateLibrariesBootstrapState>({
     userId: null,
     status: 'idle',
@@ -3099,6 +3109,74 @@ export function GeneratePageInner() {
     };
   }
 
+  const materializeRenderSoundEffect = async (
+    source: RenderSoundEffectMaterializationSource,
+  ): Promise<MaterializedRenderSoundEffectAsset> => {
+    const sourceUrl = String(source.url ?? '').trim();
+    if (!sourceUrl) {
+      return {
+        cacheKey: '',
+        uploadedUrl: '',
+        durationSeconds: null,
+      };
+    }
+
+    const normalizedAudioSettings = normalizeSoundEffectAudioSettings(
+      source.audioSettings,
+    );
+    const cacheKey = JSON.stringify({
+      sourceUrl,
+      audioSettings: normalizedAudioSettings,
+    });
+
+    const cached = renderSoundEffectAssetCacheRef.current.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const inFlight = renderSoundEffectAssetInFlightRef.current.get(cacheKey);
+    if (inFlight) {
+      return await inFlight;
+    }
+
+    const request = (async () => {
+      const rendered = await renderEditedAudioFile({
+        sourceUrl,
+        values: {
+          name: String(source.title ?? '').trim() || 'sound-effect',
+          volumePercent: 100,
+          audioSettings: normalizedAudioSettings,
+        },
+        fallbackName: String(source.title ?? '').trim() || 'sound-effect',
+      });
+
+      const uploadedUrl = await uploadManagedFile(rendered.file, {
+        resourceType: 'audio',
+        folder: RENDER_SOUND_EFFECT_UPLOAD_FOLDER,
+      });
+
+      const asset: MaterializedRenderSoundEffectAsset = {
+        cacheKey,
+        uploadedUrl,
+        durationSeconds:
+          rendered.durationSeconds > 0 ? rendered.durationSeconds : null,
+      };
+
+      renderSoundEffectAssetCacheRef.current.set(cacheKey, asset);
+      return asset;
+    })();
+
+    renderSoundEffectAssetInFlightRef.current.set(cacheKey, request);
+
+    try {
+      return await request;
+    } finally {
+      if (renderSoundEffectAssetInFlightRef.current.get(cacheKey) === request) {
+        renderSoundEffectAssetInFlightRef.current.delete(cacheKey);
+      }
+    }
+  };
+
   const buildRenderSentencePayload = async (
     sourceSentences: SentenceItem[],
     options?: {
@@ -3112,71 +3190,6 @@ export function GeneratePageInner() {
       >;
     },
   ) => {
-    const materializationCache = new Map<
-      string,
-      Promise<{
-        uploadedUrl: string;
-        durationSeconds: number | null;
-      }>
-    >();
-
-    const materializeRenderSoundEffect = async (
-      source: RenderSoundEffectMaterializationSource,
-    ) => {
-      const sourceUrl = String(source.url ?? '').trim();
-      if (!sourceUrl) {
-        return {
-          uploadedUrl: '',
-          durationSeconds: null,
-        };
-      }
-
-      const normalizedAudioSettings = normalizeSoundEffectAudioSettings(
-        source.audioSettings,
-      );
-      const cacheKey = JSON.stringify({
-        sourceUrl,
-        audioSettings: normalizedAudioSettings,
-      });
-      const cached = materializationCache.get(cacheKey);
-      if (cached) {
-        return await cached;
-      }
-
-      const request = (async () => {
-        const rendered = await renderEditedAudioFile({
-          sourceUrl,
-          values: {
-            name: String(source.title ?? '').trim() || 'sound-effect',
-            volumePercent: 100,
-            audioSettings: normalizedAudioSettings,
-          },
-          fallbackName: String(source.title ?? '').trim() || 'sound-effect',
-        });
-
-        const uploadedUrl = await uploadManagedFile(rendered.file, {
-          resourceType: 'audio',
-          folder: RENDER_SOUND_EFFECT_UPLOAD_FOLDER,
-        });
-
-        return {
-          uploadedUrl,
-          durationSeconds:
-            rendered.durationSeconds > 0 ? rendered.durationSeconds : null,
-        };
-      })();
-
-      materializationCache.set(cacheKey, request);
-
-      try {
-        return await request;
-      } finally {
-        if (materializationCache.get(cacheKey) === request) {
-          materializationCache.delete(cacheKey);
-        }
-      }
-    };
-
     const materializeSentenceSoundEffectsForRender = async (
       items: SentenceSoundEffectItem[] | null | undefined,
     ): Promise<SentenceSoundEffectItem[]> => {

@@ -3166,7 +3166,7 @@ export function ImageEffectsDetailModal({
                         updateTextSettings({
                           strokeEnabled: e.target.checked,
                           strokeWidthPx: e.target.checked
-                            ? Math.max(1, Number(resolvedText.strokeWidthPx ?? 0) || 2)
+                            ? Math.min(4, Math.max(0.1, Number(resolvedText.strokeWidthPx ?? 0) || 2))
                             : resolvedText.strokeWidthPx ?? 2,
                         })
                       }
@@ -3192,10 +3192,10 @@ export function ImageEffectsDetailModal({
                       </div>
                       <RangeField
                         label="Stroke strength"
-                        value={Math.max(1, Number(resolvedText.strokeWidthPx ?? 0) || 2)}
-                        min={1}
-                        max={8}
-                        step={0.5}
+                        value={Math.min(4, Math.max(0.1, Number(resolvedText.strokeWidthPx ?? 0) || 2))}
+                        min={0.1}
+                        max={4}
+                        step={0.1}
                         onChange={(value) => updateTextSettings({ strokeWidthPx: value, strokeEnabled: true })}
                       />
                     </div>
