@@ -68,7 +68,7 @@ import type {
   SentenceSoundEffectItem,
 } from './_types/sentences';
 import type { SavedSequenceDetailDto } from './_types/saved-sequences';
-import type { TestVideoVoiceMode } from './_components/sentences/test-video.types';
+import type { GenerateTestVideoRequest } from './_components/sentences/test-video.types';
 import {
   getDefaultImageFilterSettings,
   getDefaultImageMotionSettings,
@@ -4083,7 +4083,13 @@ export function GeneratePageInner() {
     });
   };
 
-  const generateVoiceFileForSentences = async (sentenceTexts: string[], voiceId: string) => {
+  const generateVoiceFileForSentences = async (
+    sentenceTexts: string[],
+    voiceId: string,
+    options?: {
+      styleInstructions?: string | null;
+    },
+  ) => {
     const normalizedSentences = sentenceTexts
       .map((sentence) => String(sentence ?? '').trim())
       .filter(Boolean);
@@ -4092,16 +4098,20 @@ export function GeneratePageInner() {
       throw new Error('No sentences available for test voice-over generation');
     }
 
+    const resolvedStyleInstructions =
+      options && 'styleInstructions' in options
+        ? String(options.styleInstructions ?? '').trim() || undefined
+        : voiceProvider === 'google'
+          ? String(aiStudioStyleInstructions ?? '').trim() || undefined
+          : undefined;
+
     return generateVoiceFileWithChunkSupport({
       sentenceTexts: normalizedSentences,
       scriptText: mergeVoiceSentenceTexts(normalizedSentences),
       voiceId,
       provider: voiceProvider,
       providerVoiceName: selectedVoiceOption?.name ?? null,
-      styleInstructions:
-        voiceProvider === 'google'
-          ? String(aiStudioStyleInstructions ?? '').trim() || undefined
-          : undefined,
+      styleInstructions: resolvedStyleInstructions,
       elevenLabsSettings:
         voiceProvider === 'elevenlabs' ? elevenLabsGlobalSettings : undefined,
       fallbackBaseName: `test-${voiceProvider}-voice-over`,
@@ -4115,14 +4125,12 @@ export function GeneratePageInner() {
     resetTestVideoJob();
   };
 
-  const handleGenerateTestVideo = async (params: {
-    selectedIndices: number[];
-    voiceMode: TestVideoVoiceMode;
-    uploadedVoiceOver: File | null;
-  }) => {
-    const selectedSentences = params.selectedIndices
-      .map((index) => sentences[index])
-      .filter((value): value is SentenceItem => Boolean(value));
+  const handleGenerateTestVideo = async (params: GenerateTestVideoRequest) => {
+    const selectedSentences = Array.isArray(params.selectedSentences)
+      ? params.selectedSentences.filter((value): value is SentenceItem => Boolean(value))
+      : params.selectedIndices
+        .map((index) => sentences[index])
+        .filter((value): value is SentenceItem => Boolean(value));
 
     if (selectedSentences.length < 2) {
       showAlert('Please select at least two scenes for the test video.', { type: 'warning' });
@@ -4241,7 +4249,16 @@ export function GeneratePageInner() {
           const selectedTexts = selectedSentences
             .map((s) => String(s.text ?? '').trim())
             .filter(Boolean);
-          const generated = await generateVoiceFileForSentences(selectedTexts, selectedVoiceId);
+          const generated = await generateVoiceFileForSentences(
+            selectedTexts,
+            selectedVoiceId,
+            {
+              styleInstructions:
+                voiceProvider === 'google' && selectedSentences.length < sentences.length
+                  ? null
+                  : undefined,
+            },
+          );
           voiceFile = generated.file;
           audioDurationSeconds = generated.durationSeconds;
         }

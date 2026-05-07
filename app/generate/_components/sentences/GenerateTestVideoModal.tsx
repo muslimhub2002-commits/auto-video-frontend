@@ -4,7 +4,10 @@ import { useMemo, useRef, useState } from 'react';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import type { SentenceItem } from '../../_types/sentences';
-import type { TestVideoVoiceMode } from './test-video.types';
+import type {
+  GenerateTestVideoRequest,
+  TestVideoVoiceMode,
+} from './test-video.types';
 import {
   CheckSquare,
   FileText,
@@ -25,11 +28,7 @@ type GenerateTestVideoModalProps = {
   videoUrl: string | null;
   canUseCurrentVoiceSettings: boolean;
   onClose: () => void;
-  onGenerate: (params: {
-    selectedIndices: number[];
-    voiceMode: TestVideoVoiceMode;
-    uploadedVoiceOver: File | null;
-  }) => void | Promise<void>;
+  onGenerate: (params: GenerateTestVideoRequest) => void | Promise<void>;
 };
 
 function getSceneMediaUrl(sentence: SentenceItem): string | null {
@@ -74,6 +73,11 @@ export function GenerateTestVideoModal({
   const hasResult = Boolean(jobStatus || videoUrl || jobError);
   const isStartingRequest = isSubmitting && !hasResult;
 
+  const getSelectedSentences = () =>
+    sortedSelected
+      .map((index) => sentences[index])
+      .filter((value): value is SentenceItem => Boolean(value));
+
   const isSelectable = (index: number) => {
     if (sortedSelected.length === 0) return true;
     if (sortedSelected.includes(index)) {
@@ -114,7 +118,8 @@ export function GenerateTestVideoModal({
   };
 
   const handleGenerateClick = async () => {
-    if (sortedSelected.length < 2) return;
+    const selectedSentences = getSelectedSentences();
+    if (selectedSentences.length < 2) return;
     if (voiceMode === 'upload' && !uploadedVoiceOver) return;
 
     if (voiceMode === 'current' && !canUseCurrentVoiceSettings) {
@@ -126,6 +131,7 @@ export function GenerateTestVideoModal({
     try {
       await onGenerate({
         selectedIndices: sortedSelected,
+        selectedSentences,
         voiceMode,
         uploadedVoiceOver,
       });
@@ -135,11 +141,13 @@ export function GenerateTestVideoModal({
   };
 
   const handleConfirmSilentFallback = async () => {
+    const selectedSentences = getSelectedSentences();
     setShowSilentFallbackAlert(false);
     setIsSubmitting(true);
     try {
       await onGenerate({
         selectedIndices: sortedSelected,
+        selectedSentences,
         voiceMode: 'none',
         uploadedVoiceOver: null,
       });

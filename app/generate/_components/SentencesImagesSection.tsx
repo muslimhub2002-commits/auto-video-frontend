@@ -40,7 +40,7 @@ import { GenerateTestVideoModal } from './sentences/GenerateTestVideoModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
 import { SceneEditorSection } from './sentences/SceneEditorSection';
 import { getDefaultImageMotionSpeed } from './sentences/ImageEffectPreview';
-import type { TestVideoVoiceMode } from './sentences/test-video.types';
+import type { GenerateTestVideoRequest } from './sentences/test-video.types';
 import type {
   ImageFilterPresetDto,
   ImageFilterSettings,
@@ -288,11 +288,7 @@ type SentencesImagesSectionProps = {
   onMergeSentenceIntoNext: (index: number) => void;
   onDeleteSentence: (index: number) => void;
   onAddSuspenseScene: (sourceIndex: number) => void;
-  onGenerateTestVideo: (params: {
-    selectedIndices: number[];
-    voiceMode: TestVideoVoiceMode;
-    uploadedVoiceOver: File | null;
-  }) => void | Promise<void>;
+  onGenerateTestVideo: (params: GenerateTestVideoRequest) => void | Promise<void>;
   canUseCurrentTestVoiceSettings: boolean;
   testVideoJobStatus: string | null;
   testVideoJobError: string | null;
