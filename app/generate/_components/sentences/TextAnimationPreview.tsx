@@ -774,16 +774,71 @@ function buildTextBoxStyle(settings: TextAnimationSettings): CSSProperties | nul
   };
 }
 
-function renderAccentText(displayText: string, accentBoundary: number, accentColor?: string) {
+function renderAccentText(
+  displayText: string,
+  accentBoundary: number,
+  accentColor?: string,
+  baseColor?: string,
+  textPaintStyle?: CSSProperties,
+) {
   const safeBoundary = clamp(accentBoundary, 0, displayText.length);
+  const accentText = displayText.slice(0, safeBoundary);
+  const baseText = displayText.slice(safeBoundary);
 
   return (
     <>
-      <span style={{ color: accentColor }}>
-        {displayText.slice(0, safeBoundary)}
-      </span>
-      {displayText.slice(safeBoundary)}
+      {accentText ? (
+        <span style={{ ...(textPaintStyle ?? null), color: accentColor }}>
+          {accentText}
+        </span>
+      ) : null}
+      {baseText ? (
+        <span style={{ ...(textPaintStyle ?? null), color: baseColor }}>
+          {baseText}
+        </span>
+      ) : null}
     </>
+  );
+}
+
+function buildStrokeShadowLayers(strokeWidthPx: number, strokeColor?: string) {
+  const radius = clamp(strokeWidthPx, 0, 4);
+  const color = String(strokeColor ?? '').trim();
+
+  if (!color || radius <= 0.001) {
+    return [] as string[];
+  }
+
+  const directions = [
+    [1, 0],
+    [0.9239, 0.3827],
+    [0.7071, 0.7071],
+    [0.3827, 0.9239],
+    [0, 1],
+    [-0.3827, 0.9239],
+    [-0.7071, 0.7071],
+    [-0.9239, 0.3827],
+    [-1, 0],
+    [-0.9239, -0.3827],
+    [-0.7071, -0.7071],
+    [-0.3827, -0.9239],
+    [0, -1],
+    [0.3827, -0.9239],
+    [0.7071, -0.7071],
+    [0.9239, -0.3827],
+  ] as const;
+  const radii =
+    radius >= 1.5
+      ? [radius, radius * 0.72, radius * 0.42]
+      : radius >= 0.75
+        ? [radius, radius * 0.5]
+        : [radius];
+
+  return radii.flatMap((ringRadius) =>
+    directions.map(
+      ([x, y]) =>
+        `${(x * ringRadius).toFixed(2)}px ${(y * ringRadius).toFixed(2)}px 0 ${color}`,
+    ),
   );
 }
 
@@ -1131,6 +1186,14 @@ export function TextAnimationPreview({
           )
           .join('')
       : '';
+  const textPaintStyle: CSSProperties = {
+    WebkitTextStroke: strokeEnabled ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
+    paintOrder: 'stroke fill',
+  };
+  const baseDropShadow = `0 ${(6 + (resolvedSettings.animationIntensity ?? 0.82) * 6).toFixed(1)}px ${(resolvedSettings.shadowBlurPx ?? 18).toFixed(1)}px rgba(2, 6, 23, ${(resolvedSettings.shadowOpacity ?? 0.34).toFixed(3)})`;
+  const strokeShadowLayers = strokeEnabled
+    ? buildStrokeShadowLayers(strokeWidthPx, resolvedSettings.strokeColor)
+    : [];
 
   const blockAnimatedStyle = enableMotion
     ? getAnimatedTextStyle(
@@ -1150,9 +1213,8 @@ export function TextAnimationPreview({
     textAlign: contentAlign,
     maxWidth: '100%',
     fontFamily: resolvedFontFamily,
-    textShadow: `0 ${(6 + (resolvedSettings.animationIntensity ?? 0.82) * 6).toFixed(1)}px ${(resolvedSettings.shadowBlurPx ?? 18).toFixed(1)}px rgba(2, 6, 23, ${(resolvedSettings.shadowOpacity ?? 0.34).toFixed(3)})`,
-    WebkitTextStroke: strokeEnabled ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
-    paintOrder: 'stroke fill',
+    textShadow: [...strokeShadowLayers, baseDropShadow].join(', '),
+    ...textPaintStyle,
     whiteSpace: 'pre-wrap',
   };
   const blockWrapperStyle: CSSProperties = {
@@ -1276,6 +1338,7 @@ export function TextAnimationPreview({
                         style={{
                           display: 'inline-block',
                           color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
+                          ...(textPaintStyle ?? null),
                           ...(animatedWordStyle ?? null),
                           willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
                         }}
@@ -1296,6 +1359,8 @@ export function TextAnimationPreview({
                       resolvedText,
                       accentBoundary,
                       resolvedSettings.accentColor,
+                      resolvedSettings.textColor,
+                      textPaintStyle,
                     )}
                   </div>
                   <div
@@ -1309,6 +1374,8 @@ export function TextAnimationPreview({
                       typewriterVisibleText,
                       accentBoundary,
                       resolvedSettings.accentColor,
+                      resolvedSettings.textColor,
+                      textPaintStyle,
                     )}
                   </div>
                 </>
@@ -1320,6 +1387,8 @@ export function TextAnimationPreview({
                     resolvedText,
                     accentBoundary,
                     resolvedSettings.accentColor,
+                    resolvedSettings.textColor,
+                    textPaintStyle,
                   )}
                 </div>
               </>

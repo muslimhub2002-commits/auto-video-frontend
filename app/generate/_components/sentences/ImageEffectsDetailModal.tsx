@@ -793,6 +793,8 @@ export function ImageEffectsDetailModal({
       try {
         audio.pause();
         audio.currentTime = 0;
+        audio.removeAttribute('src');
+        audio.load();
       } catch {
         // ignore
       }
@@ -2109,7 +2111,7 @@ export function ImageEffectsDetailModal({
       if (saved) {
         setDraftCustomTextAnimationId(saved.id);
         setDraftTextAnimationSettings({ ...resolvedText, presetKey: 'custom' });
-        setDraftTextSoundEffects(cloneSentenceSoundEffects(saved.soundEffects ?? draftTextSoundEffects));
+        // setDraftTextSoundEffects(cloneSentenceSoundEffects(saved.soundEffects ?? draftTextSoundEffects));
       }
     } catch (error) {
       setTextActionError(error instanceof Error ? error.message : 'Failed to override text preset.');

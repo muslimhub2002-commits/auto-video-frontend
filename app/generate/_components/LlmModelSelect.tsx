@@ -29,6 +29,7 @@ export function LlmModelSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value="claude-sonnet-4-6">Claude Sonnet 4.6</SelectItem>
         <SelectItem value="claude-sonnet-4-5">Claude Sonnet 4.5</SelectItem>
         <SelectItem value="claude-sonnet-4-0">Claude Sonnet 4.0</SelectItem>
 

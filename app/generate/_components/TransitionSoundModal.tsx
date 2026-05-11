@@ -158,6 +158,8 @@ export function TransitionSoundModal({
       try {
         audio.pause();
         audio.currentTime = 0;
+        audio.removeAttribute('src');
+        audio.load();
       } catch {}
     }
     previewRef.current.audios = [];

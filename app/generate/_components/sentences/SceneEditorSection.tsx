@@ -27,6 +27,14 @@ import {
 
 import type { SentenceItem } from '../../_types/sentences';
 import { AlertDialog } from '@/components/ui/alert-dialog';
+import {
+  BulkSceneAssignmentModal,
+  type BulkSceneAssignmentKind,
+} from './BulkSceneAssignmentModal';
+import {
+  BulkSceneAssignmentScenePickerModal,
+  type BulkSceneAssignmentScenePickerItem,
+} from './BulkSceneAssignmentScenePickerModal';
 import { SentenceEditorCard } from './SentenceEditorCardGrid';
 import { CharactersModal } from './CharactersModal';
 import { LocationsModal, type ScriptLocation } from './LocationsModal';
@@ -51,6 +59,125 @@ type ScriptCharacter = {
   isProphet: boolean;
   isWoman: boolean;
 };
+
+type BulkSceneAssignmentModalState =
+  | {
+      kind: 'characters';
+      selectedCharacterKeys: string[];
+    }
+  | {
+      kind: 'locations';
+      selectedLocationKey: string | null;
+    };
+
+type BulkSceneAssignmentScenePickerState =
+  | {
+      kind: 'characters';
+      selectedCharacterKeys: string[];
+      selectedSentenceIds: string[];
+    }
+  | {
+      kind: 'locations';
+      selectedLocationKey: string | null;
+      selectedSentenceIds: string[];
+    };
+
+type BulkScenePreviewAsset = {
+  transport: 'image' | 'video' | 'none';
+  file: File | null;
+  url: string | null;
+};
+
+function resolveSentenceSceneTab(
+  sentence: Pick<SentenceItem, 'sceneTab' | 'mediaMode'>,
+): NonNullable<SentenceItem['sceneTab']> {
+  if (
+    sentence.sceneTab === 'image' ||
+    sentence.sceneTab === 'video' ||
+    sentence.sceneTab === 'text' ||
+    sentence.sceneTab === 'overlay'
+  ) {
+    return sentence.sceneTab;
+  }
+
+  return sentence.mediaMode === 'frames' ? 'video' : 'image';
+}
+
+function getFirstNonEmptyUrl(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    const resolved = String(candidate ?? '').trim();
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
+function resolveBulkScenePreviewAsset(
+  sentence: Pick<
+    SentenceItem,
+    | 'sceneTab'
+    | 'mediaMode'
+    | 'image'
+    | 'imageUrl'
+    | 'secondaryImage'
+    | 'secondaryImageUrl'
+    | 'startImage'
+    | 'startImageUrl'
+    | 'endImage'
+    | 'endImageUrl'
+    | 'video'
+    | 'videoUrl'
+  >,
+): BulkScenePreviewAsset {
+  const sceneTab = resolveSentenceSceneTab(sentence);
+
+  if (sceneTab === 'video') {
+    return {
+      transport: 'video',
+      file: sentence.video ?? null,
+      url: getFirstNonEmptyUrl(sentence.videoUrl),
+    };
+  }
+
+  if (sceneTab === 'image') {
+    return {
+      transport: 'image',
+      file:
+        sentence.image ??
+        sentence.secondaryImage ??
+        sentence.startImage ??
+        sentence.endImage ??
+        null,
+      url: getFirstNonEmptyUrl(
+        sentence.imageUrl,
+        sentence.secondaryImageUrl,
+        sentence.startImageUrl,
+        sentence.endImageUrl,
+      ),
+    };
+  }
+
+  return {
+    transport: 'none',
+    file: null,
+    url: null,
+  };
+}
+
+function sanitizeCharacterKeys(keys: string[] | null | undefined): string[] {
+  return Array.from(
+    new Set(
+      (Array.isArray(keys) ? keys : []).map((key) => String(key ?? '').trim()).filter(Boolean),
+    ),
+  );
+}
+
+function sanitizeLocationKey(key: string | null | undefined): string | null {
+  const normalized = String(key ?? '').trim();
+  return normalized || null;
+}
 
 type SceneEditorSectionProps = {
   sentences: SentenceItem[];
@@ -970,6 +1097,10 @@ export function SceneEditorSection({
 
   const [isCharactersModalOpen, setIsCharactersModalOpen] = useState(false);
   const [isLocationsModalOpen, setIsLocationsModalOpen] = useState(false);
+  const [bulkAssignmentModal, setBulkAssignmentModal] =
+    useState<BulkSceneAssignmentModalState | null>(null);
+  const [bulkAssignmentScenePicker, setBulkAssignmentScenePicker] =
+    useState<BulkSceneAssignmentScenePickerState | null>(null);
   const [pendingReset, setPendingReset] = useState<'look' | 'motion' | null>(null);
 
   const completeCount = useMemo(
@@ -988,6 +1119,150 @@ export function SceneEditorSection({
       ).length,
     [sentences],
   );
+
+  const allSentenceIds = useMemo(
+    () => sentences.map((sentence) => sentence.id).filter(Boolean),
+    [sentences],
+  );
+
+  const bulkScenePickerItems = useMemo<BulkSceneAssignmentScenePickerItem[]>(
+    () =>
+      sentences.map((sentence, index) => {
+        const sceneTab = resolveSentenceSceneTab(sentence);
+        const previewAsset = resolveBulkScenePreviewAsset(sentence);
+        const sceneKindLabel =
+          sceneTab === 'image'
+            ? 'Image'
+            : sceneTab === 'video'
+              ? 'Video'
+              : sceneTab === 'text'
+                ? 'Text'
+                : 'Overlay';
+        const text = String(sentence.text ?? '').trim();
+        const textPreview = !text
+          ? 'No sentence text yet.'
+          : text.length > 160
+            ? `${text.slice(0, 157).trimEnd()}...`
+            : text;
+
+        return {
+          sentenceId: sentence.id,
+          title: `Scene ${index + 1}`,
+          textPreview,
+          sceneKindLabel,
+          mediaTransport: previewAsset.transport,
+          mediaFile: previewAsset.file,
+          mediaUrl: previewAsset.url,
+        };
+      }),
+    [sentences],
+  );
+
+  const handleOpenBulkAssignmentModal = (kind: BulkSceneAssignmentKind) => {
+    if (kind === 'characters') {
+      setBulkAssignmentModal({ kind, selectedCharacterKeys: [] });
+      return;
+    }
+
+    setBulkAssignmentModal({ kind, selectedLocationKey: null });
+  };
+
+  const closeBulkAssignmentFlow = () => {
+    setBulkAssignmentModal(null);
+    setBulkAssignmentScenePicker(null);
+  };
+
+  const applyBulkCharactersToScenes = (
+    selectedSentenceIds: string[],
+    selectedCharacterKeys: string[],
+  ) => {
+    const normalizedKeys = sanitizeCharacterKeys(selectedCharacterKeys);
+    if (normalizedKeys.length === 0) return;
+
+    const targetIds = new Set(selectedSentenceIds.filter(Boolean));
+    sentences.forEach((sentence, index) => {
+      if (!targetIds.has(sentence.id)) return;
+      onSentenceForcedCharacterKeysChange(index, normalizedKeys);
+    });
+
+    closeBulkAssignmentFlow();
+  };
+
+  const applyBulkLocationToScenes = (
+    selectedSentenceIds: string[],
+    selectedLocationKey: string | null,
+  ) => {
+    const normalizedKey = sanitizeLocationKey(selectedLocationKey);
+    if (!normalizedKey) return;
+
+    const targetIds = new Set(selectedSentenceIds.filter(Boolean));
+    sentences.forEach((sentence, index) => {
+      if (!targetIds.has(sentence.id)) return;
+      onSentenceForcedLocationKeyChange(index, normalizedKey);
+    });
+
+    closeBulkAssignmentFlow();
+  };
+
+  const handleApplyBulkAssignmentToAllScenes = () => {
+    if (!bulkAssignmentModal) return;
+
+    if (bulkAssignmentModal.kind === 'characters') {
+      applyBulkCharactersToScenes(
+        allSentenceIds,
+        bulkAssignmentModal.selectedCharacterKeys,
+      );
+      return;
+    }
+
+    applyBulkLocationToScenes(allSentenceIds, bulkAssignmentModal.selectedLocationKey);
+  };
+
+  const handleOpenBulkAssignmentScenePicker = () => {
+    if (!bulkAssignmentModal) return;
+
+    if (bulkAssignmentModal.kind === 'characters') {
+      const selectedCharacterKeys = sanitizeCharacterKeys(
+        bulkAssignmentModal.selectedCharacterKeys,
+      );
+      if (selectedCharacterKeys.length === 0) return;
+      setBulkAssignmentScenePicker({
+        kind: 'characters',
+        selectedCharacterKeys,
+        selectedSentenceIds: allSentenceIds,
+      });
+      setBulkAssignmentModal(null);
+      return;
+    }
+
+    const selectedLocationKey = sanitizeLocationKey(
+      bulkAssignmentModal.selectedLocationKey,
+    );
+    if (!selectedLocationKey) return;
+    setBulkAssignmentScenePicker({
+      kind: 'locations',
+      selectedLocationKey,
+      selectedSentenceIds: allSentenceIds,
+    });
+    setBulkAssignmentModal(null);
+  };
+
+  const handleApplyBulkAssignmentToSelectedScenes = (selectedSentenceIds: string[]) => {
+    if (!bulkAssignmentScenePicker) return;
+
+    if (bulkAssignmentScenePicker.kind === 'characters') {
+      applyBulkCharactersToScenes(
+        selectedSentenceIds,
+        bulkAssignmentScenePicker.selectedCharacterKeys,
+      );
+      return;
+    }
+
+    applyBulkLocationToScenes(
+      selectedSentenceIds,
+      bulkAssignmentScenePicker.selectedLocationKey,
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -1017,34 +1292,61 @@ export function SceneEditorSection({
 
           <div className="flex w-full flex-wrap items-stretch gap-3">
 
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setIsCharactersModalOpen(true);
-              }}
-              className="gap-2 h-10 px-4 border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 shadow-sm hover:shadow transition-all"
-              title="View and edit all characters"
-            >
-              <Users className="h-4 w-4" />
-              <span className="text-sm font-semibold">Characters</span>
-            </Button>
+            <div className="flex h-10 overflow-hidden rounded-lg border border-indigo-200 bg-white shadow-sm transition-all hover:shadow">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setIsCharactersModalOpen(true);
+                }}
+                className="h-full gap-2 rounded-none px-4 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700"
+                title="View and edit all characters"
+              >
+                <Users className="h-4 w-4" />
+                <span className="text-sm font-semibold">Characters</span>
+              </Button>
+              <div className="my-1.5 w-px bg-indigo-200" />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => handleOpenBulkAssignmentModal('characters')}
+                disabled={sentences.length === 0 || scriptCharacters.length === 0}
+                className="h-full w-9 rounded-none p-0 text-indigo-500 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Choose characters to apply to all or selected scenes"
+              >
+                <ListFilter className="h-3.5 w-3.5" />
+              </Button>
+            </div>
 
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setIsLocationsModalOpen(true);
-              }}
-              className="gap-2 h-10 px-4 border-cyan-200 bg-white text-cyan-700 hover:bg-cyan-50 hover:border-cyan-300 shadow-sm hover:shadow transition-all"
-              title="View and edit all locations"
-            >
-              <MapPin className="h-4 w-4" />
-
-              <span className="text-sm font-semibold">Locations</span>
-            </Button>
+            <div className="flex h-10 overflow-hidden rounded-lg border border-cyan-200 bg-white shadow-sm transition-all hover:shadow">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setIsLocationsModalOpen(true);
+                }}
+                className="h-full gap-2 rounded-none px-4 text-cyan-700 hover:bg-cyan-50 hover:text-cyan-700"
+                title="View and edit all locations"
+              >
+                <MapPin className="h-4 w-4" />
+                <span className="text-sm font-semibold">Locations</span>
+              </Button>
+              <div className="my-1.5 w-px bg-cyan-200" />
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => handleOpenBulkAssignmentModal('locations')}
+                disabled={sentences.length === 0 || scriptLocations.length === 0}
+                className="h-full w-9 rounded-none p-0 text-cyan-500 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Choose a location to apply to all or selected scenes"
+              >
+                <ListFilter className="h-3.5 w-3.5" />
+              </Button>
+            </div>
 
             <Button
               type="button"
@@ -1095,7 +1397,7 @@ export function SceneEditorSection({
               variant="outline"
               onClick={onOpenLoadSceneSequence}
               disabled={!onOpenLoadSceneSequence || isSavingSceneSequence || isApplyingSavedSequence}
-              className="gap-2 h-10 px-4 border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm hover:shadow transition-all"
+              className="gap-2 h-10 px-4 border-amber-200 bg-white text-amber-700 hover:bg-amber-50 hover:border-amber-300 shadow-sm hover:shadow transition-all"
               title="Load a saved scene sequence and apply it from the first scene"
             >
               {isApplyingSavedSequence ? (
@@ -1232,6 +1534,61 @@ export function SceneEditorSection({
         }
         confirmText={pendingReset === 'look' ? 'Reset Look' : 'Reset Motion'}
         cancelText="Keep Current"
+      />
+
+      <BulkSceneAssignmentModal
+        isOpen={Boolean(bulkAssignmentModal)}
+        kind={bulkAssignmentModal?.kind ?? 'characters'}
+        characters={scriptCharacters}
+        locations={scriptLocations}
+        selectedCharacterKeys={
+          bulkAssignmentModal?.kind === 'characters'
+            ? bulkAssignmentModal.selectedCharacterKeys
+            : []
+        }
+        selectedLocationKey={
+          bulkAssignmentModal?.kind === 'locations'
+            ? bulkAssignmentModal.selectedLocationKey
+            : null
+        }
+        selectableSceneCount={sentences.length}
+        onClose={() => setBulkAssignmentModal(null)}
+        onSelectedCharacterKeysChange={(next) => {
+          setBulkAssignmentModal((prev) =>
+            prev?.kind === 'characters'
+              ? {
+                  ...prev,
+                  selectedCharacterKeys: sanitizeCharacterKeys(next),
+                }
+              : prev,
+          );
+        }}
+        onSelectedLocationKeyChange={(next) => {
+          setBulkAssignmentModal((prev) =>
+            prev?.kind === 'locations'
+              ? {
+                  ...prev,
+                  selectedLocationKey: sanitizeLocationKey(next),
+                }
+              : prev,
+          );
+        }}
+        onApplyAllScenes={handleApplyBulkAssignmentToAllScenes}
+        onApplyCertainScenes={handleOpenBulkAssignmentScenePicker}
+      />
+
+      <BulkSceneAssignmentScenePickerModal
+        key={
+          bulkAssignmentScenePicker
+            ? `${bulkAssignmentScenePicker.kind}:${bulkAssignmentScenePicker.selectedSentenceIds.join(',')}:${bulkAssignmentScenePicker.kind === 'characters' ? bulkAssignmentScenePicker.selectedCharacterKeys.join(',') : bulkAssignmentScenePicker.selectedLocationKey ?? ''}`
+            : 'bulk-scene-assignment-picker-closed'
+        }
+        isOpen={Boolean(bulkAssignmentScenePicker)}
+        kind={bulkAssignmentScenePicker?.kind ?? 'characters'}
+        scenes={bulkScenePickerItems}
+        selectedSentenceIds={bulkAssignmentScenePicker?.selectedSentenceIds ?? []}
+        onClose={() => setBulkAssignmentScenePicker(null)}
+        onApply={handleApplyBulkAssignmentToSelectedScenes}
       />
 
       <CharactersModal

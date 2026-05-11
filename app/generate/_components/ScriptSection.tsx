@@ -46,6 +46,8 @@ interface ScriptSectionProps {
   setScriptStyle: (value: string) => void;
   scriptTechnique: string;
   setScriptTechnique: (value: string) => void;
+  useWebSearchForTrending: boolean;
+  setUseWebSearchForTrending: (value: boolean) => void;
   scriptModel: string;
   setScriptModel: (value: string) => void;
   isRandomScriptLoading: boolean;
@@ -98,6 +100,8 @@ export function ScriptSection(props: ScriptSectionProps) {
     setScriptStyle,
     scriptTechnique,
     setScriptTechnique,
+    useWebSearchForTrending,
+    setUseWebSearchForTrending,
     scriptModel,
     setScriptModel,
     isRandomScriptLoading,
@@ -197,8 +201,12 @@ export function ScriptSection(props: ScriptSectionProps) {
     if (!current) return;
 
     if (!subjectContentPresetSet.has(current)) {
-      setSubjectContentMode('custom');
-      setCustomSubjectContent(current);
+      const raf = requestAnimationFrame(() => {
+        setSubjectContentMode('custom');
+        setCustomSubjectContent(current);
+      });
+
+      return () => cancelAnimationFrame(raf);
     }
   }, [scriptSubject, scriptSubjectContent, subjectContentPresetSet]);
 
@@ -486,6 +494,22 @@ export function ScriptSection(props: ScriptSectionProps) {
 
               {/* Model */}
               <LlmModelSelect value={scriptModel} onValueChange={setScriptModel} label="Model" />
+              <Select
+                value={useWebSearchForTrending ? 'enabled' : 'disabled'}
+                onValueChange={(value) =>
+                  setUseWebSearchForTrending(value === 'enabled')
+                }
+              >
+                <SelectTrigger label="Trending Web Search">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="disabled">Off</SelectItem>
+                  <SelectItem value="enabled">
+                    Use Claude Web Search
+                  </SelectItem>
+                </SelectContent>
+              </Select>
 
               {/* Custom Subject Content */}
               {scriptSubject === 'religious (Islam)' && subjectContentMode === 'custom' ? (

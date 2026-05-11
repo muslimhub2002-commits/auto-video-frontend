@@ -1725,6 +1725,7 @@ export function GeneratePageInner() {
   const [scriptStyle, setScriptStyle] = useState('Conversational');
   const [scriptTechnique, setScriptTechnique] = useState('The Dance (Context, Conflict)');
   const [scriptLanguage, setScriptLanguage] = useState('en');
+  const [useWebSearchForTrending, setUseWebSearchForTrending] = useState(false);
   // Default to Anthropic (Claude) as requested.
   const [scriptModel, setScriptModel] = useState('gpt-5.2');
   const [scriptIdeas, setScriptIdeas] = useState<ScriptIdeaOption[]>([]);
@@ -7343,6 +7344,7 @@ export function GeneratePageInner() {
           length: scriptLength,
           technique: scriptTechnique,
           model: scriptModel,
+          useWebSearch: selectedIdea ? false : useWebSearchForTrending,
           selectedIdea,
           ...(usingReferences
             ? {
@@ -7361,6 +7363,13 @@ export function GeneratePageInner() {
 
       if (!response.ok || !response.body) {
         throw new Error('Failed to start script generation');
+      }
+
+      const warning = String(
+        response.headers.get('X-AI-Web-Search-Warning') ?? '',
+      ).trim();
+      if (warning) {
+        showToast(warning, 'warning', 5000);
       }
 
       const reader = response.body.getReader();
@@ -7406,7 +7415,10 @@ export function GeneratePageInner() {
 
     try {
       const usingReferences = referenceScripts.length > 0;
-      const response = await api.post<{ ideas: ScriptIdeaOption[] }>(
+      const response = await api.post<{
+        ideas: ScriptIdeaOption[];
+        warning?: string;
+      }>(
         '/ai/generate-script-ideas',
         {
           language: scriptLanguage,
@@ -7418,6 +7430,7 @@ export function GeneratePageInner() {
           length: scriptLength,
           technique: scriptTechnique,
           model: scriptModel,
+          useWebSearch: useWebSearchForTrending,
           count: 5,
           ...(usingReferences
             ? {
@@ -7444,6 +7457,11 @@ export function GeneratePageInner() {
 
       if (nextIdeas.length !== 5) {
         throw new Error('The server did not return five script ideas.');
+      }
+
+      const warning = String(response.data?.warning ?? '').trim();
+      if (warning) {
+        showToast(warning, 'warning', 5000);
       }
 
       setScriptIdeas(nextIdeas);
@@ -12305,6 +12323,8 @@ export function GeneratePageInner() {
                   setScriptStyle={setScriptStyle}
                   scriptTechnique={scriptTechnique}
                   setScriptTechnique={setScriptTechnique}
+                  useWebSearchForTrending={useWebSearchForTrending}
+                  setUseWebSearchForTrending={setUseWebSearchForTrending}
                   scriptModel={scriptModel}
                   setScriptModel={setScriptModel}
                   isRandomScriptLoading={isRandomScriptLoading}
