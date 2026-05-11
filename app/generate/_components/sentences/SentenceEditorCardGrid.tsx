@@ -93,6 +93,7 @@ import {
   getTextAnimationEffectLabel,
   normalizeTextAnimationText,
   normalizeTextAnimationSettings,
+  resolveTextAnimationDirection,
   resolveTextAnimationEffectFromSettings,
   resolveTextAnimationText,
   TextAnimationPreview,
@@ -1365,14 +1366,23 @@ function SentenceEditorCardComponent({
     () => resolveTextAnimationEffectFromSettings(item.textAnimationSettings, item.textAnimationEffect),
     [item.textAnimationEffect, item.textAnimationSettings],
   );
+  const resolvedTextAnimationValue = useMemo(
+    () => resolveTextAnimationText(item.textAnimationText, item.text),
+    [item.text, item.textAnimationText],
+  );
   const resolvedTextAnimationSettings = useMemo(
     () =>
       normalizeTextAnimationSettings(
         item.textAnimationSettings,
         resolvedTextAnimationEffect,
         isShortVideo,
+        resolvedTextAnimationValue,
       ),
-    [isShortVideo, item.textAnimationSettings, resolvedTextAnimationEffect],
+    [isShortVideo, item.textAnimationSettings, resolvedTextAnimationEffect, resolvedTextAnimationValue],
+  );
+  const textHookDirection = useMemo(
+    () => resolveTextAnimationDirection(item.textAnimationText, item.text),
+    [item.text, item.textAnimationText],
   );
   const resolvedTextAnimationLabel = useMemo(
     () => getTextAnimationEffectLabel(resolvedTextAnimationEffect),
@@ -1543,6 +1553,7 @@ function SentenceEditorCardComponent({
         preset.settings,
         nextEffect,
         isShortVideo,
+        resolvedTextAnimationValue,
       );
 
       onSentencePatch({
@@ -1562,6 +1573,7 @@ function SentenceEditorCardComponent({
         effect,
         item.textAnimationSettings,
         isShortVideo,
+        resolvedTextAnimationValue,
       ),
       textSoundEffects: [],
     });
@@ -2946,8 +2958,9 @@ function SentenceEditorCardComponent({
                         const nextText = event.target.value;
                         onSentencePatch({ textAnimationText: nextText.trim().length > 0 ? nextText : null });
                       }}
+                      dir={textHookDirection}
                       placeholder={resolveTextAnimationText(null, item.text)}
-                      className="h-11 rounded-xl border-amber-200 bg-white"
+                      className={`h-11 rounded-xl border-amber-200 bg-white ${textHookDirection === 'rtl' ? 'text-right' : 'text-left'}`}
                     />
                     <p className="text-xs text-amber-900/80">
                       Leave blank to use the first 5 words from the sentence.

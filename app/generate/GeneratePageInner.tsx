@@ -584,7 +584,10 @@ function resolveSentenceSceneTab(
 }
 
 function resolveTextSceneBackgroundMode(
-  sentence: Pick<SentenceItem, 'textAnimationSettings' | 'textAnimationEffect'>,
+  sentence: Pick<
+    SentenceItem,
+    'text' | 'textAnimationEffect' | 'textAnimationSettings' | 'textAnimationText'
+  >,
   isShortVideo: boolean,
 ): NonNullable<TextAnimationSettings['backgroundMode']> {
   return (
@@ -592,6 +595,7 @@ function resolveTextSceneBackgroundMode(
       sentence.textAnimationSettings,
       sentence.textAnimationEffect,
       isShortVideo,
+      resolveTextAnimationText(sentence.textAnimationText, sentence.text),
     ).backgroundMode ?? 'inheritImage'
   );
 }
@@ -627,7 +631,9 @@ function resolveTextSceneRenderBackgroundAsset(
     SentenceItem,
     | 'image'
     | 'imageUrl'
+    | 'text'
     | 'videoUrl'
+    | 'textAnimationText'
     | 'textBackgroundImage'
     | 'textBackgroundImageUrl'
     | 'textBackgroundVideo'
@@ -802,7 +808,7 @@ function inferOverlayResourceType(
 }
 
 function serializeTextAnimationSettingsForRender(
-  sentence: Pick<SentenceItem, 'textAnimationSettings'>,
+  sentence: Pick<SentenceItem, 'text' | 'textAnimationSettings' | 'textAnimationText'>,
   fallbackEffect: SentenceItem['textAnimationEffect'] | null | undefined,
   isShortVideo: boolean,
 ) {
@@ -810,6 +816,7 @@ function serializeTextAnimationSettingsForRender(
     sentence.textAnimationSettings,
     fallbackEffect,
     isShortVideo,
+    resolveTextAnimationText(sentence.textAnimationText, sentence.text),
   );
 }
 
@@ -1735,7 +1742,7 @@ export function GeneratePageInner() {
   const [scriptIdeasError, setScriptIdeasError] = useState<string | null>(null);
 
   const [isTranslateModalOpen, setIsTranslateModalOpen] = useState(false);
-  const [translateTargetLanguage, setTranslateTargetLanguage] = useState('en');
+  const [translateTargetLanguage, setTranslateTargetLanguage] = useState('ar');
   const [translateMethod, setTranslateMethod] = useState<TranslateMethod>('google');
   const [isTranslatingScript, setIsTranslatingScript] = useState(false);
   const [translateLoadingAction, setTranslateLoadingAction] =
@@ -4819,7 +4826,12 @@ export function GeneratePageInner() {
           ...sentence,
           textAnimationEffect: nextEffect,
           textAnimationSettings: {
-            ...normalizeTextAnimationSettings(preset.settings, nextEffect, effectiveIsShort),
+            ...normalizeTextAnimationSettings(
+              preset.settings,
+              nextEffect,
+              effectiveIsShort,
+              resolveTextAnimationText(sentence.textAnimationText, sentence.text),
+            ),
             presetKey: 'custom',
           },
           textSoundEffects: nextSoundEffects,
@@ -4960,6 +4972,10 @@ export function GeneratePageInner() {
                 textAnimationSettings: getDefaultTextAnimationSettings(
                   'slideCutFast',
                   effectiveIsShort,
+                    resolveTextAnimationText(
+                      sentence.textAnimationText,
+                      sentence.text,
+                    ),
                 ),
                 textSoundEffects: [],
               }
@@ -7916,11 +7932,20 @@ export function GeneratePageInner() {
         textAnimationSettingsValue,
         textAnimationEffectValue,
       );
+      const resolvedTextAnimationText = resolveTextAnimationText(
+        textAnimationTextValue,
+        s.text,
+      );
       const normalizedTextAnimationSettings = normalizeTextAnimationSettings(
         textAnimationSettingsValue,
         textAnimationEffect,
         effectiveIsShort,
+        resolvedTextAnimationText,
       );
+      const normalizedTextAnimationText =
+        typeof textAnimationTextValue === 'string' && textAnimationTextValue.trim().length > 0
+          ? textAnimationTextValue
+          : null;
 
       return {
         id: s.id,
@@ -7960,7 +7985,7 @@ export function GeneratePageInner() {
         customImageFilterId: imageFilterId,
         imageFilterSettings: normalizeSettingsObject(imageFilterSettings),
         textAnimationEffect,
-        textAnimationText: resolveTextAnimationText(textAnimationTextValue, s.text),
+        textAnimationText: normalizedTextAnimationText,
         customTextAnimationId: textAnimationId,
         textAnimationSettings: normalizedTextAnimationSettings,
         customOverlayId: String(overlayId ?? '').trim() || null,
@@ -11298,6 +11323,7 @@ export function GeneratePageInner() {
               s.textAnimationSettings,
               s.textAnimationEffect,
               effectiveIsShort,
+              resolveTextAnimationText(s.textAnimationText, s.text),
             ),
             text_animation_sound_effects:
               serializeDetachedSentenceSoundEffects(s.textSoundEffects),
@@ -12048,8 +12074,20 @@ export function GeneratePageInner() {
     setIsTranslateModalOpen(true);
   };
 
+  const getExplicitTextAnimationText = (sentence: SentenceItem) => {
+    const raw = String(sentence.textAnimationText ?? '');
+    if (!raw.trim()) {
+      return null;
+    }
+
+    // Older hydration paths materialized fallback hook text into state.
+    // Treat that derived value as blank so translation preserves fallback behavior.
+    const fallback = resolveTextAnimationText(null, sentence.text);
+    return raw.trim() === fallback.trim() ? null : raw;
+  };
+
   const translateEditorContent = async (): Promise<
-    | { kind: 'sentences'; sentences: string[]; script?: string }
+    | { kind: 'sentences'; sentences: string[]; hookTexts: Array<string | null>; script?: string }
     | { kind: 'script'; script: string }
   > => {
     const targetLanguage = String(translateTargetLanguage ?? '').trim();
@@ -12081,6 +12119,17 @@ export function GeneratePageInner() {
 
     if (sentences.length > 0) {
       const sentenceTexts = sentences.map((s) => String(s.text ?? ''));
+      const explicitHookTextEntries = sentences
+        .map((sentence, index) => ({
+          index,
+          text: getExplicitTextAnimationText(sentence),
+        }))
+        .filter((entry): entry is { index: number; text: string } => Boolean(entry.text));
+      const textsToTranslate = [
+        ...sentenceTexts,
+        ...explicitHookTextEntries.map((entry) => entry.text),
+      ];
+
       // When sentences exist we also ask the API to translate the full script text.
       // This keeps formatting/newlines closer to the original instead of re-joining sentences.
       const res = await api.post<{ sentences?: unknown[]; script?: unknown }>('/ai/translate', {
@@ -12088,7 +12137,7 @@ export function GeneratePageInner() {
         method,
         model,
         ...(sourceScript ? { script: sourceScript } : {}),
-        sentences: sentenceTexts,
+        sentences: textsToTranslate,
       });
 
       const data = coerceTranslateResponse(res.data);
@@ -12099,26 +12148,35 @@ export function GeneratePageInner() {
         : null;
 
       // Be strict about length to preserve sentence-media mapping, but provide a safer error message.
-      if (!translated || translated.length !== sentenceTexts.length) {
+      if (!translated || translated.length !== textsToTranslate.length) {
         throw new Error(
-          `Translation failed (sentence count mismatch). Expected ${sentenceTexts.length}, got ${Array.isArray(translatedRaw) ? translatedRaw.length : 0}`,
+          `Translation failed (sentence count mismatch). Expected ${textsToTranslate.length}, got ${Array.isArray(translatedRaw) ? translatedRaw.length : 0}`,
         );
       }
+
+      const translatedSentenceTexts = translated.slice(0, sentenceTexts.length);
 
       // Force CTA lines to be exactly the localized CTA for the target language.
       const subscribeTarget = getSubscribeSentence(targetLanguage);
       const shortsTarget = getShortsCtaSentence(targetLanguage);
-      const fixed = translated.map((t, idx) => {
+      const fixed = translatedSentenceTexts.map((t, idx) => {
         const original = String(sentences[idx]?.text ?? '');
         if (isShortsCtaSentence(original)) return shortsTarget;
         if (isSubscribeCtaSentence(original)) return subscribeTarget;
         return String(t ?? '');
       });
 
+      const translatedHookTexts = Array<string | null>(sentenceTexts.length).fill(null);
+      explicitHookTextEntries.forEach((entry, entryIndex) => {
+        translatedHookTexts[entry.index] =
+          String(translated[sentenceTexts.length + entryIndex] ?? '').trim() || entry.text;
+      });
+
       const translatedScript = String(data?.script ?? '').trim();
       return {
         kind: 'sentences',
         sentences: fixed,
+        hookTexts: translatedHookTexts,
         script: translatedScript || undefined,
       };
     }
@@ -12147,18 +12205,21 @@ export function GeneratePageInner() {
   const applyTranslationToEditor = (params: {
     targetLanguage: string;
     result:
-    | { kind: 'sentences'; sentences: string[]; script?: string }
+    | { kind: 'sentences'; sentences: string[]; hookTexts: Array<string | null>; script?: string }
     | { kind: 'script'; script: string };
   }) => {
     clearVoiceState();
     resetDraftIdentity();
+    setScriptLanguage(params.targetLanguage);
 
     if (params.result.kind === 'sentences') {
       const translatedSentences = params.result.sentences;
+      const translatedHookTexts = params.result.hookTexts;
       setSentences((prev) =>
         prev.map((s, idx) => ({
           ...s,
           text: String(translatedSentences[idx] ?? s.text ?? ''),
+          textAnimationText: translatedHookTexts[idx] ?? null,
         })),
       );
 

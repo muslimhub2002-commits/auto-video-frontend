@@ -160,7 +160,7 @@ export function TranslateScriptModal({
             disabled={anyLoading}
             className="gap-2 bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
           >
-            {translateOnlyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {translateOnlyLoading ? <Loader2 className="h-4 w-4 animate-spin transition-none" /> : null}
             Translate (no save)
           </Button>
 
@@ -168,7 +168,7 @@ export function TranslateScriptModal({
             type="button"
             onClick={onTranslateAndSave}
             disabled={anyLoading}
-            className="gap-2 bg-linear-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black text-white"
+            className="gap-2 bg-linear-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black text-white transition-none"
           >
             {translateSaveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Translate + Save draft

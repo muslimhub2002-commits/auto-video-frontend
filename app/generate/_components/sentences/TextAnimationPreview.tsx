@@ -47,6 +47,7 @@ export type TextHorizontalAlign = 'left' | 'center' | 'right';
 export type TextContentAlign = 'left' | 'center' | 'right';
 export type TextVerticalAlign = 'top' | 'middle' | 'bottom';
 export type TextCaseMode = 'original' | 'uppercase';
+export type TextDirection = 'ltr' | 'rtl';
 
 const TEXT_HORIZONTAL_ALIGN_VALUES = ['left', 'center', 'right'] as const;
 const TEXT_CONTENT_ALIGN_VALUES = ['left', 'center', 'right'] as const;
@@ -70,6 +71,10 @@ export const TEXT_SCENE_FONT_MIN_PX = 19.2;
 export const TEXT_SCENE_FONT_MAX_PX = 92.8;
 export const TEXT_SCENE_DEFAULT_FONT_FAMILY = 'Oswald, system-ui, sans-serif';
 export const TEXT_SCENE_ARABIC_FONT_FAMILY = 'Noto Kufi Arabic, sans-serif';
+const DEFAULT_TEXT_ANIMATION_LINE_HEIGHT = 0.92;
+const ARABIC_TEXT_DEFAULT_LINE_HEIGHT = 1.5;
+const TEXT_ANIMATION_LINE_HEIGHT_MIN = 0.75;
+const TEXT_ANIMATION_LINE_HEIGHT_MAX = 2.2;
 const SLIDE_CUT_EASING = [0.12, 0.88, 0.24, 1] as const;
 const NEWTON_ITERATIONS = 4;
 const NEWTON_MIN_SLOPE = 0.001;
@@ -117,10 +122,20 @@ export function getTextAnimationSettingsForEffectChange(
   effect: SentenceItem['textAnimationEffect'] | null | undefined,
   currentSettings: Record<string, unknown> | TextAnimationSettings | null | undefined,
   isShortVideo = true,
+  sampleText?: string | null,
 ): TextAnimationSettings {
   const nextEffect = resolveLegacyTextAnimationEffect(effect) ?? 'slideCutFast';
-  const defaults = getDefaultTextAnimationSettings(nextEffect, isShortVideo);
-  const current = normalizeTextAnimationSettings(currentSettings, nextEffect, isShortVideo);
+  const defaults = getDefaultTextAnimationSettings(
+    nextEffect,
+    isShortVideo,
+    sampleText,
+  );
+  const current = normalizeTextAnimationSettings(
+    currentSettings,
+    nextEffect,
+    isShortVideo,
+    sampleText,
+  );
 
   return normalizeTextAnimationSettings(
     {
@@ -130,6 +145,7 @@ export function getTextAnimationSettingsForEffectChange(
     },
     nextEffect,
     isShortVideo,
+    sampleText,
   );
 }
 
@@ -229,8 +245,23 @@ function stripBracketedText(value: string | null | undefined) {
     .trim();
 }
 
-function containsArabicScript(value: string) {
+export function containsArabicScript(value: string) {
   return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/u.test(value);
+}
+
+function resolveDefaultTextAnimationLineHeight(sampleText?: string | null) {
+  return containsArabicScript(String(sampleText ?? ''))
+    ? ARABIC_TEXT_DEFAULT_LINE_HEIGHT
+    : DEFAULT_TEXT_ANIMATION_LINE_HEIGHT;
+}
+
+function isLegacyArabicDefaultLineHeight(value: unknown, sampleText?: string | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return false;
+  return (
+    containsArabicScript(String(sampleText ?? '')) &&
+    Math.abs(numeric - DEFAULT_TEXT_ANIMATION_LINE_HEIGHT) < 0.001
+  );
 }
 
 function resolveLegacyTextAnimationEffect(value: unknown): TextAnimationEffect | null {
@@ -281,6 +312,13 @@ export function resolveTextAnimationText(value: string | null | undefined, sente
   return normalized || getDefaultTextAnimationText(sentenceText);
 }
 
+export function resolveTextAnimationDirection(
+  value: string | null | undefined,
+  sentenceText?: string | null,
+): TextDirection {
+  return containsArabicScript(resolveTextAnimationText(value, sentenceText)) ? 'rtl' : 'ltr';
+}
+
 export function getTextAnimationEffectLabel(effect: SentenceItem['textAnimationEffect'] | null | undefined) {
   const resolvedEffect = resolveLegacyTextAnimationEffect(effect);
 
@@ -303,6 +341,7 @@ export function isTextAnimationEffectValue(value: string): value is TextAnimatio
 export function getDefaultTextAnimationSettings(
   effect: SentenceItem['textAnimationEffect'] | null | undefined,
   isShortVideo = true,
+  sampleText?: string | null,
 ): TextAnimationSettings {
   const normalizedEffect = resolveLegacyTextAnimationEffect(effect) ?? 'slideCutFast';
   const baseFontSize = 12;
@@ -318,7 +357,7 @@ export function getDefaultTextAnimationSettings(
     maxWidthPercent: isShortVideo ? 72 : 46,
     fontWeight: 820,
     letterSpacingEm: 0.02,
-    lineHeight: 0.92,
+    lineHeight: resolveDefaultTextAnimationLineHeight(sampleText),
     textColor: '#ffffff',
     accentColor: '#ffd60a',
     strokeEnabled: false,
@@ -445,10 +484,12 @@ export function normalizeTextAnimationSettings(
   settings: Record<string, unknown> | TextAnimationSettings | null | undefined,
   fallbackEffect?: SentenceItem['textAnimationEffect'] | null,
   isShortVideo = true,
+  sampleText?: string | null,
 ): TextAnimationSettings {
   const defaults = getDefaultTextAnimationSettings(
     resolveLegacyTextAnimationEffect(fallbackEffect) ?? 'slideCutFast',
     isShortVideo,
+    sampleText,
   );
   const resolvedPresetKey =
     resolveLegacyTextAnimationEffect(settings?.presetKey) ?? defaults.presetKey;
@@ -460,6 +501,16 @@ export function normalizeTextAnimationSettings(
   const strokeEnabled =
     settings?.strokeEnabled === true ||
     (settings?.strokeEnabled == null && strokeWidthPx > 0);
+  const defaultLineHeight =
+    defaults.lineHeight ?? resolveDefaultTextAnimationLineHeight(sampleText);
+  const lineHeight = isLegacyArabicDefaultLineHeight(settings?.lineHeight, sampleText)
+    ? defaultLineHeight
+    : getNumeric(
+        settings?.lineHeight,
+        defaultLineHeight,
+        TEXT_ANIMATION_LINE_HEIGHT_MIN,
+        TEXT_ANIMATION_LINE_HEIGHT_MAX,
+      );
 
   return {
     presetKey: resolvedPresetKey,
@@ -473,7 +524,7 @@ export function normalizeTextAnimationSettings(
     maxWidthPercent: getNumeric(settings?.maxWidthPercent, defaults.maxWidthPercent ?? 76, 30, 100),
     fontWeight: getNumeric(settings?.fontWeight, defaults.fontWeight ?? 800, 300, 900),
     letterSpacingEm: getNumeric(settings?.letterSpacingEm, defaults.letterSpacingEm ?? 0.02, -0.08, 0.24),
-    lineHeight: getNumeric(settings?.lineHeight, defaults.lineHeight ?? 0.92, 0.75, 1.5),
+    lineHeight,
     textColor: getColor(settings?.textColor, defaults.textColor ?? '#ffffff'),
     accentColor: getColor(settings?.accentColor, defaults.accentColor ?? '#facc15'),
     strokeEnabled,
@@ -526,6 +577,17 @@ function resolveJustifyContent(alignment: TextHorizontalAlign) {
   return 'center';
 }
 
+function resolveWrappedWordJustifyContent(
+  alignment: TextContentAlign,
+  direction: TextDirection,
+) {
+  if (alignment === 'center') return 'center';
+  if (direction === 'rtl') {
+    return alignment === 'right' ? 'flex-start' : 'flex-end';
+  }
+  return alignment === 'right' ? 'flex-end' : 'flex-start';
+}
+
 function resolveAlignItems(alignment: TextVerticalAlign) {
   if (alignment === 'top') return 'flex-start';
   if (alignment === 'bottom') return 'flex-end';
@@ -560,6 +622,40 @@ function formatDisplayText(value: string, textCase: TextCaseMode) {
 
 function resolveContentTextAlign(settings: TextAnimationSettings) {
   return settings.contentAlign ?? settings.horizontalAlign ?? 'left';
+}
+
+export function resolveTextAnimationDisplayAlign(
+  settings: TextAnimationSettings,
+  direction: TextDirection,
+): TextContentAlign {
+  const alignment = resolveContentTextAlign(settings);
+  if (direction === 'rtl' && alignment !== 'right') {
+    return 'right';
+  }
+  return alignment;
+}
+
+function resolveDisplayLineHeight(
+  settings: TextAnimationSettings,
+  direction: TextDirection,
+) {
+  return (
+    settings.lineHeight ??
+    (direction === 'rtl'
+      ? ARABIC_TEXT_DEFAULT_LINE_HEIGHT
+      : DEFAULT_TEXT_ANIMATION_LINE_HEIGHT)
+  );
+}
+
+function resolveDisplayHorizontalAlign(
+  settings: TextAnimationSettings,
+  direction: TextDirection,
+): TextHorizontalAlign {
+  const alignment = settings.horizontalAlign ?? 'center';
+  if (direction === 'rtl' && alignment !== 'right') {
+    return 'right';
+  }
+  return alignment;
 }
 
 function getWordDelayMs(settings: TextAnimationSettings) {
@@ -1069,6 +1165,7 @@ export function TextAnimationPreview({
   repeatMotion = false,
   motionResetKey,
 }: TextAnimationPreviewProps) {
+  const previewText = resolveTextAnimationText(text, sentenceText);
   const resolvedEffect = resolveTextAnimationEffectFromSettings(
     settings,
     effect ?? 'slideCutFast',
@@ -1077,9 +1174,10 @@ export function TextAnimationPreview({
     settings,
     resolvedEffect,
     isShortVideo,
+    previewText,
   );
   const resolvedText = formatDisplayText(
-    resolveTextAnimationText(text, sentenceText),
+    previewText,
     resolvedSettings.textCase ?? 'uppercase',
   );
   const resolvedFontFamily = String(fontFamily ?? '').trim() || resolveTextAnimationFontFamily(resolvedText);
@@ -1109,7 +1207,10 @@ export function TextAnimationPreview({
     animationDurationMs +
     (animatePerWord ? wordDelayMs * Math.max(0, words.length - 1) : 0);
   const [animationElapsedMs, setAnimationElapsedMs] = useState(0);
-  const contentAlign = resolveContentTextAlign(resolvedSettings);
+  const textDirection = resolveTextAnimationDirection(text, sentenceText);
+  const contentAlign = resolveTextAnimationDisplayAlign(resolvedSettings, textDirection);
+  const horizontalAlign = resolveDisplayHorizontalAlign(resolvedSettings, textDirection);
+  const displayLineHeight = resolveDisplayLineHeight(resolvedSettings, textDirection);
   const resolvedBackgroundLook = normalizeImageFilterSettings(
     imageFilterSettings,
     visualEffect ?? null,
@@ -1208,14 +1309,28 @@ export function TextAnimationPreview({
     color: resolvedSettings.textColor,
     fontWeight: resolvedSettings.fontWeight,
     fontSize: `clamp(1.2rem, ${(resolvedSettings.fontSizePercent ?? 12).toFixed(2)}cqw, 5.8rem)`,
-    lineHeight: String(resolvedSettings.lineHeight ?? 0.92),
+    lineHeight: String(displayLineHeight),
     letterSpacing: `${(resolvedSettings.letterSpacingEm ?? 0.02).toFixed(3)}em`,
     textAlign: contentAlign,
+    direction: textDirection,
+    unicodeBidi: 'plaintext',
     maxWidth: '100%',
     fontFamily: resolvedFontFamily,
     textShadow: [...strokeShadowLayers, baseDropShadow].join(', '),
     ...textPaintStyle,
     whiteSpace: 'pre-wrap',
+  };
+  const perWordTextStyle: CSSProperties = {
+    ...textStyle,
+    display: 'inline-flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    alignContent: 'flex-start',
+    columnGap: '0.35em',
+    rowGap: '0',
+    justifyContent: resolveWrappedWordJustifyContent(contentAlign, textDirection),
+    maxWidth: '100%',
+    whiteSpace: 'normal',
   };
   const blockWrapperStyle: CSSProperties = {
     display: 'inline-block',
@@ -1311,41 +1426,40 @@ export function TextAnimationPreview({
         key={motionResetKey == null ? undefined : String(motionResetKey)}
         className={contentClassName ? `absolute inset-0 flex p-[7%] ${contentClassName}` : 'absolute inset-0 flex p-[7%]'}
         style={{
-          justifyContent: resolveJustifyContent(resolvedSettings.horizontalAlign ?? 'center'),
+          justifyContent: resolveJustifyContent(horizontalAlign),
           alignItems: resolveAlignItems(resolvedSettings.verticalAlign ?? 'middle'),
           transform: `translate(${(resolvedSettings.offsetX ?? 0).toFixed(1)}%, ${(resolvedSettings.offsetY ?? 0).toFixed(1)}%)`,
         }}
       >
         <div
+          dir={textDirection}
           style={blockWrapperStyle}
         >
           {animatePerWord
             ? (
-              <div style={textStyle}>
-                {words.map((word, index) => {
+              <div style={perWordTextStyle}>
+                {words.map((word, sourceIndex) => {
                   const animatedWordStyle = enableMotion
                     ? getAnimatedTextStyle(
                         resolvedEffect,
-                        Math.max(0, delayedAnimationElapsedMs - index * wordDelayMs),
+                        Math.max(0, delayedAnimationElapsedMs - sourceIndex * wordDelayMs),
                         animationDurationMs,
                         resolvedSettings.animationIntensity ?? 0.82,
                       )
                     : null;
-                  const isAccentWord = index === 0;
+                  const isAccentWord = sourceIndex === 0;
                   return (
-                    <span key={`${word}-${index}`}>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
-                          ...(textPaintStyle ?? null),
-                          ...(animatedWordStyle ?? null),
-                          willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
-                        }}
-                      >
-                        {word}
-                      </span>
-                      {index < words.length - 1 ? ' ' : null}
+                    <span
+                      key={`${word}-${sourceIndex}`}
+                      style={{
+                        display: 'inline-block',
+                        color: isAccentWord ? resolvedSettings.accentColor : resolvedSettings.textColor,
+                        ...(textPaintStyle ?? null),
+                        ...(animatedWordStyle ?? null),
+                        willChange: enableMotion ? 'transform, opacity, clip-path, filter' : undefined,
+                      }}
+                    >
+                      {word}
                     </span>
                   );
                 })}

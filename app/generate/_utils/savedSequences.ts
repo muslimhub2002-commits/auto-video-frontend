@@ -26,6 +26,7 @@ import {
 import {
   normalizeTextAnimationSettings,
   resolveTextAnimationEffectFromSettings,
+  resolveTextAnimationText,
 } from '../_components/sentences/TextAnimationPreview';
 import { getDefaultSentenceSequenceConfig } from './defaultSentenceSceneConfig';
 import {
@@ -448,10 +449,15 @@ export function buildSavedSequenceSceneSnapshot(
       sentence.textAnimationSettings,
       sentence.textAnimationEffect ?? null,
     );
+    const resolvedTextAnimationText = resolveTextAnimationText(
+      sentence.textAnimationText,
+      sentence.text,
+    );
     const textAnimationSettings = normalizeTextAnimationSettings(
       sentence.textAnimationSettings,
       textAnimationEffect,
       isShortVideo,
+      resolvedTextAnimationText,
     );
     const backgroundMode = textAnimationSettings.backgroundMode ?? 'inheritImage';
 
@@ -562,10 +568,15 @@ export function buildSentencePatchFromSavedSequenceScene(
       rawTextAnimationSettings,
       rawTextAnimationEffect,
     );
+    const resolvedTextAnimationText = resolveTextAnimationText(
+      scene.text_animation_text ?? scene.textAnimationText ?? null,
+      scene.text,
+    );
     const textAnimationSettings = normalizeTextAnimationSettings(
       rawTextAnimationSettings,
       textAnimationEffect,
       isShortVideo,
+      resolvedTextAnimationText,
     );
     const backgroundMode = textAnimationSettings.backgroundMode ?? 'inheritImage';
 

@@ -87,6 +87,7 @@ import {
   getTextAnimationEffectLabel,
   normalizeTextAnimationText,
   normalizeTextAnimationSettings,
+  resolveTextAnimationDirection,
   resolveTextAnimationEffectFromSettings,
   resolveTextAnimationText,
   TEXT_ANIMATION_WORD_DELAY_MAX,
@@ -600,7 +601,7 @@ export function ImageEffectsDetailModal({
     resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
   );
   const [draftTextAnimationText, setDraftTextAnimationText] = useState<string>(
-    resolveTextAnimationText(textAnimationText, sentenceText),
+    String(textAnimationText ?? ''),
   );
   const [draftTextSoundEffects, setDraftTextSoundEffects] = useState<SentenceSoundEffectItem[]>(
     () => cloneSentenceSoundEffects(textSoundEffects),
@@ -655,6 +656,7 @@ export function ImageEffectsDetailModal({
         textAnimationSettings,
         resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
         isShortVideo,
+        resolveTextAnimationText(textAnimationText, sentenceText),
       ),
   );
   const [draftOverlaySettings, setDraftOverlaySettings] = useState<OverlaySettings>(
@@ -669,6 +671,10 @@ export function ImageEffectsDetailModal({
     imageMotionSettings: ImageMotionSettings;
     imageMotionSpeed: number;
   } | null>(retainedTemporaryMotion ?? null);
+  const draftResolvedTextValue = useMemo(
+    () => resolveTextAnimationText(draftTextAnimationText, sentenceText),
+    [draftTextAnimationText, sentenceText],
+  );
 
   const resolvedLook = useMemo(
     () => normalizeImageFilterSettings(draftImageFilterSettings, draftVisualEffect ?? null),
@@ -690,12 +696,17 @@ export function ImageEffectsDetailModal({
         draftTextAnimationSettings,
         draftTextAnimationEffect,
         isShortVideo,
+        draftResolvedTextValue,
       ),
-    [draftTextAnimationEffect, draftTextAnimationSettings, isShortVideo],
+    [draftResolvedTextValue, draftTextAnimationEffect, draftTextAnimationSettings, isShortVideo],
   );
   const resolvedDraftTextEffect = useMemo(
     () => resolveTextAnimationEffectFromSettings(resolvedText, draftTextAnimationEffect),
     [draftTextAnimationEffect, resolvedText],
+  );
+  const draftTextDirection = useMemo(
+    () => resolveTextAnimationDirection(draftTextAnimationText, sentenceText),
+    [draftTextAnimationText, sentenceText],
   );
   const isTypewriterTextEffect = resolvedDraftTextEffect === 'typewriter';
   const resolvedOverlay = useMemo(
@@ -1357,9 +1368,10 @@ export function ImageEffectsDetailModal({
             selectedTextPreset.settings,
             selectedTextPresetEffect,
             isShortVideo,
+            draftResolvedTextValue,
           )
         : null,
-    [isShortVideo, selectedTextPreset, selectedTextPresetEffect],
+    [draftResolvedTextValue, isShortVideo, selectedTextPreset, selectedTextPresetEffect],
   );
   const selectedOverlayPresetSettings = useMemo(
     () =>
@@ -1464,7 +1476,7 @@ export function ImageEffectsDetailModal({
     setDraftTextAnimationEffect(
       resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
     );
-    setDraftTextAnimationText(resolveTextAnimationText(textAnimationText, sentenceText));
+    setDraftTextAnimationText(String(textAnimationText ?? ''));
     setDraftTextSoundEffects(cloneSentenceSoundEffects(textSoundEffects));
     setDraftTextBackgroundImage(textBackgroundImage ?? null);
     setDraftTextBackgroundImageUrl(textBackgroundImageUrl ?? null);
@@ -1494,6 +1506,7 @@ export function ImageEffectsDetailModal({
         textAnimationSettings,
         resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
         isShortVideo,
+        resolveTextAnimationText(textAnimationText, sentenceText),
       ),
     );
     setDraftOverlaySettings(normalizeOverlaySettings(overlaySettings, 'image'));
@@ -1767,6 +1780,7 @@ export function ImageEffectsDetailModal({
         preset.settings,
         effect,
         isShortVideo,
+        draftResolvedTextValue,
       );
 
       setDraftTextAnimationEffect(effect);
@@ -1781,7 +1795,12 @@ export function ImageEffectsDetailModal({
     setDraftTextAnimationEffect(effect);
     setDraftCustomTextAnimationId(null);
     setDraftTextAnimationSettings(
-      getTextAnimationSettingsForEffectChange(effect, draftTextAnimationSettings, isShortVideo),
+      getTextAnimationSettingsForEffectChange(
+        effect,
+        draftTextAnimationSettings,
+        isShortVideo,
+        draftResolvedTextValue,
+      ),
     );
     setDraftTextSoundEffects([]);
     setTextActionError(null);
@@ -2210,7 +2229,11 @@ export function ImageEffectsDetailModal({
         setDraftTextAnimationEffect(fallbackEffect);
         setDraftCustomTextAnimationId(null);
         setDraftTextAnimationSettings(
-          getDefaultTextAnimationSettings(fallbackEffect, isShortVideo),
+          getDefaultTextAnimationSettings(
+            fallbackEffect,
+            isShortVideo,
+            draftResolvedTextValue,
+          ),
         );
         setDraftTextSoundEffects([]);
         setTextSaveTitle('');
@@ -3022,8 +3045,9 @@ export function ImageEffectsDetailModal({
                     <Input
                       value={String(draftTextAnimationText ?? '')}
                       onChange={(e) => setDraftTextAnimationText(e.target.value)}
+                      dir={draftTextDirection}
                       placeholder={resolveTextAnimationText(null, sentenceText)}
-                      className="h-11 rounded-xl border-slate-200"
+                      className={`h-11 rounded-xl border-slate-200 ${draftTextDirection === 'rtl' ? 'text-right' : 'text-left'}`}
                     />
                   </label>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-3">
@@ -3393,6 +3417,8 @@ export function ImageEffectsDetailModal({
                   />
                   <RangeField label="Font size" value={resolvedText.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateTextSettings({ fontSizePercent: value })} />
                   <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
+                  <RangeField label="Letter spacing (em)" value={resolvedText.letterSpacingEm ?? 0.02} min={-0.08} max={0.24} step={0.01} onChange={(value) => updateTextSettings({ letterSpacingEm: value })} />
+                  <RangeField label="Line height" value={resolvedText.lineHeight ?? 0.92} min={0.75} max={2.2} step={0.05} onChange={(value) => updateTextSettings({ lineHeight: value })} />
                   {resolvedText.animatePerWord === true && !isTypewriterTextEffect ? (
                     <RangeField
                       label="Word delay"

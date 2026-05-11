@@ -133,6 +133,7 @@ export function OverlayScenePreview({
   textAnimationSettings,
 }: OverlayScenePreviewProps) {
   const resolvedOverlay = normalizeOverlaySettings(overlaySettings, 'image');
+  const resolvedTextValue = resolveTextAnimationText(text, sentenceText);
   const resolvedTextEffect = resolveTextAnimationEffectFromSettings(
     textAnimationSettings,
     textAnimationEffect ?? 'slideCutFast',
@@ -141,8 +142,8 @@ export function OverlayScenePreview({
     textAnimationSettings,
     resolvedTextEffect,
     isShortVideo,
+    resolvedTextValue,
   );
-  const resolvedTextValue = resolveTextAnimationText(text, sentenceText);
   const showText = resolvedOverlay.includeText === true && resolvedTextValue.length > 0;
   const shouldUseImageTabSizing = usesImageTabSizedOverlay(resolvedOverlay);
   const shouldUseLegacyCenteredTransform =
