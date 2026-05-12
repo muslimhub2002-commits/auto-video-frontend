@@ -449,6 +449,8 @@ export function buildSavedSequenceSceneSnapshot(
       sentence.textAnimationSettings,
       sentence.textAnimationEffect ?? null,
     );
+    const explicitTextAnimationText =
+      String(sentence.textAnimationText ?? '').trim() || null;
     const resolvedTextAnimationText = resolveTextAnimationText(
       sentence.textAnimationText,
       sentence.text,
@@ -464,6 +466,7 @@ export function buildSavedSequenceSceneSnapshot(
     return {
       ...common,
       text_animation_effect: textAnimationEffect,
+      text_animation_text: explicitTextAnimationText,
       text_animation_settings: normalizeSettingsObject(textAnimationSettings),
       text_animation_sound_effects: buildSavedSequenceSoundEffectSnapshots(
         sentence.textSoundEffects,
@@ -497,6 +500,7 @@ export function buildSavedSequenceSceneSnapshot(
 
 export function buildSentencePatchFromSavedSequenceScene(
   scene: SavedSequenceSceneDto,
+  currentSentenceText: string | null | undefined,
   isShortVideo: boolean,
   imageFilterPresets: ImageFilterPresetDto[],
   motionEffectPresets: MotionEffectPresetDto[],
@@ -562,15 +566,21 @@ export function buildSentencePatchFromSavedSequenceScene(
   if (sceneTab === 'text') {
     const rawTextAnimationEffect =
       scene.text_animation_effect ?? scene.textAnimationEffect ?? null;
+    const rawTextAnimationText =
+      scene.text_animation_text ?? scene.textAnimationText ?? null;
     const rawTextAnimationSettings =
       scene.text_animation_settings ?? scene.textAnimationSettings ?? null;
     const textAnimationEffect = resolveTextAnimationEffectFromSettings(
       rawTextAnimationSettings,
       rawTextAnimationEffect,
     );
+    const textAnimationText =
+      typeof rawTextAnimationText === 'string'
+        ? rawTextAnimationText.trim() || null
+        : null;
     const resolvedTextAnimationText = resolveTextAnimationText(
-      scene.text_animation_text ?? scene.textAnimationText ?? null,
-      scene.text,
+      textAnimationText,
+      currentSentenceText,
     );
     const textAnimationSettings = normalizeTextAnimationSettings(
       rawTextAnimationSettings,
@@ -583,7 +593,7 @@ export function buildSentencePatchFromSavedSequenceScene(
     return {
       ...commonPatch,
       textAnimationEffect,
-      textAnimationText: null,
+      textAnimationText,
       customTextAnimationId: null,
       textAnimationSettings,
       textSoundEffects: normalizeSavedSequenceSoundEffects(
@@ -673,6 +683,7 @@ export function applySavedSequenceToSentences(params: {
           ...sentence,
           ...buildSentencePatchFromSavedSequenceScene(
             savedScenes[index] ?? {},
+            sentence.text,
             params.isShortVideo,
             imageFilterPresets,
             motionEffectPresets,

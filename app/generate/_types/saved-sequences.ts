@@ -64,6 +64,8 @@ export type SavedSequenceSceneDto = {
   videoGenerationMode?: NonNullable<SentenceItem['videoGenerationMode']> | null;
   text_animation_effect?: SentenceItem['textAnimationEffect'] | null;
   textAnimationEffect?: SentenceItem['textAnimationEffect'] | null;
+  text_animation_text?: string | null;
+  textAnimationText?: string | null;
   text_animation_settings?: Record<string, unknown> | null;
   textAnimationSettings?: Record<string, unknown> | null;
   text_animation_sound_effects?: SavedSequenceSoundEffectDto[] | null;
