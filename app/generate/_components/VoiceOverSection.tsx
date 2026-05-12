@@ -1001,11 +1001,11 @@ export function VoiceOverSection({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => document.getElementById('voice')?.click()}
+                    onClick={onOpenLibrary}
                     className="flex-1 gap-1.5 text-xs border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
                   >
-                    <Upload className="h-3 w-3" />
-                    Replace
+                    <Library className="h-3 w-3" />
+                    From Library
                   </Button>
                   <Button
                     type="button"

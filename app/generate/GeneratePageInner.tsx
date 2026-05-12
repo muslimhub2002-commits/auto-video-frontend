@@ -147,11 +147,11 @@ type BackendDetachedSoundEffectDto = {
   volumePercent?: number | null;
   timing_mode?: 'with_previous' | 'after_previous_ends' | null;
   timingMode?:
-    | 'with_previous'
-    | 'after_previous_ends'
-    | 'withPrevious'
-    | 'afterPreviousEnds'
-    | null;
+  | 'with_previous'
+  | 'after_previous_ends'
+  | 'withPrevious'
+  | 'afterPreviousEnds'
+  | null;
   audio_settings_override?: Record<string, unknown> | null;
   audioSettingsOverride?: Record<string, unknown> | null;
   default_audio_settings?: Record<string, unknown> | null;
@@ -315,7 +315,7 @@ const normalizeDetachedSentenceSoundEffects = (
         ),
         timingMode:
           rawTimingMode === 'after_previous_ends' ||
-          rawTimingMode === 'afterPreviousEnds'
+            rawTimingMode === 'afterPreviousEnds'
             ? 'afterPreviousEnds'
             : 'withPrevious',
         audioSettings: cloneSoundEffectAudioSettings(
@@ -865,6 +865,10 @@ const CTA_SENTENCES_BY_LANGUAGE: Record<
     subscribe: 'يرجى الاشتراك ومساعدتنا في الوصول إلى المزيد من الناس',
     shorts: 'يمكنك مشاهدة الفيديو الكامل من الرابط في أول تعليق',
   },
+  'ar-eg': {
+    subscribe: 'اعملوا اشتراك وساعدونا نوصل لناس أكتر.',
+    shorts: 'تقدروا تشوفوا الفيديو الكامل من اللينك اللي في أول كومنت.',
+  },
   es: {
     subscribe: 'Suscríbete y ayúdanos a llegar a más personas.',
     shorts: 'Puedes ver el video completo en el enlace del primer comentario.',
@@ -919,11 +923,33 @@ const CTA_SENTENCES_BY_LANGUAGE: Record<
   },
 };
 
+const EGYPTIAN_ARABIC_LANGUAGE_CODE = 'ar-eg';
+
+const isLlmOnlyTranslateLanguage = (language: string) => {
+  const normalized = String(language ?? '').trim().toLowerCase();
+  return normalized === EGYPTIAN_ARABIC_LANGUAGE_CODE || normalized === 'arz';
+};
+
+const normalizeCtaLanguage = (language: string) => {
+  const raw = String(language ?? '').trim();
+  const normalized = raw.toLowerCase();
+
+  if (normalized === 'zh' || normalized === 'zh-cn') {
+    return 'zh-CN';
+  }
+
+  if (isLlmOnlyTranslateLanguage(normalized)) {
+    return EGYPTIAN_ARABIC_LANGUAGE_CODE;
+  }
+
+  return raw;
+};
+
 const getSubscribeSentence = (language: string) =>
-  CTA_SENTENCES_BY_LANGUAGE[language]?.subscribe ?? CTA_SENTENCES_BY_LANGUAGE.en.subscribe;
+  CTA_SENTENCES_BY_LANGUAGE[normalizeCtaLanguage(language)]?.subscribe ?? CTA_SENTENCES_BY_LANGUAGE.en.subscribe;
 
 const getShortsCtaSentence = (language: string) =>
-  CTA_SENTENCES_BY_LANGUAGE[language]?.shorts ?? CTA_SENTENCES_BY_LANGUAGE.en.shorts;
+  CTA_SENTENCES_BY_LANGUAGE[normalizeCtaLanguage(language)]?.shorts ?? CTA_SENTENCES_BY_LANGUAGE.en.shorts;
 
 const normalizeSentenceForMatch = (value: string) => {
   return String(value ?? '')
@@ -1321,14 +1347,14 @@ const buildPlannedVoiceChunks = (params: {
 const cloneVoiceOverChunks = (chunks: VoiceOverChunkState[]) =>
   Array.isArray(chunks)
     ? chunks.map((chunk) => ({
-        ...chunk,
-        sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
-        persistedUrl: String(chunk.persistedUrl ?? '').trim() || null,
-        elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
-          chunk.elevenLabsSettings,
-        ),
-        needsUpload: chunk.needsUpload === true,
-      }))
+      ...chunk,
+      sentences: Array.isArray(chunk.sentences) ? [...chunk.sentences] : [],
+      persistedUrl: String(chunk.persistedUrl ?? '').trim() || null,
+      elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
+        chunk.elevenLabsSettings,
+      ),
+      needsUpload: chunk.needsUpload === true,
+    }))
     : [];
 
 const toVoiceOverChunkState = (
@@ -2735,8 +2761,8 @@ export function GeneratePageInner() {
   }): Promise<GeneratedVoiceFileResult | null> => {
     const orderedChunks = Array.isArray(params.chunks)
       ? [...params.chunks]
-          .filter((chunk) => String(chunk?.url ?? '').trim())
-          .sort((left, right) => Number(left.index ?? 0) - Number(right.index ?? 0))
+        .filter((chunk) => String(chunk?.url ?? '').trim())
+        .sort((left, right) => Number(left.index ?? 0) - Number(right.index ?? 0))
       : [];
 
     if (orderedChunks.length === 0) {
@@ -2955,8 +2981,8 @@ export function GeneratePageInner() {
               elevenLabsSettings:
                 params.provider === 'elevenlabs'
                   ? normalizeOptionalElevenLabsVoiceSettings(
-                      params.elevenLabsSettings,
-                    )
+                    params.elevenLabsSettings,
+                  )
                   : null,
               sourceFile: null,
               needsUpload: true,
@@ -3021,8 +3047,8 @@ export function GeneratePageInner() {
             elevenLabsSettings:
               params.provider === 'elevenlabs'
                 ? normalizeOptionalElevenLabsVoiceSettings(
-                    params.elevenLabsSettings,
-                  )
+                  params.elevenLabsSettings,
+                )
                 : null,
             sourceFile: null,
             needsUpload: true,
@@ -3097,7 +3123,7 @@ export function GeneratePageInner() {
 
     const activeAssetMatchesSelection =
       activeMaterializedBackgroundSoundtrack?.cacheKey ===
-      selectedBackgroundSoundtrackMaterializationCacheKey
+        selectedBackgroundSoundtrackMaterializationCacheKey
         ? activeMaterializedBackgroundSoundtrack
         : null;
 
@@ -3235,7 +3261,7 @@ export function GeneratePageInner() {
             url: materialized.uploadedUrl || sourceUrl,
             durationSeconds:
               typeof materialized.durationSeconds === 'number' &&
-              Number.isFinite(materialized.durationSeconds)
+                Number.isFinite(materialized.durationSeconds)
                 ? Math.max(0, materialized.durationSeconds)
                 : item.durationSeconds ?? null,
             audioSettings: cloneSoundEffectAudioSettings(
@@ -3404,8 +3430,8 @@ export function GeneratePageInner() {
         );
         const textBackgroundVideoUrl =
           backgroundAsset.transport === 'video' &&
-          backgroundAsset.url &&
-          !backgroundAsset.url.startsWith('data:')
+            backgroundAsset.url &&
+            !backgroundAsset.url.startsWith('data:')
             ? backgroundAsset.url
             : null;
 
@@ -4539,8 +4565,8 @@ export function GeneratePageInner() {
 
       const items = Array.isArray(res.data?.items)
         ? res.data.items
-            .map((item) => normalizeTextAnimationPresetItem(item))
-            .filter((item): item is TextAnimationPresetDto => Boolean(item))
+          .map((item) => normalizeTextAnimationPresetItem(item))
+          .filter((item): item is TextAnimationPresetDto => Boolean(item))
         : [];
 
       setTextAnimationPresets(items.filter((item) => item.id));
@@ -4566,14 +4592,14 @@ export function GeneratePageInner() {
 
       const items = Array.isArray(res.data?.items)
         ? res.data.items
-            .map((item) => normalizeOverlayPresetItem(item))
-            .filter((item): item is OverlayPresetDto => Boolean(item))
+          .map((item) => normalizeOverlayPresetItem(item))
+          .filter((item): item is OverlayPresetDto => Boolean(item))
         : [];
 
       setOverlayPresets(items);
     } catch (error) {
       console.error('Failed to load overlay presets', error);
-      showToast('Failed to load overlay presets.', 'error');
+      // showToast('Failed to load overlay presets.', 'error');
     } finally {
       setIsLoadingOverlayPresets(false);
     }
@@ -4673,11 +4699,11 @@ export function GeneratePageInner() {
         prev.map((sentence) =>
           sentence.customImageFilterId === trimmedId
             ? {
-                ...sentence,
-                visualEffect: null,
-                customImageFilterId: null,
-                imageFilterSettings: getDefaultImageFilterSettings(null),
-              }
+              ...sentence,
+              visualEffect: null,
+              customImageFilterId: null,
+              imageFilterSettings: getDefaultImageFilterSettings(null),
+            }
             : sentence,
         ),
       );
@@ -4790,12 +4816,12 @@ export function GeneratePageInner() {
         prev.map((sentence) =>
           sentence.customMotionEffectId === trimmedId
             ? {
-                ...sentence,
-                imageMotionEffect: 'default',
-                customMotionEffectId: null,
-                imageMotionSpeed: defaultSpeed,
-                imageMotionSettings: defaultSettings,
-              }
+              ...sentence,
+              imageMotionEffect: 'default',
+              customMotionEffectId: null,
+              imageMotionSpeed: defaultSpeed,
+              imageMotionSettings: defaultSettings,
+            }
             : sentence,
         ),
       );
@@ -4847,17 +4873,17 @@ export function GeneratePageInner() {
       prev.map((sentence) =>
         sentence.customOverlayId === preset.id
           ? {
-              ...sentence,
-              customOverlayId: preset.id,
-              overlayFile: null,
-              overlayUrl: preset.url,
-              overlayMimeType: preset.mimeType ?? null,
-              overlaySettings: {
-                ...normalizeOverlaySettings(preset.settings, 'image'),
-                presetKey: 'custom',
-              },
-              overlaySoundEffects: nextSoundEffects,
-            }
+            ...sentence,
+            customOverlayId: preset.id,
+            overlayFile: null,
+            overlayUrl: preset.url,
+            overlayMimeType: preset.mimeType ?? null,
+            overlaySettings: {
+              ...normalizeOverlaySettings(preset.settings, 'image'),
+              presetKey: 'custom',
+            },
+            overlaySoundEffects: nextSoundEffects,
+          }
           : sentence,
       ),
     );
@@ -4966,19 +4992,19 @@ export function GeneratePageInner() {
         prev.map((sentence) =>
           sentence.customTextAnimationId === trimmedId
             ? {
-                ...sentence,
-                textAnimationEffect: 'slideCutFast',
-                customTextAnimationId: null,
-                textAnimationSettings: getDefaultTextAnimationSettings(
-                  'slideCutFast',
-                  effectiveIsShort,
-                    resolveTextAnimationText(
-                      sentence.textAnimationText,
-                      sentence.text,
-                    ),
+              ...sentence,
+              textAnimationEffect: 'slideCutFast',
+              customTextAnimationId: null,
+              textAnimationSettings: getDefaultTextAnimationSettings(
+                'slideCutFast',
+                effectiveIsShort,
+                resolveTextAnimationText(
+                  sentence.textAnimationText,
+                  sentence.text,
                 ),
-                textSoundEffects: [],
-              }
+              ),
+              textSoundEffects: [],
+            }
             : sentence,
         ),
       );
@@ -5065,14 +5091,14 @@ export function GeneratePageInner() {
         prev.map((sentence) =>
           sentence.customOverlayId === trimmedId
             ? {
-                ...sentence,
-                customOverlayId: null,
-                overlayFile: null,
-                overlayUrl: null,
-                overlayMimeType: null,
-                overlaySettings: null,
-                overlaySoundEffects: [],
-              }
+              ...sentence,
+              customOverlayId: null,
+              overlayFile: null,
+              overlayUrl: null,
+              overlayMimeType: null,
+              overlaySettings: null,
+              overlaySoundEffects: [],
+            }
             : sentence,
         ),
       );
@@ -5309,9 +5335,9 @@ export function GeneratePageInner() {
       return prev.map((entry) =>
         entry.id === nextItem.id
           ? {
-              ...entry,
-              ...nextItem,
-            }
+            ...entry,
+            ...nextItem,
+          }
           : entry,
       );
     });
@@ -5966,8 +5992,8 @@ export function GeneratePageInner() {
         const googleStyleInstructions =
           voiceProvider === 'google'
             ? String(entry.sentence.voiceOverStyleInstructions ?? '').trim() ||
-              String(aiStudioStyleInstructions ?? '').trim() ||
-              undefined
+            String(aiStudioStyleInstructions ?? '').trim() ||
+            undefined
             : undefined;
 
         const generated = await requestGeneratedVoiceFile({
@@ -6044,20 +6070,20 @@ export function GeneratePageInner() {
     const merged: GeneratedVoiceFileResult =
       generatedFiles.length === 1
         ? {
-            file: generatedFiles[0],
-            durationSeconds:
-              generatedDurations.length === 1 ? generatedDurations[0] : null,
-            mimeType: generatedFiles[0]?.type || 'audio/mpeg',
-            chunks: [],
-          }
+          file: generatedFiles[0],
+          durationSeconds:
+            generatedDurations.length === 1 ? generatedDurations[0] : null,
+          mimeType: generatedFiles[0]?.type || 'audio/mpeg',
+          chunks: [],
+        }
         : {
-            ...(await mergeGeneratedVoiceChunks({
-              files: generatedFiles,
-              provider: voiceProvider,
-              fallbackBaseName: `${voiceProvider}-voice-over`,
-            })),
-            chunks: [],
-          };
+          ...(await mergeGeneratedVoiceChunks({
+            files: generatedFiles,
+            provider: voiceProvider,
+            fallbackBaseName: `${voiceProvider}-voice-over`,
+          })),
+          chunks: [],
+        };
 
     setSentences(nextSentences);
     applyGeneratedVoiceResultToState(merged);
@@ -6145,8 +6171,8 @@ export function GeneratePageInner() {
       const googleStyleInstructions =
         sentenceProvider === 'google'
           ? String(sentence.voiceOverStyleInstructions ?? '').trim() ||
-            String(aiStudioStyleInstructions ?? '').trim() ||
-            undefined
+          String(aiStudioStyleInstructions ?? '').trim() ||
+          undefined
           : undefined;
 
       const generated = await requestGeneratedVoiceFile({
@@ -6214,15 +6240,15 @@ export function GeneratePageInner() {
       const nextSentences = sentences.map((item) =>
         item.id === sentenceId
           ? buildLocalSentenceVoiceState({
-              sentence: item,
-              file: candidate.file,
-              mimeType: candidate.mimeType,
-              durationSeconds: candidate.durationSeconds,
-              provider: candidate.provider,
-              providerVoiceId: candidate.voiceId,
-              providerVoiceName: candidate.voiceName,
-              styleInstructions: item.voiceOverStyleInstructions,
-            })
+            sentence: item,
+            file: candidate.file,
+            mimeType: candidate.mimeType,
+            durationSeconds: candidate.durationSeconds,
+            provider: candidate.provider,
+            providerVoiceId: candidate.voiceId,
+            providerVoiceName: candidate.voiceName,
+            styleInstructions: item.voiceOverStyleInstructions,
+          })
           : item,
       );
 
@@ -6342,8 +6368,8 @@ export function GeneratePageInner() {
       const googleStyleInstructions =
         chunkProvider === 'google'
           ? String(chunk.styleInstructions ?? '').trim() ||
-            String(aiStudioStyleInstructions ?? '').trim() ||
-            undefined
+          String(aiStudioStyleInstructions ?? '').trim() ||
+          undefined
           : undefined;
 
       const generated = await requestGeneratedVoiceFile({
@@ -6563,7 +6589,7 @@ export function GeneratePageInner() {
     if (selectedBackgroundSoundtrackRequiresMaterialization) {
       const asset =
         activeMaterializedBackgroundSoundtrack?.cacheKey ===
-        selectedBackgroundSoundtrackMaterializationCacheKey
+          selectedBackgroundSoundtrackMaterializationCacheKey
           ? activeMaterializedBackgroundSoundtrack
           : null;
       return asset?.objectUrl ?? null;
@@ -6576,36 +6602,36 @@ export function GeneratePageInner() {
 
   const activeSentenceVoiceEditorTarget = activeSentenceVoiceEditorSentenceId
     ? (() => {
-        const sentenceIndex = sentences.findIndex(
-          (sentence) => sentence.id === activeSentenceVoiceEditorSentenceId,
-        );
-        if (sentenceIndex < 0) return null;
+      const sentenceIndex = sentences.findIndex(
+        (sentence) => sentence.id === activeSentenceVoiceEditorSentenceId,
+      );
+      if (sentenceIndex < 0) return null;
 
-        const sentence = sentences[sentenceIndex];
-        if (!hasSentenceVoiceOver(sentence)) return null;
+      const sentence = sentences[sentenceIndex];
+      if (!hasSentenceVoiceOver(sentence)) return null;
 
-        return {
-          sentence,
-          sentenceIndex,
-        };
-      })()
+      return {
+        sentence,
+        sentenceIndex,
+      };
+    })()
     : null;
 
   const activeChunkVoiceEditorTarget = activeChunkVoiceEditorId
     ? (() => {
-        const chunkIndex = voiceOverChunks.findIndex(
-          (chunk) => String(chunk.index) === activeChunkVoiceEditorId,
-        );
-        if (chunkIndex < 0) return null;
+      const chunkIndex = voiceOverChunks.findIndex(
+        (chunk) => String(chunk.index) === activeChunkVoiceEditorId,
+      );
+      if (chunkIndex < 0) return null;
 
-        const chunk = voiceOverChunks[chunkIndex];
-        if (!hasVoiceOverChunkAudio(chunk)) return null;
+      const chunk = voiceOverChunks[chunkIndex];
+      if (!hasVoiceOverChunkAudio(chunk)) return null;
 
-        return {
-          chunk,
-          chunkIndex,
-        };
-      })()
+      return {
+        chunk,
+        chunkIndex,
+      };
+    })()
     : null;
 
   const sentenceVoiceManagerSegments: VoiceSegmentManagerItem[] = sentences
@@ -6732,7 +6758,7 @@ export function GeneratePageInner() {
           findVoiceOption(
             entry.sentence.voiceOverProvider ?? voiceProvider,
             entry.sentence.voiceOverVoiceId ??
-              selectedVoiceIdByProvider[entry.sentence.voiceOverProvider ?? voiceProvider],
+            selectedVoiceIdByProvider[entry.sentence.voiceOverProvider ?? voiceProvider],
           )?.name ??
           null,
         styleInstructions: entry.sentence.voiceOverStyleInstructions,
@@ -6828,7 +6854,7 @@ export function GeneratePageInner() {
           findVoiceOption(
             sentence.voiceOverProvider ?? voiceProvider,
             sentence.voiceOverVoiceId ??
-              selectedVoiceIdByProvider[sentence.voiceOverProvider ?? voiceProvider],
+            selectedVoiceIdByProvider[sentence.voiceOverProvider ?? voiceProvider],
           )?.name ??
           null,
         styleInstructions: sentence.voiceOverStyleInstructions,
@@ -6901,7 +6927,7 @@ export function GeneratePageInner() {
           findVoiceOption(
             normalizeVoiceProvider(chunk.provider),
             chunk.providerVoiceId ??
-              selectedVoiceIdByProvider[normalizeVoiceProvider(chunk.provider)],
+            selectedVoiceIdByProvider[normalizeVoiceProvider(chunk.provider)],
           )?.name ??
           null,
         styleInstructions: chunk.styleInstructions,
@@ -7465,10 +7491,10 @@ export function GeneratePageInner() {
 
       const nextIdeas = Array.isArray(response.data?.ideas)
         ? response.data.ideas.filter(
-            (idea) =>
-              typeof idea?.id === 'string' &&
-              typeof idea?.title === 'string',
-          )
+          (idea) =>
+            typeof idea?.id === 'string' &&
+            typeof idea?.title === 'string',
+        )
         : [];
 
       if (nextIdeas.length !== 5) {
@@ -7917,17 +7943,17 @@ export function GeneratePageInner() {
       const resolvedSceneTab = subscribeLike
         ? 'video'
         : sceneTabValue === 'image' ||
-            sceneTabValue === 'video' ||
-            sceneTabValue === 'text' ||
-            sceneTabValue === 'overlay'
+          sceneTabValue === 'video' ||
+          sceneTabValue === 'text' ||
+          sceneTabValue === 'overlay'
           ? sceneTabValue
           : hasOverlaySceneData
             ? 'overlay'
-          : hasTextSceneData
-            ? 'text'
-            : s.video
-              ? 'video'
-              : 'image';
+            : hasTextSceneData
+              ? 'text'
+              : s.video
+                ? 'video'
+                : 'image';
       const textAnimationEffect = resolveTextAnimationEffectFromSettings(
         textAnimationSettingsValue,
         textAnimationEffectValue,
@@ -7955,7 +7981,7 @@ export function GeneratePageInner() {
         voiceOverMimeType: String(voiceOverMimeType ?? '').trim() || null,
         voiceOverDurationSeconds:
           typeof voiceOverDurationSeconds === 'number' &&
-          Number.isFinite(voiceOverDurationSeconds)
+            Number.isFinite(voiceOverDurationSeconds)
             ? Math.max(0, voiceOverDurationSeconds)
             : null,
         voiceOverProvider:
@@ -8216,15 +8242,15 @@ export function GeneratePageInner() {
       });
       const rebuiltSentenceVoiceState =
         !loadedVoiceState.voiceFile &&
-        !loadedVoiceState.voiceLibraryUrl &&
-        mappedDraftSentences.some((sentence) => hasSentenceVoiceOver(sentence))
+          !loadedVoiceState.voiceLibraryUrl &&
+          mappedDraftSentences.some((sentence) => hasSentenceVoiceOver(sentence))
           ? await rebuildVoiceOverFromSentenceVoices({
-              sourceSentences: mappedDraftSentences,
-              fallbackBaseName: 'draft-voice-over',
-            }).catch((error) => {
-              console.error('Failed to rebuild draft sentence voices', error);
-              return null;
-            })
+            sourceSentences: mappedDraftSentences,
+            fallbackBaseName: 'draft-voice-over',
+          }).catch((error) => {
+            console.error('Failed to rebuild draft sentence voices', error);
+            return null;
+          })
           : null;
 
       setVoiceOver(loadedVoiceState.voiceFile);
@@ -8325,15 +8351,15 @@ export function GeneratePageInner() {
             });
             const rebuiltShortSentenceVoiceState =
               !shortVoiceState.voiceFile &&
-              !shortVoiceState.voiceLibraryUrl &&
-              mappedShort.some((sentence) => hasSentenceVoiceOver(sentence))
+                !shortVoiceState.voiceLibraryUrl &&
+                mappedShort.some((sentence) => hasSentenceVoiceOver(sentence))
                 ? await rebuildVoiceOverFromSentenceVoices({
-                    sourceSentences: mappedShort,
-                    fallbackBaseName: `draft-short-${idx + 1}-voice-over`,
-                  }).catch((error) => {
-                    console.error('Failed to rebuild short draft sentence voices', error);
-                    return null;
-                  })
+                  sourceSentences: mappedShort,
+                  fallbackBaseName: `draft-short-${idx + 1}-voice-over`,
+                }).catch((error) => {
+                  console.error('Failed to rebuild short draft sentence voices', error);
+                  return null;
+                })
                 : null;
 
             if (idx === 0 && shortVoiceGenerationConfig) {
@@ -9722,23 +9748,23 @@ export function GeneratePageInner() {
           const patch =
             kind === 'look'
               ? buildLookPresetSelectionPatch({
-                  value: selectedValue,
-                  sentence: {
-                    visualEffect: sentence.visualEffect ?? null,
-                    imageFilterSettings: sentence.imageFilterSettings ?? null,
-                  },
-                  imageFilterPresets,
-                })
+                value: selectedValue,
+                sentence: {
+                  visualEffect: sentence.visualEffect ?? null,
+                  imageFilterSettings: sentence.imageFilterSettings ?? null,
+                },
+                imageFilterPresets,
+              })
               : buildMotionPresetSelectionPatch({
-                  value: selectedValue,
-                  sentence: {
-                    imageMotionEffect: sentence.imageMotionEffect ?? 'default',
-                    imageMotionSettings: sentence.imageMotionSettings ?? null,
-                    imageMotionSpeed: sentence.imageMotionSpeed ?? null,
-                  },
-                  motionEffectPresets,
-                  isShortVideo: effectiveIsShort,
-                });
+                value: selectedValue,
+                sentence: {
+                  imageMotionEffect: sentence.imageMotionEffect ?? 'default',
+                  imageMotionSettings: sentence.imageMotionSettings ?? null,
+                  imageMotionSpeed: sentence.imageMotionSpeed ?? null,
+                },
+                motionEffectPresets,
+                isShortVideo: effectiveIsShort,
+              });
 
           if (!patch) {
             skippedCount += 1;
@@ -10559,30 +10585,30 @@ export function GeneratePageInner() {
             secondarySavedImageId: id,
             hasSecondaryImageSlot: true,
           }
-        : which === 'start'
-          ? {
-            ...item,
-            startImageUrl: imageUrl,
-            startImage: null,
-            startImagePrompt: prompt ?? null,
-            isFromLibrary: true,
-            startSavedImageId: id,
-          }
-          : which === 'end'
+          : which === 'start'
             ? {
               ...item,
-              endImageUrl: imageUrl,
-              endImage: null,
-              endImagePrompt: prompt ?? null,
+              startImageUrl: imageUrl,
+              startImage: null,
+              startImagePrompt: prompt ?? null,
               isFromLibrary: true,
-              endSavedImageId: id,
+              startSavedImageId: id,
             }
-            : {
-              ...item,
-              referenceImageUrl: imageUrl,
-              referenceImage: null,
-              isFromLibrary: true,
-            },
+            : which === 'end'
+              ? {
+                ...item,
+                endImageUrl: imageUrl,
+                endImage: null,
+                endImagePrompt: prompt ?? null,
+                isFromLibrary: true,
+                endSavedImageId: id,
+              }
+              : {
+                ...item,
+                referenceImageUrl: imageUrl,
+                referenceImage: null,
+                isFromLibrary: true,
+              },
     );
 
     setLibraryTarget(null);
@@ -10948,8 +10974,8 @@ export function GeneratePageInner() {
             trim_start_seconds: Math.max(0, Number(audioSettings.trim.startSeconds ?? 0) || 0),
             duration_seconds:
               typeof audioSettings.trim.durationSeconds === 'number' &&
-              Number.isFinite(audioSettings.trim.durationSeconds) &&
-              audioSettings.trim.durationSeconds > 0
+                Number.isFinite(audioSettings.trim.durationSeconds) &&
+                audioSettings.trim.durationSeconds > 0
                 ? Math.max(0, audioSettings.trim.durationSeconds)
                 : null,
             audio_settings_override: audioSettings,
@@ -11239,24 +11265,24 @@ export function GeneratePageInner() {
           const overlaySourceUrl = String(s.overlayUrl ?? '').trim() || null;
           const overlayPresetNeedsCreate = Boolean(
             (s.overlayFile || overlaySourceUrl) &&
-              (!currentOverlayPreset ||
-                currentOverlayPreset.url !== overlaySourceUrl ||
-                JSON.stringify(
-                  normalizeOverlaySettings(currentOverlayPreset.settings ?? null),
-                ) !== JSON.stringify(normalizedOverlaySettings) ||
-                !areDetachedSentenceSoundEffectsEqual(
-                  currentOverlayPreset.soundEffects,
-                  s.overlaySoundEffects,
-                )),
+            (!currentOverlayPreset ||
+              currentOverlayPreset.url !== overlaySourceUrl ||
+              JSON.stringify(
+                normalizeOverlaySettings(currentOverlayPreset.settings ?? null),
+              ) !== JSON.stringify(normalizedOverlaySettings) ||
+              !areDetachedSentenceSoundEffectsEqual(
+                currentOverlayPreset.soundEffects,
+                s.overlaySoundEffects,
+              )),
           );
           const savedOverlayPreset = overlayPresetNeedsCreate
             ? await saveOverlayPresetRequest({
-                title: currentOverlayPreset?.title ?? '',
-                settings: normalizedOverlaySettings ?? getDefaultOverlaySettings('image'),
-                file: s.overlayFile ?? null,
-                sourceUrl: overlaySourceUrl,
-                soundEffects: s.overlaySoundEffects,
-              })
+              title: currentOverlayPreset?.title ?? '',
+              settings: normalizedOverlaySettings ?? getDefaultOverlaySettings('image'),
+              file: s.overlayFile ?? null,
+              sourceUrl: overlaySourceUrl,
+              soundEffects: s.overlaySoundEffects,
+            })
             : currentOverlayPreset;
           const overlayId = savedOverlayPreset?.id ?? s.customOverlayId ?? null;
 
@@ -11268,9 +11294,9 @@ export function GeneratePageInner() {
             text: s.text,
             voice_over_url: s.voiceOverFile
               ? await persistSentenceVoiceFileToManagedStorage({
-                  file: s.voiceOverFile,
-                  sentenceId: s.id,
-                })
+                file: s.voiceOverFile,
+                sentenceId: s.id,
+              })
               : isBlobUrl(s.voiceOverUrl)
                 ? null
                 : String(s.voiceOverUrl ?? '').trim() || null,
@@ -11278,7 +11304,7 @@ export function GeneratePageInner() {
               String(s.voiceOverMimeType ?? '').trim() || null,
             voice_over_duration_seconds:
               typeof s.voiceOverDurationSeconds === 'number' &&
-              Number.isFinite(s.voiceOverDurationSeconds)
+                Number.isFinite(s.voiceOverDurationSeconds)
                 ? Math.max(0, s.voiceOverDurationSeconds)
                 : null,
             voice_over_provider: s.voiceOverProvider ?? null,
@@ -11420,30 +11446,30 @@ export function GeneratePageInner() {
 
           const response = params.file
             ? await api.post<{ id: string; video: string }>(
-                endpoint,
-                (() => {
-                  const formData = new FormData();
-                  formData.append('video', params.file);
-                  formData.append('video_type', videoModel);
-                  formData.append('video_size', 'portrait');
-                  formData.append('target', params.target);
-                  return formData;
-                })(),
-                {
-                  headers: {
-                    'Content-Type': 'multipart/form-data',
-                  },
+              endpoint,
+              (() => {
+                const formData = new FormData();
+                formData.append('video', params.file);
+                formData.append('video_type', videoModel);
+                formData.append('video_size', 'portrait');
+                formData.append('target', params.target);
+                return formData;
+              })(),
+              {
+                headers: {
+                  'Content-Type': 'multipart/form-data',
                 },
-              )
+              },
+            )
             : await api.post<{ id: string; video: string }>(
-                endpoint,
-                {
-                  videoUrl: params.url,
-                  video_type: videoModel,
-                  video_size: 'portrait',
-                  target: params.target,
-                },
-              );
+              endpoint,
+              {
+                videoUrl: params.url,
+                video_type: videoModel,
+                video_size: 'portrait',
+                target: params.target,
+              },
+            );
 
           const saved = response.data;
           return saved?.id ? saved : null;
@@ -11491,9 +11517,9 @@ export function GeneratePageInner() {
               backgroundAsset.file ??
               (backgroundAsset.url?.startsWith('data:')
                 ? dataUrlToFile(
-                    backgroundAsset.url,
-                    `sentence-${bs.index + 1}-text-background.mp4`,
-                  )
+                  backgroundAsset.url,
+                  `sentence-${bs.index + 1}-text-background.mp4`,
+                )
                 : null);
             const backgroundUrl =
               backgroundAsset.url && !backgroundAsset.url.startsWith('data:')
@@ -11702,65 +11728,65 @@ export function GeneratePageInner() {
             const shortVideoUpdates =
               shortBackendSentences.length > 0
                 ? await persistMissingSentenceVideos({
-                scriptId: id,
-                backendSentences: shortBackendSentences,
-                localSentences: finalItems,
+                  scriptId: id,
+                  backendSentences: shortBackendSentences,
+                  localSentences: finalItems,
                 })
                 : new Map();
             const mergedShortSentences =
               shortBackendSentences.length > 0
                 ? mapBackendSentencesToUi(shortBackendSentences).map((sentence, idx) => {
-                    const localSentence = finalItems[idx];
-                    const update = shortVideoUpdates.get(idx);
+                  const localSentence = finalItems[idx];
+                  const update = shortVideoUpdates.get(idx);
 
-                    const mergedVideoUrl =
-                      sentence.videoUrl ??
-                      (localSentence?.videoUrl && localSentence.videoUrl !== '/subscribe.mp4'
-                        ? localSentence.videoUrl
-                        : null);
-                    const mergedVideoFile =
-                      !sentence.videoUrl && !update?.primary
-                        ? (localSentence?.video ?? null)
-                        : null;
-                    const mergedTextBackgroundVideoUrl =
-                      sentence.textBackgroundVideoUrl ??
-                      localSentence?.textBackgroundVideoUrl ??
-                      null;
-                    const mergedTextBackgroundVideoFile =
-                      !sentence.textBackgroundVideoUrl && !update?.textBackground
-                        ? (localSentence?.textBackgroundVideo ?? null)
-                        : null;
+                  const mergedVideoUrl =
+                    sentence.videoUrl ??
+                    (localSentence?.videoUrl && localSentence.videoUrl !== '/subscribe.mp4'
+                      ? localSentence.videoUrl
+                      : null);
+                  const mergedVideoFile =
+                    !sentence.videoUrl && !update?.primary
+                      ? (localSentence?.video ?? null)
+                      : null;
+                  const mergedTextBackgroundVideoUrl =
+                    sentence.textBackgroundVideoUrl ??
+                    localSentence?.textBackgroundVideoUrl ??
+                    null;
+                  const mergedTextBackgroundVideoFile =
+                    !sentence.textBackgroundVideoUrl && !update?.textBackground
+                      ? (localSentence?.textBackgroundVideo ?? null)
+                      : null;
 
-                    return {
-                      ...sentence,
-                      ...(update?.primary
-                        ? {
-                            videoUrl: update.primary.video,
-                            savedVideoId: update.primary.id,
-                          }
-                        : {
-                            video: mergedVideoFile,
-                            videoUrl: mergedVideoUrl,
-                            savedVideoId:
-                              sentence.savedVideoId ??
-                              localSentence?.savedVideoId ??
-                              null,
-                          }),
-                      ...(update?.textBackground
-                        ? {
-                            textBackgroundVideoUrl: update.textBackground.video,
-                            textBackgroundSavedVideoId: update.textBackground.id,
-                          }
-                        : {
-                            textBackgroundVideo: mergedTextBackgroundVideoFile,
-                            textBackgroundVideoUrl: mergedTextBackgroundVideoUrl,
-                            textBackgroundSavedVideoId:
-                              sentence.textBackgroundSavedVideoId ??
-                              localSentence?.textBackgroundSavedVideoId ??
-                              null,
-                          }),
-                    };
-                  })
+                  return {
+                    ...sentence,
+                    ...(update?.primary
+                      ? {
+                        videoUrl: update.primary.video,
+                        savedVideoId: update.primary.id,
+                      }
+                      : {
+                        video: mergedVideoFile,
+                        videoUrl: mergedVideoUrl,
+                        savedVideoId:
+                          sentence.savedVideoId ??
+                          localSentence?.savedVideoId ??
+                          null,
+                      }),
+                    ...(update?.textBackground
+                      ? {
+                        textBackgroundVideoUrl: update.textBackground.video,
+                        textBackgroundSavedVideoId: update.textBackground.id,
+                      }
+                      : {
+                        textBackgroundVideo: mergedTextBackgroundVideoFile,
+                        textBackgroundVideoUrl: mergedTextBackgroundVideoUrl,
+                        textBackgroundSavedVideoId:
+                          sentence.textBackgroundSavedVideoId ??
+                          localSentence?.textBackgroundSavedVideoId ??
+                          null,
+                      }),
+                  };
+                })
                 : finalItems;
 
             // Keep local snapshot IDs in sync.
@@ -11927,27 +11953,27 @@ export function GeneratePageInner() {
             ...s,
             ...(update?.primary
               ? {
-                  videoUrl: update.primary.video ?? mergedVideoUrl,
-                  savedVideoId: update.primary.id,
-                }
+                videoUrl: update.primary.video ?? mergedVideoUrl,
+                savedVideoId: update.primary.id,
+              }
               : {
-                  video: mergedVideoFile,
-                  videoUrl: mergedVideoUrl,
-                  savedVideoId: s.savedVideoId ?? local?.savedVideoId ?? null,
-                }),
+                video: mergedVideoFile,
+                videoUrl: mergedVideoUrl,
+                savedVideoId: s.savedVideoId ?? local?.savedVideoId ?? null,
+              }),
             ...(update?.textBackground
               ? {
-                  textBackgroundVideoUrl: update.textBackground.video,
-                  textBackgroundSavedVideoId: update.textBackground.id,
-                }
+                textBackgroundVideoUrl: update.textBackground.video,
+                textBackgroundSavedVideoId: update.textBackground.id,
+              }
               : {
-                  textBackgroundVideo: mergedTextBackgroundVideoFile,
-                  textBackgroundVideoUrl: mergedTextBackgroundVideoUrl,
-                  textBackgroundSavedVideoId:
-                    s.textBackgroundSavedVideoId ??
-                    local?.textBackgroundSavedVideoId ??
-                    null,
-                }),
+                textBackgroundVideo: mergedTextBackgroundVideoFile,
+                textBackgroundVideoUrl: mergedTextBackgroundVideoUrl,
+                textBackgroundSavedVideoId:
+                  s.textBackgroundSavedVideoId ??
+                  local?.textBackgroundSavedVideoId ??
+                  null,
+              }),
           };
         });
 
@@ -12068,10 +12094,18 @@ export function GeneratePageInner() {
       return;
     }
 
-    setTranslateTargetLanguage(scriptLanguage);
-    setTranslateMethod('google');
+    const nextTargetLanguage = String(scriptLanguage ?? '').trim() || 'ar';
+    setTranslateTargetLanguage(nextTargetLanguage);
+    setTranslateMethod(isLlmOnlyTranslateLanguage(nextTargetLanguage) ? 'llm' : 'google');
     setTranslateLoadingAction(null);
     setIsTranslateModalOpen(true);
+  };
+
+  const handleTranslateTargetLanguageChange = (value: string) => {
+    setTranslateTargetLanguage(value);
+    if (isLlmOnlyTranslateLanguage(value)) {
+      setTranslateMethod('llm');
+    }
   };
 
   const getExplicitTextAnimationText = (sentence: SentenceItem) => {
@@ -12095,7 +12129,7 @@ export function GeneratePageInner() {
       throw new Error('Target language is required');
     }
 
-    const method = translateMethod;
+    const method = isLlmOnlyTranslateLanguage(targetLanguage) ? 'llm' : translateMethod;
     const model = method === 'llm' ? scriptModel : undefined;
 
     const sourceScript = String(script ?? '').trim();
@@ -12276,7 +12310,7 @@ export function GeneratePageInner() {
       return;
     }
 
-    const method = translateMethod;
+    const method = isLlmOnlyTranslateLanguage(targetLanguage) ? 'llm' : translateMethod;
     const model = method === 'llm' ? scriptModel : undefined;
 
     const existingId = String(fullScriptId ?? activeScriptId ?? '').trim() || null;
@@ -12341,676 +12375,678 @@ export function GeneratePageInner() {
           <HeaderBar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
 
           <div className="p-4">
-          <div className="max-w-4xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="text-center py-12 relative">
-              <div className="inline-block relative mb-6">
-                <div className="absolute inset-0 bg-linear-to-r from-purple-400 to-blue-400 blur-xl opacity-50 rounded-full"></div>
-                <div className="relative bg-linear-to-br from-purple-500 to-blue-600 p-4 rounded-2xl shadow-xl">
-                  <Video className="h-16 w-16 text-white" />
+            <div className="max-w-4xl mx-auto space-y-6">
+              {/* Header */}
+              <div className="text-center py-12 relative">
+                <div className="inline-block relative mb-6">
+                  <div className="absolute inset-0 bg-linear-to-r from-purple-400 to-blue-400 blur-xl opacity-50 rounded-full"></div>
+                  <div className="relative bg-linear-to-br from-purple-500 to-blue-600 p-4 rounded-2xl shadow-xl">
+                    <Video className="h-16 w-16 text-white" />
+                  </div>
                 </div>
+                <h2 className="text-4xl font-bold mb-3 bg-linear-to-r from-gray-900 via-purple-900 to-blue-900 bg-clip-text text-transparent">
+                  Generate Your Video
+                </h2>
+                <p className="text-gray-600 text-lg max-w-2xl mx-auto">
+                  Provide your script, images, and voice-over to create an
+                  AI-directed video with professional results
+                </p>
               </div>
-              <h2 className="text-4xl font-bold mb-3 bg-linear-to-r from-gray-900 via-purple-900 to-blue-900 bg-clip-text text-transparent">
-                Generate Your Video
-              </h2>
-              <p className="text-gray-600 text-lg max-w-2xl mx-auto">
-                Provide your script, images, and voice-over to create an
-                AI-directed video with professional results
-              </p>
-            </div>
 
-            {/* Generate Form */}
-            <div className="bg-linear-to-br from-white to-gray-50 rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
-              <Accordion type="multiple" defaultValue={['script', 'sentences', 'voice']} className="w-full">
-                <ScriptSection
-                  script={script}
-                  onScriptChange={setScript}
-                  scriptLanguage={scriptLanguage}
-                  setScriptLanguage={setScriptLanguage}
-                  systemPrompt={systemPrompt}
-                  onSystemPromptChange={setSystemPrompt}
-                  referenceScripts={referenceScripts}
-                  onOpenReferenceLibrary={handleOpenScriptReferences}
-                  onRemoveReferenceScript={handleRemoveReferenceScript}
-                  onClearReferenceScripts={handleClearReferenceScripts}
-                  hasSentences={sentences.length > 0}
-                  scriptSubject={scriptSubject}
-                  setScriptSubject={setScriptSubject}
-                  scriptSubjectContent={scriptSubjectContent}
-                  setScriptSubjectContent={setScriptSubjectContent}
-                  scriptLength={scriptLength}
-                  setScriptLength={setScriptLength}
-                  scriptStyle={scriptStyle}
-                  setScriptStyle={setScriptStyle}
-                  scriptTechnique={scriptTechnique}
-                  setScriptTechnique={setScriptTechnique}
-                  useWebSearchForTrending={useWebSearchForTrending}
-                  setUseWebSearchForTrending={setUseWebSearchForTrending}
-                  scriptModel={scriptModel}
-                  setScriptModel={setScriptModel}
-                  isRandomScriptLoading={isRandomScriptLoading}
-                  isScriptIdeasLoading={isScriptIdeasLoading}
-                  isSplitting={isSplitting}
-                  randomScriptError={randomScriptError}
-                  scriptIdeasError={scriptIdeasError}
-                  splitError={splitError}
-                  scriptIdeas={scriptIdeas}
-                  selectedScriptIdeaTitle={selectedScriptIdeaTitle}
-                  onGenerateScriptIdeas={handleFetchScriptIdeas}
-                  onGenerateFromScriptIdea={handleGenerateFromIdea}
-                  onGenerateRandomScript={handleGenerateRandomScript}
-                  onSplitScript={handleSplitScript}
-                  onResetScript={handleResetScriptAndSentences}
-                  onSaveDraft={handleSaveScriptDraft}
-                  isSavingDraft={isSavingDraft}
-                  onOpenLibrary={handleOpenScriptLibrary}
-                  isLongForm={isLongForm}
-                  originalScriptSubject={originalScriptSubject}
-                  originalScriptSubjectContent={originalScriptSubjectContent}
-                  isEnhancingScript={isEnhancingScript}
-                  onEnhanceScript={handleEnhanceScript}
-                  onOpenTranslate={handleOpenTranslateModal}
-                />
+              {/* Generate Form */}
+              <div className="bg-linear-to-br from-white to-gray-50 rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
+                <Accordion type="multiple" defaultValue={['script', 'sentences', 'voice']} className="w-full">
+                  <ScriptSection
+                    user={user}
+                    script={script}
+                    onScriptChange={setScript}
+                    scriptLanguage={scriptLanguage}
+                    setScriptLanguage={setScriptLanguage}
+                    systemPrompt={systemPrompt}
+                    onSystemPromptChange={setSystemPrompt}
+                    referenceScripts={referenceScripts}
+                    onOpenReferenceLibrary={handleOpenScriptReferences}
+                    onRemoveReferenceScript={handleRemoveReferenceScript}
+                    onClearReferenceScripts={handleClearReferenceScripts}
+                    hasSentences={sentences.length > 0}
+                    scriptSubject={scriptSubject}
+                    setScriptSubject={setScriptSubject}
+                    scriptSubjectContent={scriptSubjectContent}
+                    setScriptSubjectContent={setScriptSubjectContent}
+                    scriptLength={scriptLength}
+                    setScriptLength={setScriptLength}
+                    scriptStyle={scriptStyle}
+                    setScriptStyle={setScriptStyle}
+                    scriptTechnique={scriptTechnique}
+                    setScriptTechnique={setScriptTechnique}
+                    useWebSearchForTrending={useWebSearchForTrending}
+                    setUseWebSearchForTrending={setUseWebSearchForTrending}
+                    scriptModel={scriptModel}
+                    setScriptModel={setScriptModel}
+                    isRandomScriptLoading={isRandomScriptLoading}
+                    isScriptIdeasLoading={isScriptIdeasLoading}
+                    isSplitting={isSplitting}
+                    randomScriptError={randomScriptError}
+                    scriptIdeasError={scriptIdeasError}
+                    splitError={splitError}
+                    scriptIdeas={scriptIdeas}
+                    selectedScriptIdeaTitle={selectedScriptIdeaTitle}
+                    onGenerateScriptIdeas={handleFetchScriptIdeas}
+                    onGenerateFromScriptIdea={handleGenerateFromIdea}
+                    onGenerateRandomScript={handleGenerateRandomScript}
+                    onSplitScript={handleSplitScript}
+                    onResetScript={handleResetScriptAndSentences}
+                    onSaveDraft={handleSaveScriptDraft}
+                    isSavingDraft={isSavingDraft}
+                    onOpenLibrary={handleOpenScriptLibrary}
+                    isLongForm={isLongForm}
+                    originalScriptSubject={originalScriptSubject}
+                    originalScriptSubjectContent={originalScriptSubjectContent}
+                    isEnhancingScript={isEnhancingScript}
+                    onEnhanceScript={handleEnhanceScript}
+                    onOpenTranslate={handleOpenTranslateModal}
+                  />
 
-                <SentencesImagesSection
-                  sentences={sentences}
-                  isShortVideo={effectiveIsShort}
-                  sceneDurationSecondsByIndex={buildEstimatedSceneDurationSeconds(
-                    sentences,
-                    voiceDuration,
-                  )}
-                  isLongForm={isLongForm}
-                  shortsTabs={(shortRanges.length
-                    ? shortRanges
-                    : shortScriptIds.map((_id, idx) => {
-                      const snap = tabSnapshotsRef.current[tabKeyForIndex(idx)];
-                      const count = (snap?.sentences ?? []).filter(
-                        (s) => !isSubscribeLikeSentence(s.text),
-                      ).length;
-                      return { start: 0, end: Math.max(0, count - 1) };
-                    })
-                  ).map((r, idx) => ({
-                    label: `Short ${idx + 1}`,
-                    count: Math.max(0, r.end - r.start + 1),
-                  }))}
-                  activeShortTabIndex={activeShortTabIndex}
-                  onSelectShortTab={handleSelectShortTab}
-                  manualSplitEnabled={manualSplitEnabled}
-                  onManualSplitToggle={async (next) => {
-                    if (!next) {
-                      // Persist any edits on the current tab.
-                      tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] =
-                        captureActiveTabSnapshot();
+                  <SentencesImagesSection
+                    sentences={sentences}
+                    isShortVideo={effectiveIsShort}
+                    sceneDurationSecondsByIndex={buildEstimatedSceneDurationSeconds(
+                      sentences,
+                      voiceDuration,
+                    )}
+                    isLongForm={isLongForm}
+                    shortsTabs={(shortRanges.length
+                      ? shortRanges
+                      : shortScriptIds.map((_id, idx) => {
+                        const snap = tabSnapshotsRef.current[tabKeyForIndex(idx)];
+                        const count = (snap?.sentences ?? []).filter(
+                          (s) => !isSubscribeLikeSentence(s.text),
+                        ).length;
+                        return { start: 0, end: Math.max(0, count - 1) };
+                      })
+                    ).map((r, idx) => ({
+                      label: `Short ${idx + 1}`,
+                      count: Math.max(0, r.end - r.start + 1),
+                    }))}
+                    activeShortTabIndex={activeShortTabIndex}
+                    onSelectShortTab={handleSelectShortTab}
+                    manualSplitEnabled={manualSplitEnabled}
+                    onManualSplitToggle={async (next) => {
+                      if (!next) {
+                        // Persist any edits on the current tab.
+                        tabSnapshotsRef.current[tabKeyForIndex(activeShortTabIndex)] =
+                          captureActiveTabSnapshot();
 
-                      // Restore the full tab content (if we have it).
-                      if (tabSnapshotsRef.current.full) {
-                        applyTabSnapshot(tabSnapshotsRef.current.full);
-                      }
+                        // Restore the full tab content (if we have it).
+                        if (tabSnapshotsRef.current.full) {
+                          applyTabSnapshot(tabSnapshotsRef.current.full);
+                        }
 
-                      setManualSplitEnabled(false);
-                      setActiveShortTabIndex(null);
+                        setManualSplitEnabled(false);
+                        setActiveShortTabIndex(null);
 
-                      const cachedAi = aiSplitCacheRef.current;
-                      if (cachedAi && cachedAi.ranges.length > 0) {
-                        setShortRanges(cachedAi.ranges);
-                        setShortScriptIds([]);
-                        setShortsValidationError(null);
+                        const cachedAi = aiSplitCacheRef.current;
+                        if (cachedAi && cachedAi.ranges.length > 0) {
+                          setShortRanges(cachedAi.ranges);
+                          setShortScriptIds([]);
+                          setShortsValidationError(null);
 
-                        // Replace current short snapshots with the cached AI ones.
-                        Object.keys(tabSnapshotsRef.current)
-                          .filter((k) => k.startsWith('short-'))
-                          .forEach((k) => {
-                            delete tabSnapshotsRef.current[k];
+                          // Replace current short snapshots with the cached AI ones.
+                          Object.keys(tabSnapshotsRef.current)
+                            .filter((k) => k.startsWith('short-'))
+                            .forEach((k) => {
+                              delete tabSnapshotsRef.current[k];
+                            });
+
+                          Object.entries(cachedAi.shortSnapshotsByKey).forEach(([k, snap]) => {
+                            tabSnapshotsRef.current[k] = cloneSnapshot(snap);
                           });
+                        } else {
+                          setShortRanges([]);
+                          setShortScriptIds([]);
+                          setShortsValidationError(null);
 
-                        Object.entries(cachedAi.shortSnapshotsByKey).forEach(([k, snap]) => {
-                          tabSnapshotsRef.current[k] = cloneSnapshot(snap);
-                        });
-                      } else {
-                        setShortRanges([]);
-                        setShortScriptIds([]);
-                        setShortsValidationError(null);
-
-                        // Drop all short snapshots.
-                        Object.keys(tabSnapshotsRef.current)
-                          .filter((k) => k.startsWith('short-'))
-                          .forEach((k) => {
-                            delete tabSnapshotsRef.current[k];
-                          });
+                          // Drop all short snapshots.
+                          Object.keys(tabSnapshotsRef.current)
+                            .filter((k) => k.startsWith('short-'))
+                            .forEach((k) => {
+                              delete tabSnapshotsRef.current[k];
+                            });
+                        }
+                        return;
                       }
-                      return;
+                      handleSplitIntoShortsManually();
+                    }}
+                    onSplitWithAi={handleSplitIntoShortsWithAi}
+                    isSplittingWithAi={isSplittingIntoShorts}
+                    shortsValidationError={shortsValidationError}
+                    imageAspectRatio={imageAspectRatio}
+                    onImageAspectRatioChange={(next) => {
+                      setHasTouchedImageAspectRatio(true);
+                      setImageAspectRatio(next);
+                    }}
+                    imagePromptModel={imagePromptModel}
+                    onImagePromptModelChange={setImagePromptModel}
+                    imageModel={imageModel}
+                    onImageModelChange={setImageModel}
+                    imageStyle={imageStyle}
+                    onImageStyleChange={setImageStyle}
+                    videoModel={videoModel}
+                    onVideoModelChange={handleVideoModelChange}
+                    scriptCharacters={scriptCharacters}
+                    onScriptCharactersChange={handleScriptCharactersChange}
+                    onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
+                    scriptLocations={scriptLocations}
+                    onScriptLocationsChange={handleScriptLocationsChange}
+                    onSentenceForcedLocationKeyChange={handleSentenceForcedLocationKeyChange}
+                    imageFilterPresets={imageFilterPresets}
+                    motionEffectPresets={motionEffectPresets}
+                    textAnimationPresets={textAnimationPresets}
+                    overlayPresets={overlayPresets}
+                    isLoadingImageFilterPresets={isLoadingImageFilterPresets}
+                    isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+                    isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
+                    isLoadingOverlayPresets={isLoadingOverlayPresets}
+                    onSentencePatch={handleSentencePatch}
+                    onSaveImageFilterPreset={handleSaveImageFilterPreset}
+                    onUpdateImageFilterPreset={handleUpdateImageFilterPreset}
+                    onDeleteImageFilterPreset={handleDeleteImageFilterPreset}
+                    onSaveMotionEffectPreset={handleSaveMotionEffectPreset}
+                    onUpdateMotionEffectPreset={handleUpdateMotionEffectPreset}
+                    onDeleteMotionEffectPreset={handleDeleteMotionEffectPreset}
+                    onSaveTextAnimationPreset={handleSaveTextAnimationPreset}
+                    onUpdateTextAnimationPreset={handleUpdateTextAnimationPreset}
+                    onDeleteTextAnimationPreset={handleDeleteTextAnimationPreset}
+                    onSaveOverlayPreset={saveOverlayPresetRequest}
+                    onDeleteOverlayPreset={handleDeleteOverlayPreset}
+                    onGenerateSingleImageLookWithAi={handleGenerateSingleImageLookWithAi}
+                    onGenerateSingleImageMotionWithAi={handleGenerateSingleImageMotionWithAi}
+                    onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
+                    onSentenceImageMotionEffectChange={
+                      handleSentenceImageMotionEffectChange
                     }
-                    handleSplitIntoShortsManually();
-                  }}
-                  onSplitWithAi={handleSplitIntoShortsWithAi}
-                  isSplittingWithAi={isSplittingIntoShorts}
-                  shortsValidationError={shortsValidationError}
-                  imageAspectRatio={imageAspectRatio}
-                  onImageAspectRatioChange={(next) => {
-                    setHasTouchedImageAspectRatio(true);
-                    setImageAspectRatio(next);
-                  }}
-                  imagePromptModel={imagePromptModel}
-                  onImagePromptModelChange={setImagePromptModel}
-                  imageModel={imageModel}
-                  onImageModelChange={setImageModel}
-                  imageStyle={imageStyle}
-                  onImageStyleChange={setImageStyle}
-                  videoModel={videoModel}
-                  onVideoModelChange={handleVideoModelChange}
-                  scriptCharacters={scriptCharacters}
-                  onScriptCharactersChange={handleScriptCharactersChange}
-                  onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}
-                  scriptLocations={scriptLocations}
-                  onScriptLocationsChange={handleScriptLocationsChange}
-                  onSentenceForcedLocationKeyChange={handleSentenceForcedLocationKeyChange}
-                  imageFilterPresets={imageFilterPresets}
-                  motionEffectPresets={motionEffectPresets}
-                  textAnimationPresets={textAnimationPresets}
-                  overlayPresets={overlayPresets}
-                  isLoadingImageFilterPresets={isLoadingImageFilterPresets}
-                  isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
-                  isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
-                  isLoadingOverlayPresets={isLoadingOverlayPresets}
-                  onSentencePatch={handleSentencePatch}
-                  onSaveImageFilterPreset={handleSaveImageFilterPreset}
-                  onUpdateImageFilterPreset={handleUpdateImageFilterPreset}
-                  onDeleteImageFilterPreset={handleDeleteImageFilterPreset}
-                  onSaveMotionEffectPreset={handleSaveMotionEffectPreset}
-                  onUpdateMotionEffectPreset={handleUpdateMotionEffectPreset}
-                  onDeleteMotionEffectPreset={handleDeleteMotionEffectPreset}
-                  onSaveTextAnimationPreset={handleSaveTextAnimationPreset}
-                  onUpdateTextAnimationPreset={handleUpdateTextAnimationPreset}
-                  onDeleteTextAnimationPreset={handleDeleteTextAnimationPreset}
-                  onSaveOverlayPreset={saveOverlayPresetRequest}
-                  onDeleteOverlayPreset={handleDeleteOverlayPreset}
-                  onGenerateSingleImageLookWithAi={handleGenerateSingleImageLookWithAi}
-                  onGenerateSingleImageMotionWithAi={handleGenerateSingleImageMotionWithAi}
-                  onSentenceVisualEffectChange={handleSentenceVisualEffectChange}
-                  onSentenceImageMotionEffectChange={
-                    handleSentenceImageMotionEffectChange
-                  }
-                  onSentenceImageMotionSpeedChange={
-                    handleSentenceImageMotionSpeedChange
-                  }
-                  onTransitionToNextChange={handleTransitionToNextChange}
-                  onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
-                  onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
-                  onSentenceImageUpload={handleSentenceImageUpload}
-                  onSentenceVideoUpload={handleSentenceVideoUpload}
-                  onAddSentenceImageSlot={handleAddSentenceImageSlot}
-                  onRemoveSentenceImage={removeSentenceImage}
-                  onSentenceFrameImageUpload={handleSentenceFrameImageUpload}
-                  onRemoveSentenceFrameImage={removeSentenceFrameImage}
-                  onSentenceMediaModeChange={handleSentenceMediaModeChange}
-                  onGenerateSentenceFrameImage={handleGenerateSentenceFrameImage}
-                  onGenerateSentenceVideo={handleGenerateSentenceVideo}
-                  onRemoveSentenceGeneratedVideoForMode={handleRemoveSentenceGeneratedVideoForMode}
-                  onSentenceVideoGenerationModeChange={
-                    handleSentenceVideoGenerationModeChange
-                  }
-                  onSentenceVideoPromptChange={handleSentenceVideoPromptChange}
-                  onGenerateSentenceVideoPrompt={handleGenerateSentenceVideoPromptWithAi}
-                  isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
+                    onSentenceImageMotionSpeedChange={
+                      handleSentenceImageMotionSpeedChange
+                    }
+                    onTransitionToNextChange={handleTransitionToNextChange}
+                    onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
+                    onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
+                    onSentenceImageUpload={handleSentenceImageUpload}
+                    onSentenceVideoUpload={handleSentenceVideoUpload}
+                    onAddSentenceImageSlot={handleAddSentenceImageSlot}
+                    onRemoveSentenceImage={removeSentenceImage}
+                    onSentenceFrameImageUpload={handleSentenceFrameImageUpload}
+                    onRemoveSentenceFrameImage={removeSentenceFrameImage}
+                    onSentenceMediaModeChange={handleSentenceMediaModeChange}
+                    onGenerateSentenceFrameImage={handleGenerateSentenceFrameImage}
+                    onGenerateSentenceVideo={handleGenerateSentenceVideo}
+                    onRemoveSentenceGeneratedVideoForMode={handleRemoveSentenceGeneratedVideoForMode}
+                    onSentenceVideoGenerationModeChange={
+                      handleSentenceVideoGenerationModeChange
+                    }
+                    onSentenceVideoPromptChange={handleSentenceVideoPromptChange}
+                    onGenerateSentenceVideoPrompt={handleGenerateSentenceVideoPromptWithAi}
+                    isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
 
-                  onOpenSentenceSoundEffectsLibrary={handleOpenSentenceSoundEffectsLibrary}
-                  onSentenceSoundEffectsChange={handleSentenceSoundEffectsChange}
-                  onSentenceAlignSoundEffectsToSceneEndChange={
-                    handleSentenceAlignSoundEffectsToSceneEndChange
-                  }
-                  onUploadSentenceSoundEffect={handleUploadSentenceSoundEffect}
-                  isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
-                  onSaveSentenceSoundEffectsMix={handleSaveSentenceSoundEffectsMix}
-                  isSavingSentenceSfxMixBySentenceId={isSavingSentenceSfxMixBySentenceId}
-                  onSentenceReferenceImageUpload={
-                    handleSentenceReferenceImageUpload
-                  }
-                  onRemoveSentenceReferenceImage={
-                    handleRemoveSentenceReferenceImage
-                  }
-                  isGeneratingVideoBySentenceId={isGeneratingVideoBySentenceId}
-                  setIsGeneratingVideoBySentenceId={setIsGeneratingVideoBySentenceId}
-                  onDeleteSentence={handleDeleteSentence}
-                  onGenerateSentenceImage={handleGenerateSentenceImage}
-                  onGenerateSentenceReferenceImage={handleGenerateSentenceReferenceImage}
-                  onGenerateAllImages={handleGenerateAllSentenceImages}
-                  isGeneratingAllImages={isGeneratingAllImages}
-                  onGenerateBulkLookEffects={() => handleOpenBulkAiEffects('look')}
-                  isApplyingBulkLookEffects={isApplyingBulkAiEffect === 'look'}
-                  onOpenBulkLookPresetModal={() => handleOpenBulkManualEffectModal('look')}
-                  isApplyingBulkLookPreset={isApplyingManualBulkEffect === 'look'}
-                  onResetBulkLookEffects={handleResetBulkLookEffects}
-                  onGenerateBulkMotionEffects={() => handleOpenBulkAiEffects('motion')}
-                  isApplyingBulkMotionEffects={isApplyingBulkAiEffect === 'motion'}
-                  onOpenBulkMotionPresetModal={() => handleOpenBulkManualEffectModal('motion')}
-                  isApplyingBulkMotionPreset={isApplyingManualBulkEffect === 'motion'}
-                  onResetBulkMotionEffects={handleResetBulkMotionEffects}
-                  isSavingSceneSequence={isSavingSavedSequence}
-                  isApplyingSavedSequence={isApplyingSavedSequence}
-                  onOpenSaveSceneSequence={() => {
-                    setSavedSequenceSaveModalVersion((prev) => prev + 1);
-                    setIsSavedSequenceSaveModalOpen(true);
+                    onOpenSentenceSoundEffectsLibrary={handleOpenSentenceSoundEffectsLibrary}
+                    onSentenceSoundEffectsChange={handleSentenceSoundEffectsChange}
+                    onSentenceAlignSoundEffectsToSceneEndChange={
+                      handleSentenceAlignSoundEffectsToSceneEndChange
+                    }
+                    onUploadSentenceSoundEffect={handleUploadSentenceSoundEffect}
+                    isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
+                    onSaveSentenceSoundEffectsMix={handleSaveSentenceSoundEffectsMix}
+                    isSavingSentenceSfxMixBySentenceId={isSavingSentenceSfxMixBySentenceId}
+                    onSentenceReferenceImageUpload={
+                      handleSentenceReferenceImageUpload
+                    }
+                    onRemoveSentenceReferenceImage={
+                      handleRemoveSentenceReferenceImage
+                    }
+                    isGeneratingVideoBySentenceId={isGeneratingVideoBySentenceId}
+                    setIsGeneratingVideoBySentenceId={setIsGeneratingVideoBySentenceId}
+                    onDeleteSentence={handleDeleteSentence}
+                    onGenerateSentenceImage={handleGenerateSentenceImage}
+                    onGenerateSentenceReferenceImage={handleGenerateSentenceReferenceImage}
+                    onGenerateAllImages={handleGenerateAllSentenceImages}
+                    isGeneratingAllImages={isGeneratingAllImages}
+                    onGenerateBulkLookEffects={() => handleOpenBulkAiEffects('look')}
+                    isApplyingBulkLookEffects={isApplyingBulkAiEffect === 'look'}
+                    onOpenBulkLookPresetModal={() => handleOpenBulkManualEffectModal('look')}
+                    isApplyingBulkLookPreset={isApplyingManualBulkEffect === 'look'}
+                    onResetBulkLookEffects={handleResetBulkLookEffects}
+                    onGenerateBulkMotionEffects={() => handleOpenBulkAiEffects('motion')}
+                    isApplyingBulkMotionEffects={isApplyingBulkAiEffect === 'motion'}
+                    onOpenBulkMotionPresetModal={() => handleOpenBulkManualEffectModal('motion')}
+                    isApplyingBulkMotionPreset={isApplyingManualBulkEffect === 'motion'}
+                    onResetBulkMotionEffects={handleResetBulkMotionEffects}
+                    isSavingSceneSequence={isSavingSavedSequence}
+                    isApplyingSavedSequence={isApplyingSavedSequence}
+                    onOpenSaveSceneSequence={() => {
+                      setSavedSequenceSaveModalVersion((prev) => prev + 1);
+                      setIsSavedSequenceSaveModalOpen(true);
+                    }}
+                    onOpenLoadSceneSequence={() => setIsSavedSequenceLibraryOpen(true)}
+                    onSentenceTextChange={handleSentenceTextChange}
+                    onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
+                    onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
+                    onSaveSentenceImage={handleSaveSentenceImage}
+                    onSelectFromLibrary={handleSelectFromLibrary}
+                    onSelectVideoFromLibrary={handleSelectVideoFromLibrary}
+                    onSaveSentenceVideoToLibrary={handleSaveSentenceVideoToLibrary}
+                    isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryById}
+                    onAddSuspenseScene={handleAddSuspenseScene}
+                    onGenerateTestVideo={handleGenerateTestVideo}
+                    canUseCurrentTestVoiceSettings={canUseCurrentTestVoiceSettings}
+                    testVideoJobStatus={testVideoJobStatus}
+                    testVideoJobError={testVideoJobError}
+                    testVideoUrl={testVideoUrl}
+                    onCloseTestVideoModal={handleCloseTestVideoModal}
+                    scriptStyle={scriptStyle}
+                    scriptTechnique={scriptTechnique}
+                    scriptModel={scriptModel}
+                    systemPrompt={systemPrompt}
+                    apiUrl={API_URL}
+                  />
+
+                  <VoiceOverSection
+                    script={script}
+                    voiceOver={voiceOver}
+                    voicePreviewUrl={voiceOverPreviewUrl}
+                    isHydratingVoiceOver={isHydratingVoiceOver}
+                    voiceDuration={voiceDuration}
+                    voiceError={voiceError}
+                    isGeneratingVoice={isGeneratingVoice}
+                    voiceGenerationProgress={voiceGenerationProgress}
+                    isPreviewingVoice={isPreviewingVoice}
+                    isSavingVoice={isSavingVoice}
+                    savedVoiceId={savedVoiceId}
+                    voiceProvider={voiceProvider}
+                    voiceGenerationMode={voiceGenerationMode}
+                    onVoiceProviderChange={(p) => {
+                      setVoiceProvider(p);
+                    }}
+                    onVoiceGenerationModeChange={setVoiceGenerationMode}
+                    styleInstructions={
+                      voiceProvider === 'google' ? aiStudioStyleInstructions : ''
+                    }
+                    onStyleInstructionsChange={(value) => {
+                      setAiStudioStyleInstructions(value);
+                    }}
+                    voices={voices}
+                    isLoadingVoices={isLoadingVoices}
+                    voicesError={voicesError}
+                    selectedVoiceId={selectedVoiceId}
+                    onSelectVoice={handleSelectVoice}
+                    onRefreshVoices={fetchVoices}
+                    onSetFavoriteVoice={handleSetFavoriteVoice}
+                    isSettingFavoriteVoice={isSettingFavoriteVoice}
+                    onVoiceUpload={handleVoiceUpload}
+                    onGenerateVoice={handleGenerateVoice}
+                    onPreviewVoice={handlePreviewVoice}
+                    onRemoveVoice={removeVoice}
+                    onSaveVoice={handleSaveVoice}
+                    onOpenLibrary={handleOpenVoiceLibrary}
+                    onOpenVoiceEditor={
+                      String(voiceOverPreviewUrl ?? '').trim()
+                        ? () => setIsVoiceOverEditorOpen(true)
+                        : undefined
+                    }
+                    onOpenElevenLabsSettings={() => setIsElevenLabsSettingsModalOpen(true)}
+                    canManageVoiceChunks={voiceGenerationMode !== 'perSentence' && voiceOverChunks.length > 1}
+                    onOpenVoiceChunkManager={() => {
+                      setIsSentenceVoiceManagerOpen(false);
+                      setIsChunkVoiceManagerOpen(true);
+                    }}
+                    canManageSentenceVoices={sentences.some((sentence) => String(sentence.text ?? '').trim())}
+                    onOpenSentenceVoiceManager={() => {
+                      setIsChunkVoiceManagerOpen(false);
+                      setIsSentenceVoiceManagerOpen(true);
+                    }}
+                  />
+                </Accordion>
+                <RenderSettingsSection
+                  isShort={isShortsTabActive ? true : isShort}
+                  isLongForm={isLongForm}
+                  onIsShortChange={isShortsTabActive ? (() => { }) : setIsShort}
+                  disableIsShort={isLongForm || isShortsTabActive}
+                  addBackgroundSoundtrack={addBackgroundSoundtrack}
+                  onAddBackgroundSoundtrackChange={(value) => {
+                    setAddBackgroundSoundtrack(value);
+                    if (!value) {
+                      setBackgroundSoundtrackEditTargetId(null);
+                    }
                   }}
-                  onOpenLoadSceneSequence={() => setIsSavedSequenceLibraryOpen(true)}
-                  onSentenceTextChange={handleSentenceTextChange}
-                  onMergeSentenceIntoPrevious={handleMergeSentenceIntoPrevious}
-                  onMergeSentenceIntoNext={handleMergeSentenceIntoNext}
-                  onSaveSentenceImage={handleSaveSentenceImage}
-                  onSelectFromLibrary={handleSelectFromLibrary}
-                  onSelectVideoFromLibrary={handleSelectVideoFromLibrary}
-                  onSaveSentenceVideoToLibrary={handleSaveSentenceVideoToLibrary}
-                  isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryById}
-                  onAddSuspenseScene={handleAddSuspenseScene}
-                  onGenerateTestVideo={handleGenerateTestVideo}
-                  canUseCurrentTestVoiceSettings={canUseCurrentTestVoiceSettings}
-                  testVideoJobStatus={testVideoJobStatus}
-                  testVideoJobError={testVideoJobError}
-                  testVideoUrl={testVideoUrl}
-                  onCloseTestVideoModal={handleCloseTestVideoModal}
-                  scriptStyle={scriptStyle}
-                  scriptTechnique={scriptTechnique}
-                  scriptModel={scriptModel}
-                  systemPrompt={systemPrompt}
-                  apiUrl={API_URL}
+                  useLowerFps={useLowerFps}
+                  onUseLowerFpsChange={setUseLowerFps}
+                  useLowerResolution={useLowerResolution}
+                  onUseLowerResolutionChange={setUseLowerResolution}
+                  addSubtitles={addSubtitles}
+                  onAddSubtitlesChange={setAddSubtitles}
+                  enableLongFormSubscribeOverlay={effectiveEnableLongFormSubscribeOverlay}
+                  onEnableLongFormSubscribeOverlayChange={setEnableLongFormSubscribeOverlay}
                 />
 
-                <VoiceOverSection
-                  script={script}
-                  voiceOver={voiceOver}
-                  voicePreviewUrl={voiceOverPreviewUrl}
-                  isHydratingVoiceOver={isHydratingVoiceOver}
-                  voiceDuration={voiceDuration}
-                  voiceError={voiceError}
-                  isGeneratingVoice={isGeneratingVoice}
-                  voiceGenerationProgress={voiceGenerationProgress}
-                  isPreviewingVoice={isPreviewingVoice}
-                  isSavingVoice={isSavingVoice}
-                  savedVoiceId={savedVoiceId}
-                  voiceProvider={voiceProvider}
-                  voiceGenerationMode={voiceGenerationMode}
-                  onVoiceProviderChange={(p) => {
-                    setVoiceProvider(p);
-                  }}
-                  onVoiceGenerationModeChange={setVoiceGenerationMode}
-                  styleInstructions={
-                    voiceProvider === 'google' ? aiStudioStyleInstructions : ''
-                  }
-                  onStyleInstructionsChange={(value) => {
-                    setAiStudioStyleInstructions(value);
-                  }}
-                  voices={voices}
-                  isLoadingVoices={isLoadingVoices}
-                  voicesError={voicesError}
-                  selectedVoiceId={selectedVoiceId}
-                  onSelectVoice={handleSelectVoice}
-                  onRefreshVoices={fetchVoices}
-                  onSetFavoriteVoice={handleSetFavoriteVoice}
-                  isSettingFavoriteVoice={isSettingFavoriteVoice}
-                  onVoiceUpload={handleVoiceUpload}
-                  onGenerateVoice={handleGenerateVoice}
-                  onPreviewVoice={handlePreviewVoice}
-                  onRemoveVoice={removeVoice}
-                  onSaveVoice={handleSaveVoice}
-                  onOpenLibrary={handleOpenVoiceLibrary}
-                  onOpenVoiceEditor={
-                    String(voiceOverPreviewUrl ?? '').trim()
-                      ? () => setIsVoiceOverEditorOpen(true)
-                      : undefined
-                  }
-                  onOpenElevenLabsSettings={() => setIsElevenLabsSettingsModalOpen(true)}
-                  canManageVoiceChunks={voiceGenerationMode !== 'perSentence' && voiceOverChunks.length > 1}
-                  onOpenVoiceChunkManager={() => {
-                    setIsSentenceVoiceManagerOpen(false);
-                    setIsChunkVoiceManagerOpen(true);
-                  }}
-                  canManageSentenceVoices={sentences.some((sentence) => String(sentence.text ?? '').trim())}
-                  onOpenSentenceVoiceManager={() => {
-                    setIsChunkVoiceManagerOpen(false);
-                    setIsSentenceVoiceManagerOpen(true);
-                  }}
-                />
-              </Accordion>
-              <RenderSettingsSection
-                isShort={isShortsTabActive ? true : isShort}
-                isLongForm={isLongForm}
-                onIsShortChange={isShortsTabActive ? (() => { }) : setIsShort}
-                disableIsShort={isLongForm || isShortsTabActive}
-                addBackgroundSoundtrack={addBackgroundSoundtrack}
-                onAddBackgroundSoundtrackChange={(value) => {
-                  setAddBackgroundSoundtrack(value);
-                  if (!value) {
-                    setBackgroundSoundtrackEditTargetId(null);
-                  }
-                }}
-                useLowerFps={useLowerFps}
-                onUseLowerFpsChange={setUseLowerFps}
-                useLowerResolution={useLowerResolution}
-                onUseLowerResolutionChange={setUseLowerResolution}
-                addSubtitles={addSubtitles}
-                onAddSubtitlesChange={setAddSubtitles}
-                enableLongFormSubscribeOverlay={effectiveEnableLongFormSubscribeOverlay}
-                onEnableLongFormSubscribeOverlayChange={setEnableLongFormSubscribeOverlay}
-              />
+                {addBackgroundSoundtrack ? (
+                  <BackgroundSoundtrackSection
+                    isGenerating={isGenerating}
+                    isGeneratingVoice={isGeneratingVoice}
+                    videoJobStatus={videoJobStatus}
+                    voiceOver={voiceOver}
+                    voicePreviewUrl={voiceOverPreviewUrl}
+                    backgroundSoundtracks={backgroundSoundtracks}
+                    selectedBackgroundSoundtrackValue={selectedBackgroundSoundtrackValue}
+                    selectedBackgroundSoundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
+                    selectedBackgroundSoundtrackRequiresMaterialization={selectedBackgroundSoundtrackRequiresMaterialization}
+                    isMaterializingSelectedBackgroundSoundtrack={isMaterializingBackgroundSoundtrack}
+                    backgroundSoundtrackVolumePercent={backgroundSoundtrackVolumePercent}
+                    onBackgroundSoundtrackVolumePercentChange={setBackgroundSoundtrackVolumePercent}
+                    onSelectedBackgroundSoundtrackValueChange={(value: string) => {
+                      setSelectedBackgroundSoundtrackValue(value);
 
-              {addBackgroundSoundtrack ? (
-                <BackgroundSoundtrackSection
+                      if (value !== '__oneoff__') return;
+                      if (oneOffBackgroundSoundtrackUrl) return;
+                      setSelectedBackgroundSoundtrackValue('__default__');
+                    }}
+                    hasOneOffBackgroundSoundtrack={Boolean(oneOffBackgroundSoundtrackUrl)}
+                    oneOffBackgroundSoundtrackUrl={oneOffBackgroundSoundtrackUrl}
+                    onToast={showToast}
+                    onSetFavoriteBackgroundSoundtrack={handleSetFavoriteBackgroundSoundtrack}
+                    isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
+                    onSaveBackgroundSoundtrackVolume={handleSaveBackgroundSoundtrackVolume}
+                    isSavingBackgroundSoundtrackVolume={isSavingBackgroundSoundtrackVolume}
+                    onDeleteBackgroundSoundtrack={handleDeleteBackgroundSoundtrack}
+                    isDeletingBackgroundSoundtrack={isDeletingBackgroundSoundtrack}
+                    onOpenBackgroundSoundtrackEditor={handleOpenBackgroundSoundtrackEditor}
+                    onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
+                    onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
+                    isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}
+                  />
+                ) : null}
+
+                {/* Generate Button */}
+                <GenerateVideoButton
                   isGenerating={isGenerating}
-                  isGeneratingVoice={isGeneratingVoice}
                   videoJobStatus={videoJobStatus}
+                  script={script}
                   voiceOver={voiceOver}
                   voicePreviewUrl={voiceOverPreviewUrl}
-                  backgroundSoundtracks={backgroundSoundtracks}
-                  selectedBackgroundSoundtrackValue={selectedBackgroundSoundtrackValue}
-                  selectedBackgroundSoundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
-                  selectedBackgroundSoundtrackRequiresMaterialization={selectedBackgroundSoundtrackRequiresMaterialization}
-                  isMaterializingSelectedBackgroundSoundtrack={isMaterializingBackgroundSoundtrack}
-                  backgroundSoundtrackVolumePercent={backgroundSoundtrackVolumePercent}
-                  onBackgroundSoundtrackVolumePercentChange={setBackgroundSoundtrackVolumePercent}
-                  onSelectedBackgroundSoundtrackValueChange={(value: string) => {
-                    setSelectedBackgroundSoundtrackValue(value);
-
-                    if (value !== '__oneoff__') return;
-                    if (oneOffBackgroundSoundtrackUrl) return;
-                    setSelectedBackgroundSoundtrackValue('__default__');
-                  }}
-                  hasOneOffBackgroundSoundtrack={Boolean(oneOffBackgroundSoundtrackUrl)}
-                  oneOffBackgroundSoundtrackUrl={oneOffBackgroundSoundtrackUrl}
-                  onToast={showToast}
-                  onSetFavoriteBackgroundSoundtrack={handleSetFavoriteBackgroundSoundtrack}
-                  isSettingFavoriteBackgroundSoundtrack={isSettingFavoriteBackgroundSoundtrack}
-                  onSaveBackgroundSoundtrackVolume={handleSaveBackgroundSoundtrackVolume}
-                  isSavingBackgroundSoundtrackVolume={isSavingBackgroundSoundtrackVolume}
-                  onDeleteBackgroundSoundtrack={handleDeleteBackgroundSoundtrack}
-                  isDeletingBackgroundSoundtrack={isDeletingBackgroundSoundtrack}
-                  onOpenBackgroundSoundtrackEditor={handleOpenBackgroundSoundtrackEditor}
-                  onUploadBackgroundSoundtrackUseOnce={handleUploadBackgroundSoundtrackUseOnce}
-                  onUploadBackgroundSoundtrackAddToLibrary={handleUploadBackgroundSoundtrackAddToLibrary}
-                  isUploadingBackgroundSoundtrack={isUploadingBackgroundSoundtrack}
+                  onGenerate={handleGenerate}
+                  onUploadVideo={handleUploadFinalVideo}
+                  isUploadingVideo={isUploadingVideo}
+                  user={user}
                 />
-              ) : null}
-
-              {/* Generate Button */}
-              <GenerateVideoButton
-                isGenerating={isGenerating}
-                videoJobStatus={videoJobStatus}
-                script={script}
-                voiceOver={voiceOver}
-                voicePreviewUrl={voiceOverPreviewUrl}
-                onGenerate={handleGenerate}
-                onUploadVideo={handleUploadFinalVideo}
-                isUploadingVideo={isUploadingVideo}
-              />
-              {addBackgroundSoundtrack && backgroundSoundtrackEditTarget ? (
-                <SoundEffectEditModal
-                  isOpen
-                  title="Edit background soundtrack"
-                  audioUrl={backgroundSoundtrackEditTarget.url}
-                  companionAudioUrl={voiceOverPreviewUrl}
-                  companionAudioLabel="voice-over"
-                  companionAudioDefaultEnabled={Boolean(voiceOverPreviewUrl)}
-                  initialName={backgroundSoundtrackEditTarget.title}
-                  initialVolumePercent={backgroundSoundtrackEditTarget.volume_percent ?? 100}
-                  initialAudioSettings={backgroundSoundtrackEditTarget.audio_settings}
-                  isApplying={isApplyingBackgroundSoundtrackEdit}
-                  isSaving={isSavingBackgroundSoundtrackEdit}
-                  isSavingAsPreset={isSavingBackgroundSoundtrackPreset}
-                  onClose={() => {
-                    if (isApplyingBackgroundSoundtrackEdit || isSavingBackgroundSoundtrackEdit || isSavingBackgroundSoundtrackPreset) {
-                      return;
-                    }
-                    setBackgroundSoundtrackEditTargetId(null);
-                  }}
-                  onApply={applyBackgroundSoundtrackEditsLocally}
-                  onSave={saveBackgroundSoundtrackEdits}
-                  onSaveAsPreset={saveBackgroundSoundtrackAsPreset}
-                />
-              ) : null}
-              {isVoiceOverEditorOpen && voiceOverPreviewUrl ? (
-                <SoundEffectEditModal
-                  isOpen
-                  title="Edit voice-over"
-                  audioUrl={voiceOverPreviewUrl}
-                  companionAudioUrl={resolveBackgroundSoundtrackPreviewUrl()}
-                  companionAudioLabel="soundtrack"
-                  companionAudioDefaultEnabled={Boolean(resolveBackgroundSoundtrackPreviewUrl())}
-                  companionPreviewIcon="music"
-                  initialName={stripFileExtension(voiceOver?.name ?? 'voice-over')}
-                  initialVolumePercent={100}
-                  isApplying={isApplyingVoiceOverEdit}
-                  isSaving={isSavingVoiceOverEdit}
-                  showSaveAsPreset={false}
-                  onClose={() => {
-                    if (isApplyingVoiceOverEdit || isSavingVoiceOverEdit) {
-                      return;
-                    }
-                    setIsVoiceOverEditorOpen(false);
-                  }}
-                  onApply={applyVoiceOverEditsLocally}
-                  onSave={saveVoiceOverEditsToDraft}
-                />
-              ) : null}
-              {activeSentenceVoiceEditorTarget ? (
-                <SoundEffectEditModal
-                  isOpen
-                  title={`Edit sentence ${activeSentenceVoiceEditorTarget.sentenceIndex + 1} voice`}
-                  audioUrl={activeSentenceVoiceEditorTarget.sentence.voiceOverUrl}
-                  initialName={`sentence-${activeSentenceVoiceEditorTarget.sentenceIndex + 1}-voice-over`}
-                  initialVolumePercent={100}
-                  isApplying={isApplyingSentenceVoiceEdit}
-                  showSaveButton={false}
-                  showSaveAsPreset={false}
-                  showEditPresetsSection={false}
-                  actionError={sentenceVoiceEditActionError}
-                  onClose={() => {
-                    if (isApplyingSentenceVoiceEdit) {
-                      return;
-                    }
-                    setSentenceVoiceEditActionError(null);
-                    setActiveSentenceVoiceEditorSentenceId(null);
-                  }}
-                  onApply={applySentenceVoiceEditLocally}
-                  onSave={async () => undefined}
-                />
-              ) : null}
-              {activeChunkVoiceEditorTarget ? (
-                <SoundEffectEditModal
-                  isOpen
-                  title={`Edit chunk ${activeChunkVoiceEditorTarget.chunk.index + 1} voice`}
-                  audioUrl={activeChunkVoiceEditorTarget.chunk.url}
-                  initialName={`chunk-${activeChunkVoiceEditorTarget.chunk.index + 1}-voice-over`}
-                  initialVolumePercent={100}
-                  isApplying={isApplyingChunkVoiceEdit}
-                  showSaveButton={false}
-                  showSaveAsPreset={false}
-                  showEditPresetsSection={false}
-                  actionError={chunkVoiceEditActionError}
-                  onClose={() => {
-                    if (isApplyingChunkVoiceEdit) {
-                      return;
-                    }
-                    setChunkVoiceEditActionError(null);
-                    setActiveChunkVoiceEditorId(null);
-                  }}
-                  onApply={applyChunkVoiceEditLocally}
-                  onSave={async () => undefined}
-                />
-              ) : null}
-              {isElevenLabsSettingsModalOpen ? (
-                <ElevenLabsVoiceSettingsModal
-                  voiceName={selectedVoiceOption?.name ?? null}
-                  initialSettings={elevenLabsGlobalSettings}
-                  onClose={() => setIsElevenLabsSettingsModalOpen(false)}
-                  onSave={(settings) => {
-                    setElevenLabsGlobalSettings(settings);
-                    setIsElevenLabsSettingsModalOpen(false);
-                    showToast('ElevenLabs defaults updated.', 'success');
-                  }}
-                />
-              ) : null}
-              <SentenceVoiceOverManagerModal
-                isOpen={isSentenceVoiceManagerOpen}
-                title="Sentence Voice Overs"
-                description="Regenerate a single sentence, preview it, then replace only when it sounds right."
-                segmentNoun="sentence"
-                segments={sentenceVoiceManagerSegments}
-                voiceProvider={voiceProvider}
-                fullVoiceOverPreviewUrl={voiceOverPreviewUrl}
-                soundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
-                globalElevenLabsSettings={elevenLabsGlobalSettings}
-                isGeneratingStyleById={isGeneratingSentenceVoiceStyleById}
-                isRegeneratingVoiceById={isRegeneratingSentenceVoiceById}
-                isApplyingCandidateById={isApplyingSentenceVoiceCandidateById}
-                voiceCandidateById={Object.fromEntries(
-                  Object.entries(sentenceVoiceCandidateById).map(([key, value]) => [
-                    key,
-                    value
-                      ? {
-                          previewUrl: value.previewUrl,
-                          durationSeconds: value.durationSeconds,
-                          provider: value.provider,
-                          voiceName: value.voiceName,
-                        }
-                      : null,
-                  ]),
-                )}
-                onClose={() => setIsSentenceVoiceManagerOpen(false)}
-                onOpenFullVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
-                onOpenSegmentVoiceEditor={(sentenceId) => {
-                  if (sentenceVoiceCandidateById[sentenceId]) {
-                    showAlert(
-                      'Resolve the pending preview for this sentence before editing its committed voice.',
-                      { type: 'warning' },
-                    );
-                    return;
-                  }
-
-                  const sentence = sentences.find((item) => item.id === sentenceId);
-                  if (!sentence || !hasSentenceVoiceOver(sentence)) {
-                    showAlert('No committed sentence voice is available to edit.', {
-                      type: 'warning',
-                    });
-                    return;
-                  }
-
-                  setSentenceVoiceEditActionError(null);
-                  setActiveSentenceVoiceEditorSentenceId(sentenceId);
-                }}
-                onSegmentStyleChange={(sentenceId, value) => {
-                  patchSentenceById(sentenceId, {
-                    voiceOverStyleInstructions: value,
-                  });
-                }}
-                onSegmentElevenLabsSettingsChange={(sentenceId, settings) => {
-                  patchSentenceById(sentenceId, {
-                    elevenLabsSettings: settings,
-                  });
-                }}
-                onGenerateSegmentStyle={handleGenerateSentenceVoiceStyle}
-                onRegenerateSegmentVoice={handleRegenerateSentenceVoice}
-                onApplyCandidate={handleApplySentenceVoiceCandidate}
-                onCancelCandidate={handleCancelSentenceVoiceCandidate}
-              />
-              <SentenceVoiceOverManagerModal
-                isOpen={isChunkVoiceManagerOpen}
-                title="Long-Form Voice Chunks"
-                description="Treat each generated chunk like a sentence voice: regenerate it, preview it, replace it, or edit only that chunk."
-                segmentNoun="chunk"
-                segments={chunkVoiceManagerSegments}
-                voiceProvider={voiceProvider}
-                fullVoiceOverPreviewUrl={voiceOverPreviewUrl}
-                soundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
-                globalElevenLabsSettings={elevenLabsGlobalSettings}
-                isGeneratingStyleById={isGeneratingChunkVoiceStyleById}
-                isRegeneratingVoiceById={isRegeneratingChunkVoiceById}
-                isApplyingCandidateById={isApplyingChunkVoiceCandidateById}
-                voiceCandidateById={Object.fromEntries(
-                  Object.entries(chunkVoiceCandidateById).map(([key, value]) => [
-                    key,
-                    value
-                      ? {
-                          previewUrl: value.previewUrl,
-                          durationSeconds: value.durationSeconds,
-                          provider: value.provider,
-                          voiceName: value.voiceName,
-                        }
-                      : null,
-                  ]),
-                )}
-                onClose={() => setIsChunkVoiceManagerOpen(false)}
-                onOpenFullVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
-                onOpenSegmentVoiceEditor={(chunkId) => {
-                  if (chunkVoiceCandidateById[chunkId]) {
-                    showAlert(
-                      'Resolve the pending preview for this chunk before editing its committed voice.',
-                      { type: 'warning' },
-                    );
-                    return;
-                  }
-
-                  const chunk = voiceOverChunks.find(
-                    (item) => String(item.index) === chunkId,
-                  );
-                  if (!chunk || !hasVoiceOverChunkAudio(chunk)) {
-                    showAlert('No committed chunk voice is available to edit.', {
-                      type: 'warning',
-                    });
-                    return;
-                  }
-
-                  setChunkVoiceEditActionError(null);
-                  setActiveChunkVoiceEditorId(chunkId);
-                }}
-                onSegmentStyleChange={(chunkId, value) => {
-                  setVoiceOverChunks((prev) =>
-                    prev.map((chunk) =>
-                      String(chunk.index) === chunkId
-                        ? { ...chunk, styleInstructions: value }
-                        : chunk,
-                    ),
-                  );
-                }}
-                onSegmentElevenLabsSettingsChange={(chunkId, settings) => {
-                  setVoiceOverChunks((prev) =>
-                    prev.map((chunk) =>
-                      String(chunk.index) === chunkId
+                {addBackgroundSoundtrack && backgroundSoundtrackEditTarget ? (
+                  <SoundEffectEditModal
+                    isOpen
+                    title="Edit background soundtrack"
+                    audioUrl={backgroundSoundtrackEditTarget.url}
+                    companionAudioUrl={voiceOverPreviewUrl}
+                    companionAudioLabel="voice-over"
+                    companionAudioDefaultEnabled={Boolean(voiceOverPreviewUrl)}
+                    initialName={backgroundSoundtrackEditTarget.title}
+                    initialVolumePercent={backgroundSoundtrackEditTarget.volume_percent ?? 100}
+                    initialAudioSettings={backgroundSoundtrackEditTarget.audio_settings}
+                    isApplying={isApplyingBackgroundSoundtrackEdit}
+                    isSaving={isSavingBackgroundSoundtrackEdit}
+                    isSavingAsPreset={isSavingBackgroundSoundtrackPreset}
+                    onClose={() => {
+                      if (isApplyingBackgroundSoundtrackEdit || isSavingBackgroundSoundtrackEdit || isSavingBackgroundSoundtrackPreset) {
+                        return;
+                      }
+                      setBackgroundSoundtrackEditTargetId(null);
+                    }}
+                    onApply={applyBackgroundSoundtrackEditsLocally}
+                    onSave={saveBackgroundSoundtrackEdits}
+                    onSaveAsPreset={saveBackgroundSoundtrackAsPreset}
+                  />
+                ) : null}
+                {isVoiceOverEditorOpen && voiceOverPreviewUrl ? (
+                  <SoundEffectEditModal
+                    isOpen
+                    title="Edit voice-over"
+                    audioUrl={voiceOverPreviewUrl}
+                    companionAudioUrl={resolveBackgroundSoundtrackPreviewUrl()}
+                    companionAudioLabel="soundtrack"
+                    companionAudioDefaultEnabled={Boolean(resolveBackgroundSoundtrackPreviewUrl())}
+                    companionPreviewIcon="music"
+                    initialName={stripFileExtension(voiceOver?.name ?? 'voice-over')}
+                    initialVolumePercent={100}
+                    isApplying={isApplyingVoiceOverEdit}
+                    isSaving={isSavingVoiceOverEdit}
+                    showSaveAsPreset={false}
+                    onClose={() => {
+                      if (isApplyingVoiceOverEdit || isSavingVoiceOverEdit) {
+                        return;
+                      }
+                      setIsVoiceOverEditorOpen(false);
+                    }}
+                    onApply={applyVoiceOverEditsLocally}
+                    onSave={saveVoiceOverEditsToDraft}
+                  />
+                ) : null}
+                {activeSentenceVoiceEditorTarget ? (
+                  <SoundEffectEditModal
+                    isOpen
+                    title={`Edit sentence ${activeSentenceVoiceEditorTarget.sentenceIndex + 1} voice`}
+                    audioUrl={activeSentenceVoiceEditorTarget.sentence.voiceOverUrl}
+                    initialName={`sentence-${activeSentenceVoiceEditorTarget.sentenceIndex + 1}-voice-over`}
+                    initialVolumePercent={100}
+                    isApplying={isApplyingSentenceVoiceEdit}
+                    showSaveButton={false}
+                    showSaveAsPreset={false}
+                    showEditPresetsSection={false}
+                    actionError={sentenceVoiceEditActionError}
+                    onClose={() => {
+                      if (isApplyingSentenceVoiceEdit) {
+                        return;
+                      }
+                      setSentenceVoiceEditActionError(null);
+                      setActiveSentenceVoiceEditorSentenceId(null);
+                    }}
+                    onApply={applySentenceVoiceEditLocally}
+                    onSave={async () => undefined}
+                  />
+                ) : null}
+                {activeChunkVoiceEditorTarget ? (
+                  <SoundEffectEditModal
+                    isOpen
+                    title={`Edit chunk ${activeChunkVoiceEditorTarget.chunk.index + 1} voice`}
+                    audioUrl={activeChunkVoiceEditorTarget.chunk.url}
+                    initialName={`chunk-${activeChunkVoiceEditorTarget.chunk.index + 1}-voice-over`}
+                    initialVolumePercent={100}
+                    isApplying={isApplyingChunkVoiceEdit}
+                    showSaveButton={false}
+                    showSaveAsPreset={false}
+                    showEditPresetsSection={false}
+                    actionError={chunkVoiceEditActionError}
+                    onClose={() => {
+                      if (isApplyingChunkVoiceEdit) {
+                        return;
+                      }
+                      setChunkVoiceEditActionError(null);
+                      setActiveChunkVoiceEditorId(null);
+                    }}
+                    onApply={applyChunkVoiceEditLocally}
+                    onSave={async () => undefined}
+                  />
+                ) : null}
+                {isElevenLabsSettingsModalOpen ? (
+                  <ElevenLabsVoiceSettingsModal
+                    voiceName={selectedVoiceOption?.name ?? null}
+                    initialSettings={elevenLabsGlobalSettings}
+                    onClose={() => setIsElevenLabsSettingsModalOpen(false)}
+                    onSave={(settings) => {
+                      setElevenLabsGlobalSettings(settings);
+                      setIsElevenLabsSettingsModalOpen(false);
+                      showToast('ElevenLabs defaults updated.', 'success');
+                    }}
+                  />
+                ) : null}
+                <SentenceVoiceOverManagerModal
+                  isOpen={isSentenceVoiceManagerOpen}
+                  title="Sentence Voice Overs"
+                  description="Regenerate a single sentence, preview it, then replace only when it sounds right."
+                  segmentNoun="sentence"
+                  segments={sentenceVoiceManagerSegments}
+                  voiceProvider={voiceProvider}
+                  fullVoiceOverPreviewUrl={voiceOverPreviewUrl}
+                  soundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
+                  globalElevenLabsSettings={elevenLabsGlobalSettings}
+                  isGeneratingStyleById={isGeneratingSentenceVoiceStyleById}
+                  isRegeneratingVoiceById={isRegeneratingSentenceVoiceById}
+                  isApplyingCandidateById={isApplyingSentenceVoiceCandidateById}
+                  voiceCandidateById={Object.fromEntries(
+                    Object.entries(sentenceVoiceCandidateById).map(([key, value]) => [
+                      key,
+                      value
                         ? {
+                          previewUrl: value.previewUrl,
+                          durationSeconds: value.durationSeconds,
+                          provider: value.provider,
+                          voiceName: value.voiceName,
+                        }
+                        : null,
+                    ]),
+                  )}
+                  onClose={() => setIsSentenceVoiceManagerOpen(false)}
+                  onOpenFullVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
+                  onOpenSegmentVoiceEditor={(sentenceId) => {
+                    if (sentenceVoiceCandidateById[sentenceId]) {
+                      showAlert(
+                        'Resolve the pending preview for this sentence before editing its committed voice.',
+                        { type: 'warning' },
+                      );
+                      return;
+                    }
+
+                    const sentence = sentences.find((item) => item.id === sentenceId);
+                    if (!sentence || !hasSentenceVoiceOver(sentence)) {
+                      showAlert('No committed sentence voice is available to edit.', {
+                        type: 'warning',
+                      });
+                      return;
+                    }
+
+                    setSentenceVoiceEditActionError(null);
+                    setActiveSentenceVoiceEditorSentenceId(sentenceId);
+                  }}
+                  onSegmentStyleChange={(sentenceId, value) => {
+                    patchSentenceById(sentenceId, {
+                      voiceOverStyleInstructions: value,
+                    });
+                  }}
+                  onSegmentElevenLabsSettingsChange={(sentenceId, settings) => {
+                    patchSentenceById(sentenceId, {
+                      elevenLabsSettings: settings,
+                    });
+                  }}
+                  onGenerateSegmentStyle={handleGenerateSentenceVoiceStyle}
+                  onRegenerateSegmentVoice={handleRegenerateSentenceVoice}
+                  onApplyCandidate={handleApplySentenceVoiceCandidate}
+                  onCancelCandidate={handleCancelSentenceVoiceCandidate}
+                />
+                <SentenceVoiceOverManagerModal
+                  isOpen={isChunkVoiceManagerOpen}
+                  title="Long-Form Voice Chunks"
+                  description="Treat each generated chunk like a sentence voice: regenerate it, preview it, replace it, or edit only that chunk."
+                  segmentNoun="chunk"
+                  segments={chunkVoiceManagerSegments}
+                  voiceProvider={voiceProvider}
+                  fullVoiceOverPreviewUrl={voiceOverPreviewUrl}
+                  soundtrackPreviewUrl={resolveBackgroundSoundtrackPreviewUrl()}
+                  globalElevenLabsSettings={elevenLabsGlobalSettings}
+                  isGeneratingStyleById={isGeneratingChunkVoiceStyleById}
+                  isRegeneratingVoiceById={isRegeneratingChunkVoiceById}
+                  isApplyingCandidateById={isApplyingChunkVoiceCandidateById}
+                  voiceCandidateById={Object.fromEntries(
+                    Object.entries(chunkVoiceCandidateById).map(([key, value]) => [
+                      key,
+                      value
+                        ? {
+                          previewUrl: value.previewUrl,
+                          durationSeconds: value.durationSeconds,
+                          provider: value.provider,
+                          voiceName: value.voiceName,
+                        }
+                        : null,
+                    ]),
+                  )}
+                  onClose={() => setIsChunkVoiceManagerOpen(false)}
+                  onOpenFullVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
+                  onOpenSegmentVoiceEditor={(chunkId) => {
+                    if (chunkVoiceCandidateById[chunkId]) {
+                      showAlert(
+                        'Resolve the pending preview for this chunk before editing its committed voice.',
+                        { type: 'warning' },
+                      );
+                      return;
+                    }
+
+                    const chunk = voiceOverChunks.find(
+                      (item) => String(item.index) === chunkId,
+                    );
+                    if (!chunk || !hasVoiceOverChunkAudio(chunk)) {
+                      showAlert('No committed chunk voice is available to edit.', {
+                        type: 'warning',
+                      });
+                      return;
+                    }
+
+                    setChunkVoiceEditActionError(null);
+                    setActiveChunkVoiceEditorId(chunkId);
+                  }}
+                  onSegmentStyleChange={(chunkId, value) => {
+                    setVoiceOverChunks((prev) =>
+                      prev.map((chunk) =>
+                        String(chunk.index) === chunkId
+                          ? { ...chunk, styleInstructions: value }
+                          : chunk,
+                      ),
+                    );
+                  }}
+                  onSegmentElevenLabsSettingsChange={(chunkId, settings) => {
+                    setVoiceOverChunks((prev) =>
+                      prev.map((chunk) =>
+                        String(chunk.index) === chunkId
+                          ? {
                             ...chunk,
                             elevenLabsSettings: normalizeOptionalElevenLabsVoiceSettings(
                               settings,
                             ),
                           }
-                        : chunk,
-                    ),
-                  );
-                }}
-                onGenerateSegmentStyle={handleGenerateChunkVoiceStyle}
-                onRegenerateSegmentVoice={handleRegenerateChunkVoice}
-                onApplyCandidate={handleApplyChunkVoiceCandidate}
-                onCancelCandidate={handleCancelChunkVoiceCandidate}
-              />
-            </div>
+                          : chunk,
+                      ),
+                    );
+                  }}
+                  onGenerateSegmentStyle={handleGenerateChunkVoiceStyle}
+                  onRegenerateSegmentVoice={handleRegenerateChunkVoice}
+                  onApplyCandidate={handleApplyChunkVoiceCandidate}
+                  onCancelCandidate={handleCancelChunkVoiceCandidate}
+                />
+              </div>
 
-            {/* Video job status & preview */}
-            <div ref={videoSectionRef}>
-              <VideoJobSection
-                videoJobId={videoJobId}
-                videoJobStatus={videoJobStatus}
-                videoJobError={videoJobError}
-                videoUrl={videoUrl}
-                isShortVideo={effectiveIsShort}
-                scriptId={activeScriptId}
-                scriptTextForUpload={sentences
-                  .map((s) => String(s?.text ?? '').trim())
-                  .filter(Boolean)
-                  .join(' ')
-                  .trim()}
-                scriptCharacters={scriptCharacters}
-                onRetry={handleGenerate}
-              />
-            </div>
+              {/* Video job status & preview */}
+              <div ref={videoSectionRef}>
+                <VideoJobSection
+                  videoJobId={videoJobId}
+                  videoJobStatus={videoJobStatus}
+                  videoJobError={videoJobError}
+                  videoUrl={videoUrl}
+                  isShortVideo={effectiveIsShort}
+                  scriptId={activeScriptId}
+                  scriptTextForUpload={sentences
+                    .map((s) => String(s?.text ?? '').trim())
+                    .filter(Boolean)
+                    .join(' ')
+                    .trim()}
+                  scriptCharacters={scriptCharacters}
+                  onRetry={handleGenerate}
+                />
+              </div>
 
-            {/* Debug: Sync ElevenLabs voices into backend DB */}
-            {/* <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-700">
+              {/* Debug: Sync ElevenLabs voices into backend DB */}
+              {/* <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-700">
               <div className="flex items-center justify-between mb-2">
                 <p className="font-medium">Debug: Sync ElevenLabs Voices</p>
                 <button
@@ -13030,7 +13066,7 @@ export function GeneratePageInner() {
                 <p className="text-xs text-gray-600">{syncVoicesResult}</p>
               )}
             </div> */}
-          </div>
+            </div>
           </div>
         </div>
       </div>
@@ -13144,7 +13180,7 @@ export function GeneratePageInner() {
           setIsTranslateModalOpen(false);
         }}
         targetLanguage={translateTargetLanguage}
-        onTargetLanguageChange={setTranslateTargetLanguage}
+        onTargetLanguageChange={handleTranslateTargetLanguageChange}
         method={translateMethod}
         onMethodChange={setTranslateMethod}
         llmModel={scriptModel}
@@ -13272,8 +13308,8 @@ export function GeneratePageInner() {
         confirmText="Apply to all eligible images"
         cancelText={
           bulkAiEffectsConfirm &&
-          bulkAiEffectsConfirm.existingCount > 0 &&
-          bulkAiEffectsConfirm.uneditedIndices.length > 0
+            bulkAiEffectsConfirm.existingCount > 0 &&
+            bulkAiEffectsConfirm.uneditedIndices.length > 0
             ? bulkAiEffectsConfirm?.kind === 'look'
               ? 'Apply only to images without custom look'
               : 'Apply only to images without custom motion'

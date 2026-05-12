@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { X, Loader2, Languages } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,13 @@ import {
 export type TranslateMethod = 'google' | 'llm';
 
 export type TranslateLoadingAction = 'only' | 'save';
+
+const EGYPTIAN_ARABIC_LANGUAGE_CODE = 'ar-eg';
+
+const isLlmOnlyTranslateLanguage = (language: string) => {
+  const normalized = String(language ?? '').trim().toLowerCase();
+  return normalized === EGYPTIAN_ARABIC_LANGUAGE_CODE || normalized === 'arz';
+};
 
 type TranslateScriptModalProps = {
   isOpen: boolean;
@@ -52,6 +59,7 @@ export function TranslateScriptModal({
     () => [
       { code: 'en', label: 'English' },
       { code: 'ar', label: 'Arabic' },
+      { code: EGYPTIAN_ARABIC_LANGUAGE_CODE, label: 'Egyptian Arabic' },
       { code: 'es', label: 'Spanish' },
       { code: 'fr', label: 'French' },
       { code: 'de', label: 'German' },
@@ -69,11 +77,26 @@ export function TranslateScriptModal({
     [],
   );
 
+  const isLlmOnlyLanguage = isLlmOnlyTranslateLanguage(targetLanguage);
+  const resolvedMethod = isLlmOnlyLanguage ? 'llm' : method;
+
+  useEffect(() => {
+    if (isLlmOnlyLanguage && method !== 'llm') {
+      onMethodChange('llm');
+    }
+  }, [isLlmOnlyLanguage, method, onMethodChange]);
+
   if (!isOpen) return null;
 
   const anyLoading = Boolean(isLoading || loadingAction);
   const translateOnlyLoading = loadingAction === 'only' || (isLoading && !loadingAction);
   const translateSaveLoading = loadingAction === 'save' || (isLoading && !loadingAction);
+  const handleTargetLanguageChange = (value: string) => {
+    onTargetLanguageChange(value);
+    if (isLlmOnlyTranslateLanguage(value) && method !== 'llm') {
+      onMethodChange('llm');
+    }
+  };
 
   return (
     <div
@@ -112,7 +135,7 @@ export function TranslateScriptModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-gray-600">Target Language</Label>
-              <Select value={targetLanguage} onValueChange={onTargetLanguageChange}>
+              <Select value={targetLanguage} onValueChange={handleTargetLanguageChange}>
                 <SelectTrigger className="w-full bg-white border-gray-300">
                   <SelectValue placeholder="Choose language" />
                 </SelectTrigger>
@@ -128,17 +151,22 @@ export function TranslateScriptModal({
 
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-gray-600">Method</Label>
-              <Select value={method} onValueChange={(v) => onMethodChange(v as TranslateMethod)}>
+              <Select value={resolvedMethod} onValueChange={(v) => onMethodChange(v as TranslateMethod)}>
                 <SelectTrigger className="w-full bg-white border-gray-300">
                   <SelectValue placeholder="Choose method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="google">Google Translate</SelectItem>
+                  <SelectItem value="google" disabled={isLlmOnlyLanguage}>Google Translate</SelectItem>
                   <SelectItem value="llm">Selected LLM Model</SelectItem>
                 </SelectContent>
               </Select>
-              {method === 'llm' ? (
+              {resolvedMethod === 'llm' ? (
                 <p className="text-xs text-gray-500">Model: {llmModel}</p>
+              ) : null}
+              {isLlmOnlyLanguage ? (
+                <p className="text-xs text-amber-600">
+                  Egyptian Arabic is available only with the selected LLM model.
+                </p>
               ) : null}
             </div>
           </div>
@@ -160,7 +188,7 @@ export function TranslateScriptModal({
             disabled={anyLoading}
             className="gap-2 bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
           >
-            {translateOnlyLoading ? <Loader2 className="h-4 w-4 animate-spin transition-none" /> : null}
+            {translateOnlyLoading ? <Loader2 className="h-4 w-4 animate-spin transition-none" /> : <Languages className="h-4 w-4" />}
             Translate (no save)
           </Button>
 
@@ -170,7 +198,7 @@ export function TranslateScriptModal({
             disabled={anyLoading}
             className="gap-2 bg-linear-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black text-white transition-none"
           >
-            {translateSaveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {translateSaveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
             Translate + Save draft
           </Button>
         </div>

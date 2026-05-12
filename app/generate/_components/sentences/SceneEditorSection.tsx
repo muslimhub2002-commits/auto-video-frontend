@@ -1361,7 +1361,7 @@ export function SceneEditorSection({
               <span className="text-sm font-semibold">Add Suspense Scene</span>
             </Button>
 
-            <Button
+            {/* <Button
               type="button"
               size="sm"
               variant="outline"
@@ -1372,7 +1372,7 @@ export function SceneEditorSection({
             >
               <Clapperboard className="h-4 w-4" />
               <span className="text-sm font-semibold">Generate Test Video</span>
-            </Button>
+            </Button> */}
 
             <Button
               type="button"

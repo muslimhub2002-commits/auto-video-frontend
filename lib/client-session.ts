@@ -46,6 +46,14 @@ export async function getSessionUser(forceRefresh = false) {
   return session?.user ?? null;
 }
 
+function resolveClientCallbackUrl(callbackUrl: string) {
+  if (!canUseBrowserSession()) {
+    return callbackUrl;
+  }
+
+  return new URL(callbackUrl, window.location.origin).toString();
+}
+
 export async function signOutClient(callbackUrl = '/login') {
   clearClientSessionCache();
 
@@ -53,11 +61,12 @@ export async function signOutClient(callbackUrl = '/login') {
     return;
   }
 
+  const resolvedCallbackUrl = resolveClientCallbackUrl(callbackUrl);
   const { signOut } = await import('next-auth/react');
   const result = await signOut({
     redirect: false,
-    callbackUrl,
+    callbackUrl: resolvedCallbackUrl,
   });
 
-  window.location.href = result?.url || callbackUrl;
+  window.location.href = result?.url || resolvedCallbackUrl;
 }

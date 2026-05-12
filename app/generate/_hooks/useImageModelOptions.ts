@@ -26,9 +26,9 @@ export type ImageProviderOption = {
 const PROVIDER_OPTIONS: ImageProviderOption[] = [
   { value: 'leonardo', label: 'Leonardo' },
   { value: 'openai', label: 'OpenAI' },
-  { value: 'grok', label: 'Grok' },
+  // { value: 'grok', label: 'Grok' },
   { value: 'gemini', label: 'Gemini' },
-  { value: 'modelslab', label: 'ModelsLab' },
+  // { value: 'modelslab', label: 'ModelsLab' },
 ];
 
 const FALLBACK_LEONARDO_OPTION: ImageModelOption = {

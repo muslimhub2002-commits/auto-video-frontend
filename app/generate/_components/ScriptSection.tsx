@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/accordion';
 import { Loader2, Sparkles, FileText, Lightbulb, RefreshCw, X, Save } from 'lucide-react';
 import { LlmModelSelect } from './LlmModelSelect';
+import { User } from '@/lib/auth';
 
 type ScriptIdeaOption = {
   id: string;
@@ -25,6 +26,7 @@ type ScriptIdeaOption = {
 };
 
 interface ScriptSectionProps {
+  user: User | null;
   script: string;
   onScriptChange: (value: string) => void;
   scriptLanguage: string;
@@ -79,6 +81,7 @@ export function ScriptSection(props: ScriptSectionProps) {
   const DEFAULT_SCRIPT_TECHNIQUE = 'The Dance (Context, Conflict)';
 
   const {
+    user,
     script,
     onScriptChange,
     scriptLanguage,
@@ -132,6 +135,7 @@ export function ScriptSection(props: ScriptSectionProps) {
     () => [
       { code: 'en', label: 'English' },
       { code: 'ar', label: 'Arabic' },
+      { code: 'ar-eg', label: 'Egyptian Arabic' },
       { code: 'es', label: 'Spanish' },
       { code: 'fr', label: 'French' },
       { code: 'de', label: 'German' },
@@ -512,13 +516,13 @@ export function ScriptSection(props: ScriptSectionProps) {
               </Select>
 
               {/* Custom Subject Content */}
-              {scriptSubject === 'religious (Islam)' && subjectContentMode === 'custom' ? (
+              {subjectContentMode === 'custom' || scriptSubject !== 'religious (Islam)' ? (
                 <div className="md:col-span-3">
                   <Label
                     htmlFor="customSubjectContent"
                     className="text-xs font-semibold text-gray-600"
                   >
-                    Custom Subject Content
+                    Subject Content
                   </Label>
                   <Textarea
                     id="customSubjectContent"
@@ -710,18 +714,16 @@ export function ScriptSection(props: ScriptSectionProps) {
                     return (
                       <div
                         key={idea.id}
-                        className={`rounded-2xl border p-4 transition-all ${
-                          isSelected
-                            ? 'border-amber-400 bg-white shadow-md shadow-amber-200/60'
-                            : 'border-amber-100 bg-white/90 shadow-sm'
-                        }`}
+                        className={`rounded-2xl border p-4 transition-all ${isSelected
+                          ? 'border-amber-400 bg-white shadow-md shadow-amber-200/60'
+                          : 'border-amber-100 bg-white/90 shadow-sm'
+                          }`}
                       >
                         <div className="flex items-start gap-3">
-                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${
-                            isSelected
-                              ? 'bg-linear-to-br from-amber-500 to-orange-600 text-white'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}>
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${isSelected
+                            ? 'bg-linear-to-br from-amber-500 to-orange-600 text-white'
+                            : 'bg-amber-100 text-amber-800'
+                            }`}>
                             {index + 1}
                           </div>
                           <div className="min-w-0 flex-1">

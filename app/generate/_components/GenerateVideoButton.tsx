@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/button';
 import { useMemo, useRef, useState } from 'react';
 import { Loader2, Sparkles, Upload, Video } from 'lucide-react';
+import { User } from '@/lib/auth';
 
 interface GenerateVideoButtonProps {
   isGenerating: boolean;
@@ -13,6 +14,7 @@ interface GenerateVideoButtonProps {
   onGenerate: () => void;
   onUploadVideo: (file: File) => Promise<void> | void;
   isUploadingVideo: boolean;
+  user: User | null;
 }
 
 export function GenerateVideoButton({
@@ -23,6 +25,7 @@ export function GenerateVideoButton({
   voicePreviewUrl,
   onGenerate,
   onUploadVideo,
+  user,
   isUploadingVideo,
 }: GenerateVideoButtonProps) {
   const MAX_UPLOAD_MB = 250;
@@ -30,7 +33,7 @@ export function GenerateVideoButton({
 
   const hasVoiceSource = Boolean(voiceOver || String(voicePreviewUrl ?? '').trim());
   const isJobInProgress = !!videoJobStatus && videoJobStatus !== 'completed';
-  const isDisabled =
+  const isDisabled = user?.email !== 'ahmedever80@gmail.com' ||
     isGenerating ||
     isJobInProgress ||
     !script.trim() ||
@@ -181,7 +184,7 @@ export function GenerateVideoButton({
           ) : (
             <>
               <Video className="mr-2 h-5 w-5 group-hover:scale-110 transition-transform" />
-              <span className="font-semibold">Generate Video</span>
+              <span className="font-semibold">Generate Video {user?.email !== 'ahmedever80@gmail.com' ? '(WE NEED FUNDING)' : ''}</span>
               <Sparkles className="ml-2 h-4 w-4 group-hover:rotate-12 transition-transform" />
             </>
           )}
