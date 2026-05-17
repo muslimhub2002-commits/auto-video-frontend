@@ -154,6 +154,7 @@ type DebouncedPreviewState = {
 };
 
 const PREVIEW_RESTART_DEBOUNCE_MS = 140;
+const SOUND_EFFECT_PRELOAD_TIMEOUT_MS = 5000;
 
 const cloneSentenceSoundEffects = (
   items: SentenceSoundEffectItem[] | null | undefined,
@@ -570,6 +571,7 @@ export function ImageEffectsDetailModal({
     audios: HTMLAudioElement[];
     cleanups: Array<() => void | Promise<void>>;
   }>({ timeouts: [], audios: [], cleanups: [] });
+  const soundEffectsStartRequestRef = useRef(0);
   const soundEffectsEverStartedRef = useRef<Set<string>>(new Set());
   const [lookActionError, setLookActionError] = useState<string | null>(null);
   const [motionActionError, setMotionActionError] = useState<string | null>(null);
@@ -794,7 +796,11 @@ export function ImageEffectsDetailModal({
     };
   };
 
-  const stopAllScheduledAudio = () => {
+  const stopAllScheduledAudio = (options?: { cancelPendingStart?: boolean }) => {
+    if (options?.cancelPendingStart !== false) {
+      soundEffectsStartRequestRef.current += 1;
+    }
+
     for (const timeoutId of soundEffectsPreviewRef.current.timeouts) {
       window.clearTimeout(timeoutId);
     }
@@ -823,6 +829,68 @@ export function ImageEffectsDetailModal({
 
     setStackStatusByKind({ text: 'idle', overlay: 'idle' });
     setSingleStatusByKey({});
+  };
+
+  const preloadSoundEffectUrl = (url: string) =>
+    new Promise<void>((resolve, reject) => {
+      const audio = new Audio(url);
+      audio.preload = 'auto';
+      audio.crossOrigin = 'anonymous';
+
+      let timeoutId: number | null = null;
+
+      const cleanup = () => {
+        audio.removeEventListener('canplay', handleCanPlay);
+        audio.removeEventListener('error', handleError);
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+
+        try {
+          audio.pause();
+          audio.removeAttribute('src');
+          audio.load();
+        } catch {
+          // ignore preload cleanup errors
+        }
+      };
+
+      const handleCanPlay = () => {
+        cleanup();
+        resolve();
+      };
+
+      const handleError = () => {
+        cleanup();
+        reject(new Error(`Failed to preload sound effect: ${url}`));
+      };
+
+      if (audio.readyState >= 3) {
+        cleanup();
+        resolve();
+        return;
+      }
+
+      audio.addEventListener('canplay', handleCanPlay, { once: true });
+      audio.addEventListener('error', handleError, { once: true });
+      timeoutId = window.setTimeout(() => {
+        cleanup();
+        reject(new Error(`Timed out preloading sound effect: ${url}`));
+      }, SOUND_EFFECT_PRELOAD_TIMEOUT_MS);
+      audio.load();
+    });
+
+  const preloadSoundEffectsStack = async (items: SentenceSoundEffectItem[]) => {
+    const urls = Array.from(
+      new Set(
+        computeSentenceSoundEffectTiming(normalizeSentenceSoundEffects(items))
+          .map((effect) => String(effect.url ?? '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    await Promise.allSettled(urls.map((url) => preloadSoundEffectUrl(url)));
   };
 
   const scheduleAudio = (params: {
@@ -971,11 +1039,15 @@ export function ImageEffectsDetailModal({
     soundEffectsPreviewRef.current.timeouts.push(timeoutId);
   };
 
-  const playSoundEffectsStack = (kind: 'text' | 'overlay', items?: SentenceSoundEffectItem[]) => {
+  const playSoundEffectsStack = (
+    kind: 'text' | 'overlay',
+    items?: SentenceSoundEffectItem[],
+    options?: { cancelPendingStart?: boolean },
+  ) => {
     const effects = normalizeSentenceSoundEffects(items ?? getDraftSoundEffects(kind));
     if (effects.length === 0) return;
 
-    stopAllScheduledAudio();
+    stopAllScheduledAudio(options);
 
     const timedSoundEffects = computeSentenceSoundEffectTiming(effects);
     const shouldShowLoading = timedSoundEffects.some((effect, index) => {
@@ -1260,14 +1332,25 @@ export function ImageEffectsDetailModal({
     }
   };
 
-  const handleStartFromBeginning = (kind: 'text' | 'overlay') => {
-    setPreviewRestartNonce((prev) => prev + 1);
+  const handleStartFromBeginning = async (kind: 'text' | 'overlay') => {
+    stopAllScheduledAudio();
+
     const items = getDraftSoundEffects(kind);
-    if (items.length > 0) {
-      playSoundEffectsStack(kind, items);
+    if (items.length === 0) {
+      setPreviewRestartNonce((prev) => prev + 1);
       return;
     }
-    stopAllScheduledAudio();
+
+    const startRequestId = soundEffectsStartRequestRef.current;
+    setStackStatusByKind((prev) => ({ ...prev, [kind]: 'loading' }));
+
+    await preloadSoundEffectsStack(items);
+    if (startRequestId !== soundEffectsStartRequestRef.current) {
+      return;
+    }
+
+    setPreviewRestartNonce((prev) => prev + 1);
+    playSoundEffectsStack(kind, items, { cancelPendingStart: false });
   };
   const draftTextBackgroundObjectUrl = useManagedObjectUrl(draftTextBackgroundImage);
   const draftTextBackgroundVideoObjectUrl = useManagedObjectUrl(draftTextBackgroundVideo);
@@ -2448,7 +2531,7 @@ export function ImageEffectsDetailModal({
                 stopAllScheduledAudio();
                 return;
               }
-              handleStartFromBeginning(kind);
+              void handleStartFromBeginning(kind);
             }}
             disabled={!canManage}
             className="h-10 rounded-xl border-slate-200 bg-white text-slate-700 hover:bg-slate-100"

@@ -2,28 +2,50 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { ElevenLabsVoiceSettings } from '../_types/sentences';
+import type {
+  ElevenLabsModel,
+  ElevenLabsVoiceSettings,
+} from '../_types/sentences';
 import {
+  DEFAULT_ELEVENLABS_MODEL,
   DEFAULT_ELEVENLABS_VOICE_SETTINGS,
+  ELEVENLABS_MODEL_OPTIONS,
   ElevenLabsVoiceSettingsFields,
   describeElevenLabsVoiceSettings,
+  formatElevenLabsModelLabel,
+  normalizeElevenLabsModel,
   normalizeElevenLabsVoiceSettings,
 } from './ElevenLabsVoiceSettingsFields';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { SlidersHorizontal, X } from 'lucide-react';
 
 type ElevenLabsVoiceSettingsModalProps = {
   voiceName: string | null;
+  initialModel?: ElevenLabsModel | null;
   initialSettings: ElevenLabsVoiceSettings | null;
   onClose: () => void;
-  onSave: (settings: ElevenLabsVoiceSettings) => void;
+  onSave: (value: {
+    model: ElevenLabsModel;
+    settings: ElevenLabsVoiceSettings;
+  }) => void;
 };
 
 export function ElevenLabsVoiceSettingsModal({
   voiceName,
+  initialModel,
   initialSettings,
   onClose,
   onSave,
 }: ElevenLabsVoiceSettingsModalProps) {
+  const [draftModel, setDraftModel] = useState<ElevenLabsModel>(
+    normalizeElevenLabsModel(initialModel ?? DEFAULT_ELEVENLABS_MODEL),
+  );
   const [draft, setDraft] = useState<ElevenLabsVoiceSettings>(
     normalizeElevenLabsVoiceSettings(initialSettings ?? DEFAULT_ELEVENLABS_VOICE_SETTINGS),
   );
@@ -66,12 +88,48 @@ export function ElevenLabsVoiceSettingsModal({
               Current defaults
             </div>
             <p className="text-xs leading-5 text-sky-800">
-              {describeElevenLabsVoiceSettings(draft)}
+              {describeElevenLabsVoiceSettings(draft, { model: draftModel })}
+            </p>
+          </div>
+
+          <div className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-indigo-950">Model</p>
+                <p className="text-xs text-indigo-900/80">
+                  Choose which ElevenLabs model new generations should use.
+                </p>
+              </div>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                {formatElevenLabsModelLabel(draftModel)}
+              </span>
+            </div>
+            <Select
+              value={draftModel}
+              onValueChange={(value) => setDraftModel(normalizeElevenLabsModel(value))}
+            >
+              <SelectTrigger className="bg-white">
+                <SelectValue placeholder="Select an ElevenLabs model" />
+              </SelectTrigger>
+              <SelectContent>
+                {ELEVENLABS_MODEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-2 text-xs leading-5 text-indigo-900/80">
+              {
+                ELEVENLABS_MODEL_OPTIONS.find((option) => option.value === draftModel)
+                  ?.description
+              }
             </p>
           </div>
 
           <ElevenLabsVoiceSettingsFields
             value={draft}
+            model={draftModel}
             onChange={setDraft}
             showReset
           />
@@ -85,7 +143,7 @@ export function ElevenLabsVoiceSettingsModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="button" onClick={() => onSave(draft)}>
+            <Button type="button" onClick={() => onSave({ model: draftModel, settings: draft })}>
               Save defaults
             </Button>
           </div>

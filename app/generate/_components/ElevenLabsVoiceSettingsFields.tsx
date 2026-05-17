@@ -1,7 +1,29 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import type { ElevenLabsVoiceSettings } from '../_types/sentences';
+import type {
+  ElevenLabsModel,
+  ElevenLabsVoiceSettings,
+} from '../_types/sentences';
+
+export const DEFAULT_ELEVENLABS_MODEL: ElevenLabsModel = 'eleven_v3';
+
+export const ELEVENLABS_MODEL_OPTIONS: Array<{
+  value: ElevenLabsModel;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'eleven_v3',
+    label: 'Eleven v3',
+    description: 'Emotion-first model with bracket-cue support and stability control.',
+  },
+  {
+    value: 'eleven_multilingual_v2',
+    label: 'Eleven Multilingual v2',
+    description: 'Legacy multilingual model with the full settings surface.',
+  },
+];
 
 export const DEFAULT_ELEVENLABS_VOICE_SETTINGS: ElevenLabsVoiceSettings = {
   stability: 0.5,
@@ -15,6 +37,20 @@ const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 const formatPercent = (value: number) => `${Math.round(value * 100)}%`;
+
+export const normalizeOptionalElevenLabsModel = (
+  value: string | null | undefined,
+): ElevenLabsModel | null =>
+  value === 'eleven_multilingual_v2' || value === 'eleven_v3' ? value : null;
+
+export const normalizeElevenLabsModel = (
+  value: string | null | undefined,
+): ElevenLabsModel => normalizeOptionalElevenLabsModel(value) ?? DEFAULT_ELEVENLABS_MODEL;
+
+export const formatElevenLabsModelLabel = (value: string | null | undefined) =>
+  normalizeElevenLabsModel(value) === 'eleven_multilingual_v2'
+    ? 'Eleven Multilingual v2'
+    : 'Eleven v3';
 
 export const normalizeElevenLabsVoiceSettings = (
   value: Partial<ElevenLabsVoiceSettings> | null | undefined,
@@ -35,9 +71,20 @@ export const normalizeElevenLabsVoiceSettings = (
 
 export const describeElevenLabsVoiceSettings = (
   value: Partial<ElevenLabsVoiceSettings> | null | undefined,
+  options?: { model?: ElevenLabsModel | null },
 ) => {
   const settings = normalizeElevenLabsVoiceSettings(value);
+  const model = normalizeElevenLabsModel(options?.model);
+
+  if (model === 'eleven_v3') {
+    return [
+      formatElevenLabsModelLabel(model),
+      `Stability ${formatPercent(settings.stability)}`,
+    ].join(' • ');
+  }
+
   return [
+    formatElevenLabsModelLabel(model),
     `Stability ${formatPercent(settings.stability)}`,
     `Similarity ${formatPercent(settings.similarityBoost)}`,
     `Style ${formatPercent(settings.style)}`,
@@ -48,6 +95,7 @@ export const describeElevenLabsVoiceSettings = (
 
 type ElevenLabsVoiceSettingsFieldsProps = {
   value: Partial<ElevenLabsVoiceSettings> | null | undefined;
+  model?: ElevenLabsModel | null;
   onChange: (next: ElevenLabsVoiceSettings) => void;
   disabled?: boolean;
   showReset?: boolean;
@@ -104,12 +152,15 @@ function RangeControl({
 
 export function ElevenLabsVoiceSettingsFields({
   value,
+  model,
   onChange,
   disabled = false,
   showReset = false,
   resetLabel = 'Reset to provider defaults',
 }: ElevenLabsVoiceSettingsFieldsProps) {
   const settings = normalizeElevenLabsVoiceSettings(value);
+  const resolvedModel = normalizeElevenLabsModel(model);
+  const showsLegacyControls = resolvedModel === 'eleven_multilingual_v2';
 
   const patch = (patchValue: Partial<ElevenLabsVoiceSettings>) => {
     onChange(normalizeElevenLabsVoiceSettings({ ...settings, ...patchValue }));
@@ -128,56 +179,60 @@ export function ElevenLabsVoiceSettingsFields({
         displayValue={formatPercent(settings.stability)}
         onChange={(next) => patch({ stability: next })}
       />
-      <RangeControl
-        label="Similarity"
-        hint="Controls how strongly the output adheres to the selected voice profile."
-        min={0}
-        max={1}
-        step={0.01}
-        value={settings.similarityBoost}
-        disabled={disabled}
-        displayValue={formatPercent(settings.similarityBoost)}
-        onChange={(next) => patch({ similarityBoost: next })}
-      />
-      <RangeControl
-        label="Style"
-        hint="Increases style exaggeration when the selected voice supports it."
-        min={0}
-        max={1}
-        step={0.01}
-        value={settings.style}
-        disabled={disabled}
-        displayValue={formatPercent(settings.style)}
-        onChange={(next) => patch({ style: next })}
-      />
-      <RangeControl
-        label="Speed"
-        hint="Adjusts pacing. 1.00x is the provider default speed."
-        min={0.5}
-        max={1.5}
-        step={0.01}
-        value={settings.speed}
-        disabled={disabled}
-        displayValue={`${settings.speed.toFixed(2)}x`}
-        onChange={(next) => patch({ speed: next })}
-      />
-      <div className="rounded-2xl border border-sky-100 bg-white px-4 py-3">
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={settings.useSpeakerBoost}
+      {showsLegacyControls ? (
+        <>
+          <RangeControl
+            label="Similarity"
+            hint="Controls how strongly the output adheres to the selected voice profile."
+            min={0}
+            max={1}
+            step={0.01}
+            value={settings.similarityBoost}
             disabled={disabled}
-            onChange={(event) => patch({ useSpeakerBoost: event.target.checked })}
-            className="mt-0.5 h-4 w-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500"
+            displayValue={formatPercent(settings.similarityBoost)}
+            onChange={(next) => patch({ similarityBoost: next })}
           />
-          <div>
-            <p className="text-sm font-medium text-gray-900">Speaker boost</p>
-            <p className="text-xs text-gray-500">
-              Keeps the output closer to the source voice at a slightly higher compute cost.
-            </p>
+          <RangeControl
+            label="Style"
+            hint="Increases style exaggeration when the selected voice supports it."
+            min={0}
+            max={1}
+            step={0.01}
+            value={settings.style}
+            disabled={disabled}
+            displayValue={formatPercent(settings.style)}
+            onChange={(next) => patch({ style: next })}
+          />
+          <RangeControl
+            label="Speed"
+            hint="Adjusts pacing. 1.00x is the provider default speed."
+            min={0.5}
+            max={1.5}
+            step={0.01}
+            value={settings.speed}
+            disabled={disabled}
+            displayValue={`${settings.speed.toFixed(2)}x`}
+            onChange={(next) => patch({ speed: next })}
+          />
+          <div className="rounded-2xl border border-sky-100 bg-white px-4 py-3">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={settings.useSpeakerBoost}
+                disabled={disabled}
+                onChange={(event) => patch({ useSpeakerBoost: event.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500"
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-900">Speaker boost</p>
+                <p className="text-xs text-gray-500">
+                  Keeps the output closer to the source voice at a slightly higher compute cost.
+                </p>
+              </div>
+            </label>
           </div>
-        </label>
-      </div>
+        </>
+      ) : null}
       {showReset ? (
         <div className="flex justify-end">
           <Button

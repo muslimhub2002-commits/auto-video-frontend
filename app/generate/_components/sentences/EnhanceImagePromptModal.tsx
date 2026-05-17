@@ -1,13 +1,15 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { Sparkles, X } from 'lucide-react';
+import { Loader2, Sparkles, X } from 'lucide-react';
 
 type EnhanceImagePromptModalProps = {
   isOpen: boolean;
   enhanceImagePromptError: string | null;
   enhanceImagePromptText: string;
+  isEnhancingImagePromptText: boolean;
   onEnhanceImagePromptTextChange: (next: string) => void;
+  onMakeMoreDescriptive: () => void | Promise<void>;
   onCancel: () => void;
   onDone: () => void | Promise<void>;
 };
@@ -16,7 +18,9 @@ export function EnhanceImagePromptModal({
   isOpen,
   enhanceImagePromptError,
   enhanceImagePromptText,
+  isEnhancingImagePromptText,
   onEnhanceImagePromptTextChange,
+  onMakeMoreDescriptive,
   onCancel,
   onDone,
 }: EnhanceImagePromptModalProps) {
@@ -62,11 +66,33 @@ export function EnhanceImagePromptModal({
             <textarea
               value={enhanceImagePromptText}
               onChange={(e) => onEnhanceImagePromptTextChange(e.target.value)}
+              disabled={isEnhancingImagePromptText}
               className="w-full text-sm text-gray-800 leading-relaxed bg-transparent border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-pink-200 focus:border-pink-300 resize-none"
               rows={6}
               placeholder="Describe the image you want..."
             />
-            <p className="text-[11px] text-gray-500 mt-2">Tip: Keep it descriptive (scene, mood, lighting, style).</p>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[11px] text-gray-500">
+                Tip: Keep it descriptive (scene, mood, lighting, style).
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onMakeMoreDescriptive}
+                disabled={enhanceImagePromptText.trim().length < 3 || isEnhancingImagePromptText}
+                className="gap-2 self-start sm:self-auto"
+              >
+                {isEnhancingImagePromptText ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {isEnhancingImagePromptText
+                  ? 'Making it more descriptive...'
+                  : 'Make it more descriptive'}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -80,7 +106,7 @@ export function EnhanceImagePromptModal({
               type="button"
               size="sm"
               onClick={handleDone}
-              disabled={!enhanceImagePromptText.trim()}
+              disabled={!enhanceImagePromptText.trim() || isEnhancingImagePromptText}
               className="gap-2 bg-linear-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white"
             >
               <Sparkles className="h-4 w-4" />

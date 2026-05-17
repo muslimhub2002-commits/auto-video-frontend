@@ -37,8 +37,10 @@ interface VoiceOverSectionProps {
   savedVoiceId: string | null;
   voiceProvider: 'google' | 'elevenlabs';
   voiceGenerationMode: 'auto' | 'perSentence';
+  elevenLabsAutoGenerationStrategy: 'oneTake' | 'chunks';
   onVoiceProviderChange: (provider: 'google' | 'elevenlabs') => void;
   onVoiceGenerationModeChange: (mode: 'auto' | 'perSentence') => void;
+  onElevenLabsAutoGenerationStrategyChange: (strategy: 'oneTake' | 'chunks') => void;
   styleInstructions?: string;
   onStyleInstructionsChange?: (value: string) => void;
   voices: {
@@ -84,8 +86,10 @@ export function VoiceOverSection({
   savedVoiceId,
   voiceProvider,
   voiceGenerationMode,
+  elevenLabsAutoGenerationStrategy,
   onVoiceProviderChange,
   onVoiceGenerationModeChange,
+  onElevenLabsAutoGenerationStrategyChange,
   styleInstructions,
   onStyleInstructionsChange,
   voices,
@@ -115,6 +119,11 @@ export function VoiceOverSection({
   const selectedVoice = voices.find((v) => v.voice_id === selectedVoiceId) || null;
   const providerLabel = voiceProvider === 'google' ? 'AI Studio' : 'ElevenLabs';
   const isPerSentenceMode = voiceGenerationMode === 'perSentence';
+  const showElevenLabsAutoGenerationStrategy =
+    voiceProvider === 'elevenlabs' && !isPerSentenceMode;
+  const usesElevenLabsChunkGeneration =
+    showElevenLabsAutoGenerationStrategy &&
+    elevenLabsAutoGenerationStrategy === 'chunks';
   const haveStyleInstructions = Boolean(String(styleInstructions ?? '').trim());
   const hasVoiceSelection = Boolean(voiceOver || String(voicePreviewUrl ?? '').trim());
   const resolvedVoiceName = voiceOver?.name || (savedVoiceId ? 'Library voice-over' : 'Saved voice-over');
@@ -406,10 +415,33 @@ export function VoiceOverSection({
                     </SelectContent>
                   </Select>
 
+                  {showElevenLabsAutoGenerationStrategy ? (
+                    <Select
+                      value={elevenLabsAutoGenerationStrategy}
+                      onValueChange={(v) =>
+                        onElevenLabsAutoGenerationStrategyChange(
+                          v as 'oneTake' | 'chunks',
+                        )
+                      }
+                    >
+                      <SelectTrigger label="Long voice generation">
+                        <SelectValue placeholder="Choose how long voices are generated" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="oneTake">One take</SelectItem>
+                        <SelectItem value="chunks">Chunked if needed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+
                   <p className="text-[11px] text-gray-500">
                     {isPerSentenceMode
                       ? 'Each sentence gets its own voice clip, then everything is merged into one final voice-over.'
-                      : 'Long scripts are split automatically when needed using the current chunked voice flow.'}
+                      : usesElevenLabsChunkGeneration
+                        ? 'Long ElevenLabs voice-overs use the current chunked flow and merge the generated parts afterward.'
+                        : voiceProvider === 'elevenlabs'
+                          ? 'ElevenLabs generates the full voice-over directly as one take, even for long scripts.'
+                          : 'Long scripts are split automatically when needed using the current chunked voice flow.'}
                   </p>
                 </div>
 

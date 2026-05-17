@@ -153,6 +153,17 @@ function getString(value: unknown, fallback: string) {
   return typeof value === 'string' && value.trim().length > 0 ? value : fallback;
 }
 
+function getStablePreviewSeed(value: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967295;
+}
+
 export function normalizeImageMotionSpeed(value: number | null | undefined) {
   const numeric = Number(value ?? DEFAULT_IMAGE_MOTION_SPEED);
   if (!Number.isFinite(numeric)) return DEFAULT_IMAGE_MOTION_SPEED;
@@ -586,6 +597,15 @@ export function ImageEffectPreview({
     resolvedFilterSettings,
     visualEffect ?? null,
   );
+  const animatedLightingIntensity = resolvedFilterSettings.animatedLightingIntensity ?? 0;
+  const shouldShowAnimatedLighting = animatedLightingIntensity > 0.001;
+  const previewSeed = getStablePreviewSeed(
+    `${normalizedVisualEffect ?? 'none'}|${String(motionResetKey ?? '')}`,
+  );
+  const lightingX = ((previewSeed * 320) % 100 + 100) % 100;
+  const lightingY = (35 + 25 * Math.sin(previewSeed * 8) + 100) % 100;
+  const lightingAlpha =
+    (0.22 + 0.1 * Math.sin(previewSeed * 12)) * animatedLightingIntensity;
 
   const isGlassReflections = normalizedVisualEffect === 'glassReflections';
   const isGlassStrong = normalizedVisualEffect === 'glassStrong';
@@ -735,6 +755,17 @@ export function ImageEffectPreview({
       >
         <div style={{ filter: mediaFilter }}>{children}</div>
       </div>
+
+      {shouldShowAnimatedLighting ? (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            opacity: Math.max(0, Math.min(0.42, lightingAlpha)),
+            mixBlendMode: 'screen',
+            background: `radial-gradient(circle at ${lightingX.toFixed(2)}% ${lightingY.toFixed(2)}%, rgba(255, 80, 200, 0.55) 0%, rgba(80, 160, 255, 0.30) 38%, rgba(0,0,0,0) 70%)`,
+          }}
+        />
+      ) : null}
 
       {shouldShowGlassOverlay ? (
         <div

@@ -33,6 +33,8 @@ export type ElevenLabsVoiceSettings = {
   useSpeakerBoost: boolean;
 };
 
+export type ElevenLabsModel = 'eleven_multilingual_v2' | 'eleven_v3';
+
 export type SentenceItem = {
   id: string;
   text: string;
@@ -45,6 +47,7 @@ export type SentenceItem = {
   voiceOverVoiceName?: string | null;
   voiceOverStyleInstructions?: string | null;
   elevenLabsSettings?: ElevenLabsVoiceSettings | null;
+  elevenLabsModel?: ElevenLabsModel | null;
   mediaMode?: 'single' | 'frames';
   sceneTab?: 'image' | 'video' | 'text' | 'overlay';
   imageEffectsMode?: 'quick' | 'detailed';

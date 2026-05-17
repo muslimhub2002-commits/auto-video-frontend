@@ -90,6 +90,8 @@ type SentencesImagesSectionProps = {
   shortsValidationError?: string | null;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+  isApplyingBulkFeelingCues?: boolean;
+  onGenerateBulkFeelingCues?: (() => void) | (() => Promise<void>);
   isApplyingBulkLookEffects?: boolean;
   onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
   onOpenBulkLookPresetModal?: (() => void) | (() => Promise<void>);
@@ -307,6 +309,8 @@ export function SentencesImagesSection({
   sceneDurationSecondsByIndex,
   isGeneratingAllImages,
   onGenerateAllImages,
+  isApplyingBulkFeelingCues = false,
+  onGenerateBulkFeelingCues,
   isApplyingBulkLookEffects = false,
   onGenerateBulkLookEffects,
   onOpenBulkLookPresetModal,
@@ -463,11 +467,14 @@ export function SentencesImagesSection({
     enhanceImagePromptText,
     setEnhanceImagePromptText,
     enhanceImagePromptError,
+    isEnhancingImagePromptText,
     openEnhanceImagePromptModal,
     closeEnhanceImagePromptModal,
+    makeImagePromptMoreDescriptive,
     applyEnhanceImagePrompt,
   } = useEnhanceImagePrompt({
     sentences,
+    apiUrl: API_URL,
     onGenerateSentenceImage,
   });
 
@@ -724,6 +731,8 @@ export function SentencesImagesSection({
               sceneDurationSecondsByIndex={sceneDurationSecondsByIndex}
               isGeneratingAllImages={isGeneratingAllImages}
               onGenerateAllImages={onGenerateAllImages}
+              isApplyingBulkFeelingCues={isApplyingBulkFeelingCues}
+              onGenerateBulkFeelingCues={onGenerateBulkFeelingCues}
               isApplyingBulkLookEffects={isApplyingBulkLookEffects}
               onGenerateBulkLookEffects={onGenerateBulkLookEffects}
               onOpenBulkLookPresetModal={onOpenBulkLookPresetModal}
@@ -900,7 +909,9 @@ export function SentencesImagesSection({
         isOpen={enhanceImagePromptModalOpen}
         enhanceImagePromptError={enhanceImagePromptError}
         enhanceImagePromptText={enhanceImagePromptText}
+        isEnhancingImagePromptText={isEnhancingImagePromptText}
         onEnhanceImagePromptTextChange={setEnhanceImagePromptText}
+        onMakeMoreDescriptive={makeImagePromptMoreDescriptive}
         onCancel={closeEnhanceImagePromptModal}
         onDone={applyEnhanceImagePrompt}
       />

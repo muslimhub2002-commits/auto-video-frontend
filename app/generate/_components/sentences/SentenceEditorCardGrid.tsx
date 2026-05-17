@@ -670,9 +670,6 @@ function SentenceEditorCardComponent({
   onPreviewImage,
 }: SentenceEditorCardProps) {
   const videoAspectClass = isShortVideo ? 'aspect-9/16' : 'aspect-video';
-  const generatedVideoClassName = isShortVideo
-    ? 'block w-full aspect-9/16 object-cover h-96'
-    : 'block w-full aspect-video object-cover';
   const hasAnyVideo = Boolean(item.video || item.videoUrl);
   const isSubscribeClip = item.videoUrl === '/subscribe.mp4';
   const canSaveCurrentVideoToLibrary = Boolean(
@@ -689,6 +686,14 @@ function SentenceEditorCardComponent({
   const isTextSceneTab = sceneTab === 'text';
   const isOverlaySceneTab = sceneTab === 'overlay';
   const mediaMode: 'single' | 'frames' = isVideoSceneTab ? 'frames' : 'single';
+  const usesTallLongFormScenePreview =
+    !isShortVideo && (isVideoSceneTab || isTextSceneTab || isOverlaySceneTab);
+  const scenePreviewFrameClass = usesTallLongFormScenePreview
+    ? 'h-58'
+    : videoAspectClass;
+  const generatedVideoClassName = isShortVideo
+    ? 'block w-full aspect-9/16 object-cover h-96'
+    : `block w-full ${scenePreviewFrameClass} object-cover`;
 
   const soundEffects = useMemo(
     () => (Array.isArray(item.soundEffects) ? item.soundEffects : []),
@@ -2899,7 +2904,7 @@ function SentenceEditorCardComponent({
                     text={item.textAnimationText}
                     textAnimationEffect={resolvedTextAnimationEffect}
                     textAnimationSettings={item.textAnimationSettings ?? null}
-                    className={`w-full ${videoAspectClass}`}
+                    className={`w-full ${scenePreviewFrameClass}`}
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/70 via-black/15 to-transparent px-4 py-3 opacity-0 transition-opacity duration-200 group-hover/overlay-preview:opacity-100 group-focus-within/overlay-preview:opacity-100">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">
@@ -2935,7 +2940,7 @@ function SentenceEditorCardComponent({
                     backgroundImageUrl={textPreviewBackgroundUrl}
                     backgroundVideoUrl={textPreviewBackgroundVideoUrl}
                     isShortVideo={isShortVideo}
-                    className={`w-full ${videoAspectClass}`}
+                    className={`w-full ${scenePreviewFrameClass}`}
                     contentClassName="p-[7%]"
                     enableMotion
                     motionResetKey={`${item.id}-${resolvedTextAnimationEffect}-${resolvedTextAnimationSettings.speed ?? 1}`}
@@ -3066,7 +3071,7 @@ function SentenceEditorCardComponent({
                         <img
                           src={textBackgroundPreviewUrl}
                           alt="Text scene background"
-                          className="h-40 w-full rounded-xl object-cover"
+                          className="h-58 w-full rounded-xl object-cover"
                         />
                       ) : null}
                     </div>

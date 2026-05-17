@@ -185,6 +185,8 @@ type SceneEditorSectionProps = {
   sceneDurationSecondsByIndex: Array<number | null>;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
+  isApplyingBulkFeelingCues?: boolean;
+  onGenerateBulkFeelingCues?: (() => void) | (() => Promise<void>);
   isApplyingBulkLookEffects?: boolean;
   onGenerateBulkLookEffects?: (() => void) | (() => Promise<void>);
   onOpenBulkLookPresetModal?: (() => void) | (() => Promise<void>);
@@ -978,6 +980,8 @@ export function SceneEditorSection({
   sceneDurationSecondsByIndex,
   isGeneratingAllImages,
   onGenerateAllImages,
+  isApplyingBulkFeelingCues = false,
+  onGenerateBulkFeelingCues,
   isApplyingBulkLookEffects = false,
   onGenerateBulkLookEffects,
   onOpenBulkLookPresetModal,
@@ -1424,6 +1428,24 @@ export function SceneEditorSection({
                 <span className="text-sm font-semibold">Generate All Images</span>
               </>
             </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onGenerateBulkFeelingCues}
+              disabled={!onGenerateBulkFeelingCues || isApplyingBulkFeelingCues}
+              className="gap-2 h-10 px-4 border-rose-200 bg-white text-rose-700 hover:bg-rose-50 hover:border-rose-300 shadow-sm hover:shadow transition-all disabled:cursor-not-allowed disabled:opacity-70"
+              title="Add or replace bracketed feeling cues for all sentence lines"
+            >
+              {isApplyingBulkFeelingCues ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              <span className="text-sm font-semibold">AI Feeling</span>
+            </Button>
+
             <div className="flex h-10 overflow-hidden rounded-lg border border-fuchsia-200 bg-white shadow-sm transition-all hover:shadow">
               <Button
                 type="button"
