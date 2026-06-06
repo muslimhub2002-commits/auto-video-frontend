@@ -80,16 +80,22 @@ import {
   resolveVisualEffectFromSettings,
 } from './ImageEffectPreview';
 import {
+  createTextAnimationWordStyleSeed,
   DEFAULT_TEXT_ANIMATION_START_DELAY,
   DEFAULT_TEXT_ANIMATION_WORD_DELAY,
   getDefaultTextAnimationSettings,
   getTextAnimationSettingsForEffectChange,
   getTextAnimationEffectLabel,
+  getTextAnimationWords,
   normalizeTextAnimationText,
   normalizeTextAnimationSettings,
+  normalizeTextAnimationWordStyle,
+  normalizeTextAnimationWordStyles,
   resolveTextAnimationDirection,
+  resolveTextAnimationEditMode,
   resolveTextAnimationEffectFromSettings,
   resolveTextAnimationText,
+  TEXT_ANIMATION_EDIT_MODE_VALUES,
   TEXT_ANIMATION_WORD_DELAY_MAX,
   TEXT_ANIMATION_WORD_DELAY_MIN,
   TEXT_ANIMATION_WORD_DELAY_STEP,
@@ -98,8 +104,10 @@ import {
   TEXT_ANIMATION_START_DELAY_STEP,
   TextAnimationPreview,
   TEXT_ANIMATION_EFFECT_VALUES,
+  type TextAnimationEditMode,
   type TextAnimationPresetDto,
   type TextAnimationSettings,
+  type TextAnimationWordStyle,
 } from './TextAnimationPreview';
 import { OverlayScenePreview } from './OverlayScenePreview';
 import { TEMPORARY_CUSTOM_PRESET_ID } from '../../_utils/imageEffectSelection';
@@ -116,6 +124,21 @@ const LOOK_EFFECT_VALUES = [
 ] as const;
 
 type DetailTab = 'visual' | 'motion' | 'text' | 'overlay';
+
+type TextEditorTabKey = 'all' | `word:${number}`;
+
+const ALL_WORDS_TEXT_TAB_KEY: TextEditorTabKey = 'all';
+
+const getTextEditorWordTabKey = (index: number): TextEditorTabKey =>
+  `word:${index}`;
+
+const parseTextEditorWordTabIndex = (
+  value: TextEditorTabKey,
+): number | null => {
+  if (!value.startsWith('word:')) return null;
+  const numeric = Number.parseInt(value.slice('word:'.length), 10);
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : null;
+};
 
 export type ImageEffectsDetailApplyParams = {
   visualEffect: SentenceItem['visualEffect'] | null;
@@ -664,6 +687,8 @@ export function ImageEffectsDetailModal({
   const [draftOverlaySettings, setDraftOverlaySettings] = useState<OverlaySettings>(
     () => normalizeOverlaySettings(overlaySettings, 'image'),
   );
+  const [activeTextEditorTab, setActiveTextEditorTab] =
+    useState<TextEditorTabKey>(ALL_WORDS_TEXT_TAB_KEY);
   const [retainedDraftTemporaryLook, setRetainedDraftTemporaryLook] = useState<{
     visualEffect: SentenceItem['visualEffect'] | null;
     imageFilterSettings: ImageFilterSettings;
@@ -706,16 +731,76 @@ export function ImageEffectsDetailModal({
     () => resolveTextAnimationEffectFromSettings(resolvedText, draftTextAnimationEffect),
     [draftTextAnimationEffect, resolvedText],
   );
+  const draftTextEditMode = useMemo<TextAnimationEditMode>(
+    () => resolveTextAnimationEditMode(resolvedText),
+    [resolvedText],
+  );
+  const draftTextWords = useMemo(
+    () => getTextAnimationWords(draftTextAnimationText, sentenceText),
+    [draftTextAnimationText, sentenceText],
+  );
+  const draftTextWordStyleSeed = useMemo(
+    () =>
+      createTextAnimationWordStyleSeed(
+        resolvedDraftTextEffect,
+        resolvedText,
+        isShortVideo,
+        draftResolvedTextValue,
+      ),
+    [resolvedDraftTextEffect, draftResolvedTextValue, isShortVideo, resolvedText],
+  );
+  const draftTextWordStyles = useMemo(
+    () =>
+      normalizeTextAnimationWordStyles(
+        resolvedText.wordStyles,
+        resolvedDraftTextEffect,
+        resolvedText,
+        isShortVideo,
+        draftResolvedTextValue,
+      ),
+    [
+      draftResolvedTextValue,
+      isShortVideo,
+      resolvedDraftTextEffect,
+      resolvedText,
+      resolvedText.wordStyles,
+    ],
+  );
+  const textEditorWordTabs = useMemo(
+    () =>
+      draftTextWords.map((word, index) => ({
+        key: getTextEditorWordTabKey(index),
+        index,
+        label:
+          word.length > 20 ? `${word.slice(0, 20).trim()}...` : word || `Word ${index + 1}`,
+        fullLabel: word || `Word ${index + 1}`,
+      })),
+    [draftTextWords],
+  );
+  const activeTextEditorWordIndex = useMemo(
+    () => parseTextEditorWordTabIndex(activeTextEditorTab),
+    [activeTextEditorTab],
+  );
+  const activeTextEditorWordStyle =
+    activeTextEditorWordIndex !== null
+      ? draftTextWordStyles[activeTextEditorWordIndex] ?? draftTextWordStyleSeed
+      : null;
+  const activeTextEditorWordEffect =
+    activeTextEditorWordStyle?.effect ?? resolvedDraftTextEffect;
   const draftTextDirection = useMemo(
     () => resolveTextAnimationDirection(draftTextAnimationText, sentenceText),
     [draftTextAnimationText, sentenceText],
   );
   const isTypewriterTextEffect = resolvedDraftTextEffect === 'typewriter';
+  const isPerWordTextEditMode = draftTextEditMode === 'perWord';
+  const isTypewriterWordEffect = activeTextEditorWordEffect === 'typewriter';
   const resolvedOverlay = useMemo(
     () => normalizeOverlaySettings(draftOverlaySettings, 'image'),
     [draftOverlaySettings],
   );
-  const canManageTextSoundEffects = Boolean(draftTextAnimationEffect);
+  const canManageTextSoundEffects =
+    Boolean(draftTextAnimationEffect) &&
+    (!isPerWordTextEditMode || activeTextEditorTab === ALL_WORDS_TEXT_TAB_KEY);
   const canManageOverlaySoundEffects = Boolean(
     draftOverlayFile || String(draftOverlayUrl ?? '').trim(),
   );
@@ -1456,6 +1541,9 @@ export function ImageEffectsDetailModal({
         : null,
     [draftResolvedTextValue, isShortVideo, selectedTextPreset, selectedTextPresetEffect],
   );
+  const effectiveDraftTextSoundEffects = draftTextSoundEffects;
+  const effectiveSelectedTextPresetSoundEffects =
+    selectedTextPreset?.soundEffects ?? [];
   const selectedOverlayPresetSettings = useMemo(
     () =>
       selectedOverlayPreset
@@ -1480,7 +1568,10 @@ export function ImageEffectsDetailModal({
     selectedTextPreset &&
       (selectedTextPresetEffect !== draftTextAnimationEffect ||
         JSON.stringify(selectedTextPresetSettings) !== JSON.stringify(resolvedText) ||
-        !areSentenceSoundEffectsEqual(selectedTextPreset.soundEffects, draftTextSoundEffects)),
+        !areSentenceSoundEffectsEqual(
+          effectiveSelectedTextPresetSoundEffects,
+          effectiveDraftTextSoundEffects,
+        )),
   );
   const isOverlayDirtyFromSelectedPreset = Boolean(
     selectedOverlayPreset &&
@@ -1539,7 +1630,6 @@ export function ImageEffectsDetailModal({
   useEffect(() => {
     if (isOpen) {
       setIsRendered(true);
-      setIsClosing(false);
       return;
     }
 
@@ -1550,6 +1640,13 @@ export function ImageEffectsDetailModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    const nextDraftTextSettings = normalizeTextAnimationSettings(
+      textAnimationSettings,
+      resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
+      isShortVideo,
+      resolveTextAnimationText(textAnimationText, sentenceText),
+    );
+
     setCurrentTab(availableTabs.includes(activeTab) ? activeTab : availableTabs[0]);
     setDraftVisualEffect(visualEffect ?? null);
     setDraftImageMotionEffect(imageMotionEffect ?? 'default');
@@ -1584,14 +1681,7 @@ export function ImageEffectsDetailModal({
         isShortVideo,
       ),
     );
-    setDraftTextAnimationSettings(
-      normalizeTextAnimationSettings(
-        textAnimationSettings,
-        resolveTextAnimationEffectFromSettings(textAnimationSettings, textAnimationEffect),
-        isShortVideo,
-        resolveTextAnimationText(textAnimationText, sentenceText),
-      ),
-    );
+    setDraftTextAnimationSettings(nextDraftTextSettings);
     setDraftOverlaySettings(normalizeOverlaySettings(overlaySettings, 'image'));
     setRetainedDraftTemporaryLook(retainedTemporaryLook ?? null);
     setRetainedDraftTemporaryMotion(retainedTemporaryMotion ?? null);
@@ -1615,6 +1705,7 @@ export function ImageEffectsDetailModal({
     stopAllScheduledAudio();
     setDeletePresetKind(null);
     setPreviewRestartNonce(0);
+    setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
     setDebouncedPreview((prev) => ({
       visualEffect: visualEffect ?? null,
       imageMotionEffect: imageMotionEffect ?? 'default',
@@ -1660,6 +1751,31 @@ export function ImageEffectsDetailModal({
     visualEffect,
     availableTabs,
     overlaySoundEffects,
+  ]);
+
+  useEffect(() => {
+    if (!isPerWordTextEditMode) {
+      if (activeTextEditorTab !== ALL_WORDS_TEXT_TAB_KEY) {
+        setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
+      }
+      return;
+    }
+
+    if (activeTextEditorTab === ALL_WORDS_TEXT_TAB_KEY) {
+      return;
+    }
+
+    if (
+      activeTextEditorWordIndex === null ||
+      activeTextEditorWordIndex >= draftTextWords.length
+    ) {
+      setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
+    }
+  }, [
+    activeTextEditorTab,
+    activeTextEditorWordIndex,
+    draftTextWords.length,
+    isPerWordTextEditMode,
   ]);
 
   useEffect(() => {
@@ -1760,7 +1876,7 @@ export function ImageEffectsDetailModal({
     : `builtin:${resolveMotionEffectFromSettings(draftImageMotionSettings, draftImageMotionEffect ?? 'default')}`;
   const textSelectValue = draftCustomTextAnimationId
     ? `custom:${draftCustomTextAnimationId}`
-    : draftTextAnimationSettings?.presetKey === 'custom'
+    : isPerWordTextEditMode || draftTextAnimationSettings?.presetKey === 'custom'
       ? `custom:${TEMPORARY_CUSTOM_PRESET_ID}`
       : `builtin:${resolveTextAnimationEffectFromSettings(draftTextAnimationSettings, draftTextAnimationEffect)}`;
   const overlaySelectValue =
@@ -1870,6 +1986,7 @@ export function ImageEffectsDetailModal({
       setDraftCustomTextAnimationId(preset.id);
       setDraftTextAnimationSettings({ ...settings, presetKey: 'custom' });
       setDraftTextSoundEffects(cloneSentenceSoundEffects(preset.soundEffects));
+      setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
       setTextActionError(null);
       return;
     }
@@ -1878,14 +1995,19 @@ export function ImageEffectsDetailModal({
     setDraftTextAnimationEffect(effect);
     setDraftCustomTextAnimationId(null);
     setDraftTextAnimationSettings(
-      getTextAnimationSettingsForEffectChange(
-        effect,
-        draftTextAnimationSettings,
-        isShortVideo,
-        draftResolvedTextValue,
-      ),
+      {
+        ...getTextAnimationSettingsForEffectChange(
+          effect,
+          draftTextAnimationSettings,
+          isShortVideo,
+          draftResolvedTextValue,
+        ),
+        editMode: 'fullText',
+        wordStyles: null,
+      },
     );
     setDraftTextSoundEffects([]);
+    setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
     setTextActionError(null);
   };
 
@@ -1957,18 +2079,165 @@ export function ImageEffectsDetailModal({
       nextSettings,
       draftTextAnimationEffect,
     );
+    const requestedEditMode =
+      patch.editMode === 'perWord'
+        ? 'perWord'
+        : patch.editMode === 'fullText'
+          ? 'fullText'
+          : resolveTextAnimationEditMode(nextSettings);
+    const normalizedWordStyles =
+      requestedEditMode === 'perWord'
+        ? normalizeTextAnimationWordStyles(
+            patch.wordStyles ?? nextSettings.wordStyles,
+            nextEffect,
+            {
+              ...nextSettings,
+              editMode: 'fullText',
+              wordStyles: null,
+            },
+            isShortVideo,
+            draftResolvedTextValue,
+          )
+        : null;
     const sanitizedSettings: TextAnimationSettings =
       nextEffect === 'typewriter'
         ? {
             ...nextSettings,
             animatePerWord: false,
             textBoxEnabled: false,
+            editMode: requestedEditMode,
+            wordStyles: normalizedWordStyles,
           }
-        : nextSettings;
+        : {
+            ...nextSettings,
+            animatePerWord: nextSettings.animatePerWord,
+            editMode: requestedEditMode,
+            wordStyles: normalizedWordStyles,
+          };
 
     setDraftTextAnimationEffect(nextEffect);
     setDraftTextAnimationSettings(sanitizedSettings);
     setTextActionError(null);
+  };
+
+  const handleTextEditModeChange = (nextMode: TextAnimationEditMode) => {
+    if (nextMode === draftTextEditMode) return;
+
+    if (nextMode === 'perWord') {
+      updateTextSettings({
+        editMode: 'perWord',
+        wordStyles: normalizeTextAnimationWordStyles(
+          resolvedText.wordStyles,
+          resolvedDraftTextEffect,
+          {
+            ...resolvedText,
+            editMode: 'fullText',
+            wordStyles: null,
+          },
+          isShortVideo,
+          draftResolvedTextValue,
+        ),
+      });
+      setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
+      return;
+    }
+
+    updateTextSettings({
+      editMode: 'fullText',
+      wordStyles: null,
+    });
+    setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY);
+  };
+
+  const handleAllWordsTextEffectChange = (
+    nextEffect: NonNullable<SentenceItem['textAnimationEffect']>,
+  ) => {
+    const nextWordStyles = draftTextWords.map((_, index) =>
+      normalizeTextAnimationWordStyle(
+        {
+          ...(draftTextWordStyles[index] ?? draftTextWordStyleSeed),
+          effect: nextEffect,
+        },
+        nextEffect,
+        {
+          ...resolvedText,
+          editMode: 'fullText',
+          wordStyles: null,
+        },
+        isShortVideo,
+        draftResolvedTextValue,
+      ),
+    );
+
+    setDraftTextAnimationEffect(nextEffect);
+    setDraftTextAnimationSettings({
+      ...resolvedText,
+      presetKey: 'custom',
+      editMode: 'perWord',
+      wordStyles: nextWordStyles,
+    });
+    setTextActionError(null);
+  };
+
+  const updateTextWordStyle = (
+    index: number,
+    patch: Partial<TextAnimationWordStyle>,
+  ) => {
+    if (index < 0 || index >= draftTextWords.length) return;
+
+    const nextWordStyles = [...draftTextWordStyles];
+    nextWordStyles[index] = normalizeTextAnimationWordStyle(
+      {
+        ...(nextWordStyles[index] ?? draftTextWordStyleSeed),
+        ...patch,
+      },
+      resolvedDraftTextEffect,
+      {
+        ...resolvedText,
+        editMode: 'fullText',
+        wordStyles: null,
+      },
+      isShortVideo,
+      draftResolvedTextValue,
+    );
+
+    setDraftTextAnimationSettings({
+      ...resolvedText,
+      presetKey: 'custom',
+      editMode: 'perWord',
+      wordStyles: nextWordStyles,
+    });
+    setTextActionError(null);
+  };
+
+  const isAllWordsTextEditorTab = activeTextEditorTab === ALL_WORDS_TEXT_TAB_KEY;
+  const isWordSpecificTextEditorTab =
+    isPerWordTextEditMode && activeTextEditorWordIndex !== null;
+  const activeResolvedTextWordStyle =
+    activeTextEditorWordStyle ?? draftTextWordStyleSeed;
+  const currentWordLocalTextSettings = isWordSpecificTextEditorTab
+    ? activeResolvedTextWordStyle
+    : resolvedText;
+  const currentWordLocalTextEffect = isWordSpecificTextEditorTab
+    ? activeTextEditorWordEffect
+    : resolvedDraftTextEffect;
+  const isCurrentWordLocalTypewriterEffect = isWordSpecificTextEditorTab
+    ? isTypewriterWordEffect
+    : isTypewriterTextEffect;
+  const canShowSharedTextControls =
+    !isPerWordTextEditMode || isAllWordsTextEditorTab;
+  const canShowWordLocalTextControls =
+    !isPerWordTextEditMode || isWordSpecificTextEditorTab;
+
+  const updateCurrentWordLocalTextStyle = (
+    patch: Partial<TextAnimationWordStyle> & Partial<TextAnimationSettings>,
+  ) => {
+    if (isWordSpecificTextEditorTab && activeTextEditorWordIndex !== null) {
+      updateTextWordStyle(activeTextEditorWordIndex, patch);
+      return;
+    }
+
+    updateTextSettings(patch);
   };
 
   const updateOverlaySettings = (patch: Partial<OverlaySettings>) => {
@@ -2118,12 +2387,16 @@ export function ImageEffectsDetailModal({
       const saved = await onSaveTextAnimationPreset(
         trimmedTextSaveTitle,
         resolvedText,
-        draftTextSoundEffects,
+        effectiveDraftTextSoundEffects,
       );
       if (saved) {
         setDraftCustomTextAnimationId(saved.id);
         setDraftTextAnimationSettings({ ...resolvedText, presetKey: 'custom' });
-        setDraftTextSoundEffects(cloneSentenceSoundEffects(saved.soundEffects ?? draftTextSoundEffects));
+        setDraftTextSoundEffects(
+          cloneSentenceSoundEffects(
+            saved.soundEffects ?? effectiveDraftTextSoundEffects,
+          ),
+        );
         setTextSaveTitle('');
       }
     } catch (error) {
@@ -2208,7 +2481,7 @@ export function ImageEffectsDetailModal({
       const saved = await onUpdateTextAnimationPreset(
         selectedTextPreset.id,
         resolvedText,
-        draftTextSoundEffects,
+        effectiveDraftTextSoundEffects,
       );
       if (saved) {
         setDraftCustomTextAnimationId(saved.id);
@@ -2434,7 +2707,7 @@ export function ImageEffectsDetailModal({
           ? resolvedText
           : { ...resolvedText, presetKey: 'custom' },
       textAnimationText: String(draftTextAnimationText ?? '').trim() || null,
-      textSoundEffects: cloneSentenceSoundEffects(draftTextSoundEffects),
+      textSoundEffects: cloneSentenceSoundEffects(effectiveDraftTextSoundEffects),
       textBackgroundImage: draftTextBackgroundImage,
       textBackgroundImageUrl: draftTextBackgroundImageUrl,
       textBackgroundSavedImageId: draftTextBackgroundSavedImageId,
@@ -3075,6 +3348,7 @@ export function ImageEffectsDetailModal({
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {currentTab === 'text' ? (
               <>
+                {!isPerWordTextEditMode ? (
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
                     <div className="flex items-center gap-2">
@@ -3117,11 +3391,27 @@ export function ImageEffectsDetailModal({
                     </SelectContent>
                   </Select>
                 </div>
+                ) : null}
 
                 <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <SlidersHorizontal className="h-4 w-4 text-amber-600" />
-                    Text tuning
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+                    <div className="flex items-center gap-2">
+                      <SlidersHorizontal className="h-4 w-4 text-amber-600" />
+                      Text tuning
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => void handleStartFromBeginning('text')}
+                      disabled={stackStatusByKind.text === 'loading'}
+                      className={`h-10 rounded-full bg-linear-to-r from-amber-500 via-orange-500 to-rose-500 px-4 text-white shadow-lg transition-all duration-200 hover:scale-[1.03] hover:from-amber-400 hover:via-orange-400 hover:to-rose-400 ${stackStatusByKind.text === 'playing' ? 'animate-pulse' : ''}`}
+                    >
+                      {stackStatusByKind.text === 'loading' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="mr-2 h-4 w-4 fill-current" />
+                      )}
+                      Play sentence
+                    </Button>
                   </div>
                   <label className="space-y-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Hook text</span>
@@ -3133,7 +3423,77 @@ export function ImageEffectsDetailModal({
                       className={`h-11 rounded-xl border-slate-200 ${draftTextDirection === 'rtl' ? 'text-right' : 'text-left'}`}
                     />
                   </label>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-3">
+                  <div className="grid grid-cols-1 mt-2">
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Edit mode</div>
+                      <Select
+                        value={draftTextEditMode}
+                        onValueChange={(value) =>
+                          handleTextEditModeChange(value as TextAnimationEditMode)
+                        }
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Edit mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TEXT_ANIMATION_EDIT_MODE_VALUES.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {value === 'perWord'
+                                ? 'Edit each word separately'
+                                : 'Edit the full text hook'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {isPerWordTextEditMode ? (
+                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant={
+                            isAllWordsTextEditorTab ? 'default' : 'outline'
+                          }
+                          onClick={() => setActiveTextEditorTab(ALL_WORDS_TEXT_TAB_KEY)}
+                          className="h-9 rounded-xl"
+                        >
+                          All words
+                        </Button>
+                        {textEditorWordTabs.map((tab) => (
+                          <Button
+                            key={tab.key}
+                            type="button"
+                            variant={
+                              activeTextEditorTab === tab.key
+                                ? 'default'
+                                : 'outline'
+                            }
+                            onClick={() => setActiveTextEditorTab(tab.key)}
+                            className="h-9 rounded-xl"
+                            title={tab.fullLabel}
+                          >
+                            {`Word ${tab.index + 1}`}
+                          </Button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        Hook text splits in real time by spaces. The All words tab keeps shared layout and background settings, and each word tab controls only that word's animation and styling.
+                      </p>
+                      {isWordSpecificTextEditorTab ? (
+                        <p className="text-xs font-medium text-slate-700">
+                          {`Editing word ${
+                            (activeTextEditorWordIndex ?? 0) + 1
+                          }: ${
+                            draftTextWords[activeTextEditorWordIndex ?? 0] ??
+                            'Word'
+                          }`}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {canShowSharedTextControls ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-3">
                     <div className="space-y-2">
                       <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text align</div>
                       <Select
@@ -3183,7 +3543,33 @@ export function ImageEffectsDetailModal({
                       </Select>
                     </div>
                   </div>
-                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  ) : null}
+                  {isPerWordTextEditMode && isAllWordsTextEditorTab ? (
+                    <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Word animation</div>
+                      <Select
+                        value={resolvedDraftTextEffect ?? 'slideCutFast'}
+                        onValueChange={(value) =>
+                          handleAllWordsTextEffectChange(
+                            value as NonNullable<SentenceItem['textAnimationEffect']>,
+                          )
+                        }
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Animation style" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-80">
+                          {TEXT_ANIMATION_EFFECT_VALUES.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {getTextAnimationEffectLabel(value)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                  {canShowSharedTextControls ? (
+                    <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <input
                       type="checkbox"
                       checked={!isTypewriterTextEffect && resolvedText.animatePerWord === true}
@@ -3207,6 +3593,10 @@ export function ImageEffectsDetailModal({
                       </span>
                     </span>
                   </label>
+                  ) : null}
+                  
+                  {canShowSharedTextControls ? (
+                    <>
                   <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <input
                       type="checkbox"
@@ -3257,26 +3647,44 @@ export function ImageEffectsDetailModal({
                       </div>
                     </div>
                   ) : null}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text color</span>
-                      <Input type="color" value={resolvedText.textColor ?? '#ffffff'} onChange={(e) => updateTextSettings({ textColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                    </>
+                  ) : null}
+                  {isWordSpecificTextEditorTab ? (
+                    <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Word animation</div>
+                      <Select
+                        value={currentWordLocalTextEffect ?? 'slideCutFast'}
+                        onValueChange={(value) =>
+                          updateTextWordStyle(activeTextEditorWordIndex ?? 0, {
+                            effect: value as NonNullable<SentenceItem['textAnimationEffect']>,
+                          })
+                        }
+                      >
+                        <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white">
+                          <SelectValue placeholder="Animation style" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-80">
+                          {TEXT_ANIMATION_EFFECT_VALUES.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {getTextAnimationEffectLabel(value)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Accent color</span>
-                      <Input type="color" value={resolvedText.accentColor ?? '#facc15'} onChange={(e) => updateTextSettings({ accentColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
-                    </div>
-                  </div>
+                  ) : null}
+                  {canShowWordLocalTextControls ? (
+                    <>
                   <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={resolvedText.strokeEnabled === true}
+                      checked={currentWordLocalTextSettings.strokeEnabled === true}
                       onChange={(e) =>
-                        updateTextSettings({
+                        updateCurrentWordLocalTextStyle({
                           strokeEnabled: e.target.checked,
                           strokeWidthPx: e.target.checked
-                            ? Math.min(4, Math.max(0.1, Number(resolvedText.strokeWidthPx ?? 0) || 2))
-                            : resolvedText.strokeWidthPx ?? 2,
+                            ? Math.min(4, Math.max(0.1, Number(currentWordLocalTextSettings.strokeWidthPx ?? 0) || 2))
+                            : currentWordLocalTextSettings.strokeWidthPx ?? 2,
                         })
                       }
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
@@ -3288,45 +3696,41 @@ export function ImageEffectsDetailModal({
                       </span>
                     </span>
                   </label>
-                  {resolvedText.strokeEnabled === true ? (
+                  {currentWordLocalTextSettings.strokeEnabled === true ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="space-y-2">
                         <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Stroke color</span>
                         <Input
                           type="color"
-                          value={resolvedText.strokeColor ?? '#0f172a'}
-                          onChange={(e) => updateTextSettings({ strokeColor: e.target.value })}
+                          value={currentWordLocalTextSettings.strokeColor ?? '#0f172a'}
+                          onChange={(e) => updateCurrentWordLocalTextStyle({ strokeColor: e.target.value })}
                           className="h-11 rounded-xl border-slate-200 p-2"
                         />
                       </div>
                       <RangeField
                         label="Stroke strength"
-                        value={Math.min(4, Math.max(0.1, Number(resolvedText.strokeWidthPx ?? 0) || 2))}
+                        value={Math.min(4, Math.max(0.1, Number(currentWordLocalTextSettings.strokeWidthPx ?? 0) || 2))}
                         min={0.1}
                         max={4}
                         step={0.1}
-                        onChange={(value) => updateTextSettings({ strokeWidthPx: value, strokeEnabled: true })}
+                        onChange={(value) => updateCurrentWordLocalTextStyle({ strokeWidthPx: value, strokeEnabled: true })}
                       />
                     </div>
                   ) : null}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <RangeField
-                      label="Shadow opacity"
-                      value={resolvedText.shadowOpacity ?? 0.34}
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      onChange={(value) => updateTextSettings({ shadowOpacity: value })}
-                    />
-                    <RangeField
-                      label="Shadow blur"
-                      value={resolvedText.shadowBlurPx ?? 18}
-                      min={0}
-                      max={48}
-                      step={1}
-                      onChange={(value) => updateTextSettings({ shadowBlurPx: value })}
-                    />
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Text color</span>
+                      <Input type="color" value={currentWordLocalTextSettings.textColor ?? '#ffffff'} onChange={(e) => updateCurrentWordLocalTextStyle({ textColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                    </div>
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Accent color</span>
+                      <Input type="color" value={currentWordLocalTextSettings.accentColor ?? '#facc15'} onChange={(e) => updateCurrentWordLocalTextStyle({ accentColor: e.target.value })} className="h-11 rounded-xl border-slate-200 p-2" />
+                    </div>
                   </div>
+                    </>
+                  ) : null}
+                  {canShowSharedTextControls ? (
+                    <>
                   <div className="space-y-2">
                     <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Background mode</div>
                     <Select
@@ -3489,20 +3893,46 @@ export function ImageEffectsDetailModal({
                       </div>
                     </div>
                   ) : null}
-                  <RangeField label="Speed" value={resolvedText.speed ?? 1} min={0.4} max={2.4} step={0.1} onChange={(value) => updateTextSettings({ speed: value })} />
+                    </>
+                  ) : null}
+                  {canShowWordLocalTextControls ? (
+                    <>
+                  <RangeField label="Speed" value={currentWordLocalTextSettings.speed ?? 1} min={0.4} max={2.4} step={0.1} onChange={(value) => updateCurrentWordLocalTextStyle({ speed: value })} />
                   <RangeField
                     label="Start delay"
-                    value={resolvedText.startDelaySeconds ?? DEFAULT_TEXT_ANIMATION_START_DELAY}
+                    value={currentWordLocalTextSettings.startDelaySeconds ?? DEFAULT_TEXT_ANIMATION_START_DELAY}
                     min={TEXT_ANIMATION_START_DELAY_MIN}
                     max={TEXT_ANIMATION_START_DELAY_MAX}
                     step={TEXT_ANIMATION_START_DELAY_STEP}
-                    onChange={(value) => updateTextSettings({ startDelaySeconds: value })}
+                    onChange={(value) => updateCurrentWordLocalTextStyle({ startDelaySeconds: value })}
                   />
-                  <RangeField label="Font size" value={resolvedText.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateTextSettings({ fontSizePercent: value })} />
-                  <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
-                  <RangeField label="Letter spacing (em)" value={resolvedText.letterSpacingEm ?? 0.02} min={-0.08} max={0.24} step={0.01} onChange={(value) => updateTextSettings({ letterSpacingEm: value })} />
-                  <RangeField label="Line height" value={resolvedText.lineHeight ?? 0.92} min={0.75} max={2.2} step={0.05} onChange={(value) => updateTextSettings({ lineHeight: value })} />
-                  {resolvedText.animatePerWord === true && !isTypewriterTextEffect ? (
+                  <RangeField label="Font size" value={currentWordLocalTextSettings.fontSizePercent ?? 12} min={5} max={24} step={0.1} onChange={(value) => updateCurrentWordLocalTextStyle({ fontSizePercent: value })} />
+                  <RangeField label="Letter spacing (em)" value={currentWordLocalTextSettings.letterSpacingEm ?? 0.02} min={-0.08} max={0.24} step={0.01} onChange={(value) => updateCurrentWordLocalTextStyle({ letterSpacingEm: value })} />
+                  <RangeField label="Line height" value={currentWordLocalTextSettings.lineHeight ?? 0.92} min={0.75} max={2.2} step={0.05} onChange={(value) => updateCurrentWordLocalTextStyle({ lineHeight: value })} />
+                  <RangeField label="Animation intensity" value={currentWordLocalTextSettings.animationIntensity ?? 0.82} min={0} max={1.2} step={0.01} onChange={(value) => updateCurrentWordLocalTextStyle({ animationIntensity: value })} />
+                    </>
+                  ) : null}
+                  {isWordSpecificTextEditorTab ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <RangeField
+                        label="Offset X"
+                        value={activeResolvedTextWordStyle.offsetX ?? resolvedText.offsetX ?? 0}
+                        min={-35}
+                        max={35}
+                        step={1}
+                        onChange={(value) => updateTextWordStyle(activeTextEditorWordIndex ?? 0, { offsetX: value })}
+                      />
+                      <RangeField
+                        label="Offset Y"
+                        value={activeResolvedTextWordStyle.offsetY ?? resolvedText.offsetY ?? 0}
+                        min={-35}
+                        max={35}
+                        step={1}
+                        onChange={(value) => updateTextWordStyle(activeTextEditorWordIndex ?? 0, { offsetY: value })}
+                      />
+                    </div>
+                  ) : null}
+                  {canShowSharedTextControls && resolvedText.animatePerWord === true && !isTypewriterTextEffect ? (
                     <RangeField
                       label="Word delay"
                       value={resolvedText.wordDelaySeconds ?? DEFAULT_TEXT_ANIMATION_WORD_DELAY}
@@ -3512,13 +3942,19 @@ export function ImageEffectsDetailModal({
                       onChange={(value) => updateTextSettings({ wordDelaySeconds: value })}
                     />
                   ) : null}
+                  {canShowSharedTextControls ? (
+                    <>
+                  <RangeField label="Max width" value={resolvedText.maxWidthPercent ?? 76} min={30} max={100} step={1} onChange={(value) => updateTextSettings({ maxWidthPercent: value })} />
                   <RangeField label="Offset X" value={resolvedText.offsetX ?? 0} min={-35} max={35} step={1} onChange={(value) => updateTextSettings({ offsetX: value })} />
                   <RangeField label="Offset Y" value={resolvedText.offsetY ?? 0} min={-35} max={35} step={1} onChange={(value) => updateTextSettings({ offsetY: value })} />
                   <RangeField label="Background dim" value={resolvedText.backgroundDim ?? 0.38} min={0} max={0.92} step={0.01} onChange={(value) => updateTextSettings({ backgroundDim: value })} />
-                  <RangeField label="Animation intensity" value={resolvedText.animationIntensity ?? 0.82} min={0} max={1.2} step={0.01} onChange={(value) => updateTextSettings({ animationIntensity: value })} />
+                    </>
+                  ) : null}
                 </div>
 
-                {renderSoundEffectsSection('text')}
+                {!isPerWordTextEditMode || isAllWordsTextEditorTab
+                  ? renderSoundEffectsSection('text')
+                  : null}
 
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">

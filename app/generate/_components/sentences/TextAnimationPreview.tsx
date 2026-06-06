@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 import type { SentenceItem } from '../../_types/sentences';
 import type { SentenceSoundEffectItem } from '../../_types/sentences';
@@ -11,6 +11,7 @@ import {
 import { buildPreviewImageMotionStyle } from '../../_utils/imageMotionPreview';
 
 export const TEXT_ANIMATION_EFFECT_VALUES = [
+  'none',
   'popInBounceHook',
   'slideCutFast',
   'typewriter',
@@ -48,11 +49,16 @@ export type TextContentAlign = 'left' | 'center' | 'right';
 export type TextVerticalAlign = 'top' | 'middle' | 'bottom';
 export type TextCaseMode = 'original' | 'uppercase';
 export type TextDirection = 'ltr' | 'rtl';
+export type TextAnimationEditMode = 'fullText' | 'perWord';
 
 const TEXT_HORIZONTAL_ALIGN_VALUES = ['left', 'center', 'right'] as const;
 const TEXT_CONTENT_ALIGN_VALUES = ['left', 'center', 'right'] as const;
 const TEXT_VERTICAL_ALIGN_VALUES = ['top', 'middle', 'bottom'] as const;
 const TEXT_CASE_MODE_VALUES = ['original', 'uppercase'] as const;
+export const TEXT_ANIMATION_EDIT_MODE_VALUES = [
+  'fullText',
+  'perWord',
+] as const;
 
 export const TEXT_ANIMATION_SPEED_MIN = 0.4;
 export const TEXT_ANIMATION_SPEED_MAX = 2.4;
@@ -83,6 +89,7 @@ const SUBDIVISION_MAX_ITERATIONS = 10;
 
 export type TextAnimationSettings = {
   presetKey?: TextAnimationEffect | 'custom';
+  editMode?: TextAnimationEditMode;
   speed?: number;
   horizontalAlign?: TextHorizontalAlign;
   contentAlign?: TextContentAlign;
@@ -99,8 +106,6 @@ export type TextAnimationSettings = {
   strokeEnabled?: boolean;
   strokeColor?: string;
   strokeWidthPx?: number;
-  shadowOpacity?: number;
-  shadowBlurPx?: number;
   backgroundMode?: TextBackgroundMode;
   backgroundColor?: string;
   gradientFrom?: string;
@@ -116,7 +121,323 @@ export type TextAnimationSettings = {
   textBoxPaddingPx?: number;
   textBoxRadiusPx?: number;
   textBoxColor?: string;
+  wordStyles?: TextAnimationWordStyle[] | null;
 };
+
+export type TextAnimationWordStyle = {
+  effect?: TextAnimationEffect | null;
+  offsetX?: number;
+  offsetY?: number;
+  speed?: number;
+  fontSizePercent?: number;
+  fontWeight?: number;
+  letterSpacingEm?: number;
+  lineHeight?: number;
+  textColor?: string;
+  accentColor?: string;
+  strokeEnabled?: boolean;
+  strokeColor?: string;
+  strokeWidthPx?: number;
+  animationIntensity?: number;
+  startDelaySeconds?: number;
+  textCase?: TextCaseMode;
+};
+
+type TextAnimationWordStyleInput =
+  | Record<string, unknown>
+  | TextAnimationWordStyle
+  | null
+  | undefined;
+
+function getResolvedTextAnimationWords(sampleText?: string | null) {
+  return getWords(String(sampleText ?? '').trim());
+}
+
+export function resolveTextAnimationEditMode(
+  settings: Record<string, unknown> | TextAnimationSettings | null | undefined,
+): TextAnimationEditMode {
+  return settings?.editMode === 'perWord' ? 'perWord' : 'fullText';
+}
+
+function buildTextAnimationWordStyleSeed(
+  effect: TextAnimationEffect,
+  settings: TextAnimationSettings,
+): TextAnimationWordStyle {
+  return {
+    effect,
+    speed: settings.speed,
+    fontSizePercent: settings.fontSizePercent,
+    fontWeight: settings.fontWeight,
+    letterSpacingEm: settings.letterSpacingEm,
+    lineHeight: settings.lineHeight,
+    textColor: settings.textColor,
+    accentColor: settings.accentColor,
+    strokeEnabled: settings.strokeEnabled,
+    strokeColor: settings.strokeColor,
+    strokeWidthPx: settings.strokeWidthPx,
+    animationIntensity: settings.animationIntensity,
+    startDelaySeconds: settings.startDelaySeconds,
+    textCase: settings.textCase,
+  };
+}
+
+export function createTextAnimationWordStyleSeed(
+  effect: SentenceItem['textAnimationEffect'] | null | undefined,
+  settings: Record<string, unknown> | TextAnimationSettings | null | undefined,
+  isShortVideo = true,
+  sampleText?: string | null,
+): TextAnimationWordStyle {
+  const normalizedSeedInput =
+    settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? {
+          ...settings,
+          editMode: 'fullText' as const,
+          wordStyles: null,
+        }
+      : settings;
+  const resolvedEffect =
+    resolveTextAnimationEffectFromSettings(normalizedSeedInput, effect) ??
+    'slideCutFast';
+  const resolvedSettings = normalizeTextAnimationSettings(
+    normalizedSeedInput,
+    resolvedEffect,
+    isShortVideo,
+    sampleText,
+  );
+
+  return buildTextAnimationWordStyleSeed(resolvedEffect, resolvedSettings);
+}
+
+function normalizeOptionalTextAnimationWordOffset(value: unknown) {
+  if (value == null || value === '') {
+    return undefined;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return undefined;
+  }
+
+  return clamp(numeric, -35, 35);
+}
+
+export function normalizeTextAnimationWordStyle(
+  value: TextAnimationWordStyleInput,
+  fallbackEffect: SentenceItem['textAnimationEffect'] | null | undefined,
+  fallbackSettings: Record<string, unknown> | TextAnimationSettings,
+  isShortVideo = true,
+  sampleText?: string | null,
+): TextAnimationWordStyle {
+  const normalizedSeedInput =
+    fallbackSettings &&
+    typeof fallbackSettings === 'object' &&
+    !Array.isArray(fallbackSettings)
+      ? {
+          ...fallbackSettings,
+          editMode: 'fullText' as const,
+          wordStyles: null,
+        }
+      : fallbackSettings;
+  const resolvedEffect =
+    resolveTextAnimationEffectFromSettings(
+      normalizedSeedInput,
+      fallbackEffect,
+    ) ?? 'slideCutFast';
+  const resolvedSettings = normalizeTextAnimationSettings(
+    normalizedSeedInput,
+    resolvedEffect,
+    isShortVideo,
+    sampleText,
+  );
+  const seed = buildTextAnimationWordStyleSeed(
+    resolvedEffect,
+    resolvedSettings,
+  );
+  const input =
+    value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  const hasOffsetX = Boolean(
+    input && Object.prototype.hasOwnProperty.call(input, 'offsetX'),
+  );
+  const hasOffsetY = Boolean(
+    input && Object.prototype.hasOwnProperty.call(input, 'offsetY'),
+  );
+
+  return {
+    effect: resolveLegacyTextAnimationEffect(input?.effect) ?? seed.effect,
+    offsetX: hasOffsetX
+      ? normalizeOptionalTextAnimationWordOffset(input?.offsetX)
+      : undefined,
+    offsetY: hasOffsetY
+      ? normalizeOptionalTextAnimationWordOffset(input?.offsetY)
+      : undefined,
+    speed: getNumeric(
+      input?.speed,
+      seed.speed ?? DEFAULT_TEXT_ANIMATION_SPEED,
+      TEXT_ANIMATION_SPEED_MIN,
+      TEXT_ANIMATION_SPEED_MAX,
+    ),
+    fontSizePercent: getNumeric(
+      input?.fontSizePercent,
+      seed.fontSizePercent ?? resolvedSettings.fontSizePercent ?? 12,
+      5,
+      24,
+    ),
+    fontWeight: getNumeric(
+      input?.fontWeight,
+      seed.fontWeight ?? resolvedSettings.fontWeight ?? 800,
+      300,
+      900,
+    ),
+    letterSpacingEm: getNumeric(
+      input?.letterSpacingEm,
+      seed.letterSpacingEm ?? resolvedSettings.letterSpacingEm ?? 0.02,
+      -0.08,
+      0.24,
+    ),
+    lineHeight: isLegacyArabicDefaultLineHeight(input?.lineHeight, sampleText)
+      ? seed.lineHeight
+      : getNumeric(
+          input?.lineHeight,
+          seed.lineHeight ?? resolvedSettings.lineHeight ?? 1,
+          TEXT_ANIMATION_LINE_HEIGHT_MIN,
+          TEXT_ANIMATION_LINE_HEIGHT_MAX,
+        ),
+    textColor: getColor(
+      input?.textColor,
+      seed.textColor ?? resolvedSettings.textColor ?? '#ffffff',
+    ),
+    accentColor: getColor(
+      input?.accentColor,
+      seed.accentColor ?? resolvedSettings.accentColor ?? '#ffd60a',
+    ),
+    strokeEnabled:
+      input?.strokeEnabled === true
+        ? true
+        : input?.strokeEnabled === false
+          ? false
+          : seed.strokeEnabled,
+    strokeColor: getColor(
+      input?.strokeColor,
+      seed.strokeColor ?? resolvedSettings.strokeColor ?? '#0f172a',
+    ),
+    strokeWidthPx: getNumeric(
+      input?.strokeWidthPx,
+      seed.strokeWidthPx ?? resolvedSettings.strokeWidthPx ?? 0,
+      0,
+      4,
+    ),
+    animationIntensity: getNumeric(
+      input?.animationIntensity,
+      seed.animationIntensity ?? resolvedSettings.animationIntensity ?? 0.82,
+      0,
+      1.2,
+    ),
+    startDelaySeconds: getNumeric(
+      input?.startDelaySeconds,
+      seed.startDelaySeconds ?? resolvedSettings.startDelaySeconds ?? 0,
+      TEXT_ANIMATION_START_DELAY_MIN,
+      TEXT_ANIMATION_START_DELAY_MAX,
+    ),
+    textCase: getEnumValue(
+      input?.textCase,
+      TEXT_CASE_MODE_VALUES,
+      seed.textCase ?? resolvedSettings.textCase ?? 'uppercase',
+    ),
+  };
+}
+
+export function normalizeTextAnimationWordStyles(
+  value: unknown,
+  fallbackEffect: SentenceItem['textAnimationEffect'] | null | undefined,
+  fallbackSettings: Record<string, unknown> | TextAnimationSettings,
+  isShortVideo = true,
+  sampleText?: string | null,
+): TextAnimationWordStyle[] {
+  const input = Array.isArray(value) ? value : [];
+  const resolvedWords = getResolvedTextAnimationWords(sampleText);
+  const targetLength = resolvedWords.length > 0 ? resolvedWords.length : input.length;
+  const seed = createTextAnimationWordStyleSeed(
+    fallbackEffect,
+    fallbackSettings,
+    isShortVideo,
+    sampleText,
+  );
+
+  return Array.from({ length: Math.max(0, targetLength) }, (_, index) =>
+    index < input.length
+      ? normalizeTextAnimationWordStyle(
+          input[index] as TextAnimationWordStyleInput,
+          fallbackEffect,
+          fallbackSettings,
+          isShortVideo,
+          sampleText,
+        )
+      : { ...seed },
+  );
+}
+
+export function resolveTextAnimationWordPresentation(
+  sharedSettings: Record<string, unknown> | TextAnimationSettings | null | undefined,
+  fallbackEffect: SentenceItem['textAnimationEffect'] | null | undefined,
+  wordIndex: number,
+  isShortVideo = true,
+  sampleText?: string | null,
+): {
+  effect: TextAnimationEffect;
+  settings: TextAnimationSettings;
+} {
+  const resolvedEffect =
+    resolveTextAnimationEffectFromSettings(sharedSettings, fallbackEffect) ??
+    'slideCutFast';
+  const resolvedSettings = normalizeTextAnimationSettings(
+    sharedSettings,
+    resolvedEffect,
+    isShortVideo,
+    sampleText,
+  );
+  const wordStyles = normalizeTextAnimationWordStyles(
+    resolvedSettings.wordStyles,
+    resolvedEffect,
+    resolvedSettings,
+    isShortVideo,
+    sampleText,
+  );
+  const wordStyle = wordStyles[wordIndex] ??
+    buildTextAnimationWordStyleSeed(resolvedEffect, resolvedSettings);
+
+  return {
+    effect: resolveLegacyTextAnimationEffect(wordStyle.effect) ?? resolvedEffect,
+    settings: {
+      ...resolvedSettings,
+      presetKey:
+        resolveLegacyTextAnimationEffect(wordStyle.effect) ?? resolvedSettings.presetKey,
+      offsetX: wordStyle.offsetX ?? resolvedSettings.offsetX,
+      offsetY: wordStyle.offsetY ?? resolvedSettings.offsetY,
+      speed: wordStyle.speed ?? resolvedSettings.speed,
+      fontSizePercent: wordStyle.fontSizePercent ?? resolvedSettings.fontSizePercent,
+      fontWeight: wordStyle.fontWeight ?? resolvedSettings.fontWeight,
+      letterSpacingEm: wordStyle.letterSpacingEm ?? resolvedSettings.letterSpacingEm,
+      lineHeight: wordStyle.lineHeight ?? resolvedSettings.lineHeight,
+      textColor: wordStyle.textColor ?? resolvedSettings.textColor,
+      accentColor: wordStyle.accentColor ?? resolvedSettings.accentColor,
+      strokeEnabled: wordStyle.strokeEnabled ?? resolvedSettings.strokeEnabled,
+      strokeColor: wordStyle.strokeColor ?? resolvedSettings.strokeColor,
+      strokeWidthPx: wordStyle.strokeWidthPx ?? resolvedSettings.strokeWidthPx,
+      animationIntensity:
+        wordStyle.animationIntensity ?? resolvedSettings.animationIntensity,
+      startDelaySeconds:
+        wordStyle.startDelaySeconds ?? resolvedSettings.startDelaySeconds,
+      textCase: wordStyle.textCase ?? resolvedSettings.textCase,
+    },
+  };
+}
+
+export function getTextAnimationWords(
+  value: string | null | undefined,
+  sentenceText?: string | null,
+) {
+  return getWords(resolveTextAnimationText(value, sentenceText));
+}
 
 export function getTextAnimationSettingsForEffectChange(
   effect: SentenceItem['textAnimationEffect'] | null | undefined,
@@ -322,6 +643,7 @@ export function resolveTextAnimationDirection(
 export function getTextAnimationEffectLabel(effect: SentenceItem['textAnimationEffect'] | null | undefined) {
   const resolvedEffect = resolveLegacyTextAnimationEffect(effect);
 
+  if (resolvedEffect === 'none') return 'None';
   if (resolvedEffect === 'popInBounceHook') return 'Pop in bounce';
   if (resolvedEffect === 'typewriter') return 'Typewriter';
   if (resolvedEffect === 'scalePunchZoom') return 'Scale punch zoom';
@@ -363,8 +685,6 @@ export function getDefaultTextAnimationSettings(
     strokeEnabled: false,
     strokeColor: '#0f172a',
     strokeWidthPx: 0,
-    shadowOpacity: 0.34,
-    shadowBlurPx: 18,
     backgroundMode: 'inheritImage',
     backgroundColor: '#0f172a',
     gradientFrom: '#0f172a',
@@ -388,7 +708,6 @@ export function getDefaultTextAnimationSettings(
       speed: 1,
       offsetY: -10,
       animationIntensity: 1.02,
-      shadowOpacity: 0.4,
     };
   }
 
@@ -410,7 +729,6 @@ export function getDefaultTextAnimationSettings(
       fontWeight: 860,
       letterSpacingEm: 0.01,
       animationIntensity: 1.08,
-      shadowOpacity: 0.42,
     };
   }
 
@@ -429,8 +747,6 @@ export function getDefaultTextAnimationSettings(
       ...defaults,
       speed: 1.35,
       animationIntensity: 1.12,
-      shadowOpacity: 0.46,
-      shadowBlurPx: 22,
     };
   }
 
@@ -450,8 +766,6 @@ export function getDefaultTextAnimationSettings(
       ...defaults,
       speed: 0.9,
       animationIntensity: 0.72,
-      shadowOpacity: 0.26,
-      shadowBlurPx: 24,
     };
   }
 
@@ -491,10 +805,15 @@ export function normalizeTextAnimationSettings(
     isShortVideo,
     sampleText,
   );
-  const resolvedPresetKey =
-    resolveLegacyTextAnimationEffect(settings?.presetKey) ?? defaults.presetKey;
+  const resolvedPresetKey: TextAnimationEffect =
+    resolveLegacyTextAnimationEffect(settings?.presetKey) ??
+    resolveLegacyTextAnimationEffect(defaults.presetKey) ??
+    'slideCutFast';
+  const editMode = resolveTextAnimationEditMode(settings);
   const animatePerWord =
-    resolvedPresetKey !== 'typewriter' && settings?.animatePerWord === true;
+    resolvedPresetKey !== 'typewriter' &&
+    resolvedPresetKey !== 'none' &&
+    settings?.animatePerWord === true;
   const textBoxEnabled =
     resolvedPresetKey !== 'typewriter' && settings?.textBoxEnabled === true;
   const strokeWidthPx = getNumeric(settings?.strokeWidthPx, defaults.strokeWidthPx ?? 0, 0, 4);
@@ -512,8 +831,9 @@ export function normalizeTextAnimationSettings(
         TEXT_ANIMATION_LINE_HEIGHT_MAX,
       );
 
-  return {
+  const normalizedSettings: TextAnimationSettings = {
     presetKey: resolvedPresetKey,
+    editMode,
     speed: getNumeric(settings?.speed, defaults.speed ?? DEFAULT_TEXT_ANIMATION_SPEED, TEXT_ANIMATION_SPEED_MIN, TEXT_ANIMATION_SPEED_MAX),
     horizontalAlign: getEnumValue(settings?.horizontalAlign, TEXT_HORIZONTAL_ALIGN_VALUES, defaults.horizontalAlign ?? 'center'),
     contentAlign: getEnumValue(settings?.contentAlign, TEXT_CONTENT_ALIGN_VALUES, defaults.contentAlign ?? defaults.horizontalAlign ?? 'left'),
@@ -530,8 +850,6 @@ export function normalizeTextAnimationSettings(
     strokeEnabled,
     strokeColor: getColor(settings?.strokeColor, defaults.strokeColor ?? '#0f172a'),
     strokeWidthPx,
-    shadowOpacity: getNumeric(settings?.shadowOpacity, defaults.shadowOpacity ?? 0.34, 0, 1),
-    shadowBlurPx: getNumeric(settings?.shadowBlurPx, defaults.shadowBlurPx ?? 18, 0, 48),
     backgroundMode: getEnumValue(settings?.backgroundMode, TEXT_BACKGROUND_MODE_VALUES, defaults.backgroundMode ?? 'inheritImage'),
     backgroundColor: getColor(settings?.backgroundColor, defaults.backgroundColor ?? '#0f172a'),
     gradientFrom: getColor(settings?.gradientFrom, defaults.gradientFrom ?? '#0f172a'),
@@ -557,7 +875,21 @@ export function normalizeTextAnimationSettings(
     textBoxPaddingPx: getNumeric(settings?.textBoxPaddingPx, defaults.textBoxPaddingPx ?? 12, 0, 48),
     textBoxRadiusPx: getNumeric(settings?.textBoxRadiusPx, defaults.textBoxRadiusPx ?? 12, 0, 48),
     textBoxColor: getColor(settings?.textBoxColor, defaults.textBoxColor ?? '#0f172a'),
+    wordStyles: null,
   };
+
+  normalizedSettings.wordStyles =
+    editMode === 'perWord'
+      ? normalizeTextAnimationWordStyles(
+          settings?.wordStyles,
+          resolvedPresetKey,
+          normalizedSettings,
+          isShortVideo,
+          sampleText,
+        )
+      : null;
+
+  return normalizedSettings;
 }
 
 export function resolveTextAnimationEffectFromSettings(
@@ -870,6 +1202,35 @@ function buildTextBoxStyle(settings: TextAnimationSettings): CSSProperties | nul
   };
 }
 
+function mergeTextAnimationOffsetStyle(
+  offsetX: number | undefined,
+  offsetY: number | undefined,
+  referenceWidthPx: number,
+  referenceHeightPx: number,
+  animatedStyle: CSSProperties | null | undefined,
+): CSSProperties | null {
+  const hasOffset =
+    Math.abs(offsetX ?? 0) > 0.001 || Math.abs(offsetY ?? 0) > 0.001;
+  const offsetTransform = hasOffset
+    ? `translate(${((referenceWidthPx * (offsetX ?? 0)) / 100).toFixed(2)}px, ${((referenceHeightPx * (offsetY ?? 0)) / 100).toFixed(2)}px)`
+    : '';
+  const animatedTransform =
+    typeof animatedStyle?.transform === 'string' ? animatedStyle.transform : '';
+  const mergedTransform =
+    offsetTransform && animatedTransform
+      ? `${offsetTransform} ${animatedTransform}`
+      : offsetTransform || animatedTransform || undefined;
+
+  if (!animatedStyle) {
+    return mergedTransform ? { transform: mergedTransform } : null;
+  }
+
+  return {
+    ...animatedStyle,
+    transform: mergedTransform,
+  };
+}
+
 function renderAccentText(
   displayText: string,
   accentBoundary: number,
@@ -938,12 +1299,22 @@ function buildStrokeShadowLayers(strokeWidthPx: number, strokeColor?: string) {
   );
 }
 
+function buildBaseTextDropShadow(animationIntensity?: number) {
+  return `0 ${(6 + (animationIntensity ?? 0.82) * 6).toFixed(1)}px 18.0px rgba(2, 6, 23, 0.340)`;
+}
+
 function getAnimatedTextStyle(
   effect: TextAnimationEffect,
   elapsedMs: number,
   durationMs: number,
   animationIntensity: number,
 ): CSSProperties {
+  if (effect === 'none') {
+    return {
+      opacity: 1,
+    };
+  }
+
   const progress = clamp(elapsedMs / Math.max(durationMs, 1), 0, 1);
   const easedProgress = getBezierProgress(
     progress,
@@ -1165,6 +1536,8 @@ export function TextAnimationPreview({
   repeatMotion = false,
   motionResetKey,
 }: TextAnimationPreviewProps) {
+  const previewRootRef = useRef<HTMLDivElement | null>(null);
+  const [previewBounds, setPreviewBounds] = useState({ width: 0, height: 0 });
   const previewText = resolveTextAnimationText(text, sentenceText);
   const resolvedEffect = resolveTextAnimationEffectFromSettings(
     settings,
@@ -1180,6 +1553,9 @@ export function TextAnimationPreview({
     previewText,
     resolvedSettings.textCase ?? 'uppercase',
   );
+  const sourceWords = getResolvedTextAnimationWords(previewText);
+  const isPerWordMode =
+    resolvedSettings.editMode === 'perWord' && sourceWords.length > 0;
   const resolvedFontFamily = String(fontFamily ?? '').trim() || resolveTextAnimationFontFamily(resolvedText);
   const resolvedBackgroundImageUrl = String(backgroundImageUrl ?? '').trim() || undefined;
   const resolvedBackgroundVideoUrl = String(backgroundVideoUrl ?? '').trim() || undefined;
@@ -1193,19 +1569,64 @@ export function TextAnimationPreview({
   const animationDurationMs = getTextAnimationIntroDurationMs(
     resolvedSettings.speed ?? DEFAULT_TEXT_ANIMATION_SPEED,
   );
+  const wordDelayMs = getWordDelayMs(resolvedSettings);
   const strokeWidthPx = resolvedSettings.strokeWidthPx ?? 0;
   const strokeEnabled = resolvedSettings.strokeEnabled === true && strokeWidthPx > 0;
-  const words = resolvedText.split(/\s+/u).filter(Boolean);
+  const perWordItems = isPerWordMode
+    ? sourceWords.map((word, index) => {
+        const wordPresentation = resolveTextAnimationWordPresentation(
+          resolvedSettings,
+          resolvedEffect,
+          index,
+          isShortVideo,
+          previewText,
+        );
+        const wordEffect = wordPresentation.effect;
+        const wordSettings = wordPresentation.settings;
+        const displayText = formatDisplayText(
+          word,
+          wordSettings.textCase ?? 'uppercase',
+        );
+
+        return {
+          key: `${word}-${index}`,
+          displayText,
+          effect: wordEffect,
+          settings: wordSettings,
+          animationDurationMs: getTextAnimationIntroDurationMs(
+            wordSettings.speed ?? DEFAULT_TEXT_ANIMATION_SPEED,
+          ),
+          startDelayMs:
+            getStartDelayMs(wordSettings) +
+            (resolvedSettings.animatePerWord === true ? index * wordDelayMs : 0),
+          typewriterGraphemes:
+            wordEffect === 'typewriter' ? getGraphemes(displayText) : [],
+        };
+      })
+    : [];
+  const words = isPerWordMode
+    ? perWordItems.map((item) => item.displayText)
+    : resolvedText.split(/\s+/u).filter(Boolean);
   const animatePerWord =
+    !isPerWordMode &&
     resolvedEffect !== 'typewriter' &&
+    resolvedEffect !== 'none' &&
     resolvedSettings.animatePerWord === true &&
     words.length > 1;
   const startDelayMs = getStartDelayMs(resolvedSettings);
-  const wordDelayMs = getWordDelayMs(resolvedSettings);
   const totalAnimationWindowMs =
-    startDelayMs +
-    animationDurationMs +
-    (animatePerWord ? wordDelayMs * Math.max(0, words.length - 1) : 0);
+    isPerWordMode
+      ? perWordItems.reduce(
+          (maxDuration, item) =>
+            Math.max(
+              maxDuration,
+              item.startDelayMs + item.animationDurationMs,
+            ),
+          0,
+        )
+      : startDelayMs +
+        animationDurationMs +
+        (animatePerWord ? wordDelayMs * Math.max(0, words.length - 1) : 0);
   const [animationElapsedMs, setAnimationElapsedMs] = useState(0);
   const textDirection = resolveTextAnimationDirection(text, sentenceText);
   const contentAlign = resolveTextAnimationDisplayAlign(resolvedSettings, textDirection);
@@ -1273,6 +1694,43 @@ export function TextAnimationPreview({
     };
   }, [enableMotion, motionResetKey, repeatMotion, totalAnimationWindowMs]);
 
+  useEffect(() => {
+    const node = previewRootRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    const updateBounds = () => {
+      const nextWidth = node.clientWidth;
+      const nextHeight = node.clientHeight;
+
+      setPreviewBounds((currentBounds) =>
+        currentBounds.width === nextWidth && currentBounds.height === nextHeight
+          ? currentBounds
+          : { width: nextWidth, height: nextHeight },
+      );
+    };
+
+    updateBounds();
+
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(() => {
+        updateBounds();
+      });
+      observer.observe(node);
+
+      return () => {
+        observer.disconnect();
+      };
+    }
+
+    window.addEventListener('resize', updateBounds);
+
+    return () => {
+      window.removeEventListener('resize', updateBounds);
+    };
+  }, []);
+
   const delayedAnimationElapsedMs = Math.max(0, animationElapsedMs - startDelayMs);
   const typewriterVisibleText =
     resolvedEffect === 'typewriter'
@@ -1291,7 +1749,7 @@ export function TextAnimationPreview({
     WebkitTextStroke: strokeEnabled ? `${strokeWidthPx.toFixed(2)}px ${resolvedSettings.strokeColor}` : undefined,
     paintOrder: 'stroke fill',
   };
-  const baseDropShadow = `0 ${(6 + (resolvedSettings.animationIntensity ?? 0.82) * 6).toFixed(1)}px ${(resolvedSettings.shadowBlurPx ?? 18).toFixed(1)}px rgba(2, 6, 23, ${(resolvedSettings.shadowOpacity ?? 0.34).toFixed(3)})`;
+  const baseDropShadow = buildBaseTextDropShadow(resolvedSettings.animationIntensity);
   const strokeShadowLayers = strokeEnabled
     ? buildStrokeShadowLayers(strokeWidthPx, resolvedSettings.strokeColor)
     : [];
@@ -1338,14 +1796,15 @@ export function TextAnimationPreview({
     boxSizing: 'content-box',
     position: resolvedEffect === 'typewriter' ? 'relative' : undefined,
     ...(textBoxStyle ?? null),
-    ...(animatePerWord ? null : blockAnimatedStyle),
-    willChange: enableMotion && !animatePerWord
+    ...((animatePerWord || isPerWordMode) ? null : blockAnimatedStyle),
+    willChange: enableMotion && !animatePerWord && !isPerWordMode
       ? 'transform, opacity, clip-path, filter'
       : undefined,
   };
 
   return (
     <div
+      ref={previewRootRef}
       className={className ? `relative overflow-hidden ${className}` : 'relative overflow-hidden'}
       style={{
         ...backgroundStyle,
@@ -1428,14 +1887,132 @@ export function TextAnimationPreview({
         style={{
           justifyContent: resolveJustifyContent(horizontalAlign),
           alignItems: resolveAlignItems(resolvedSettings.verticalAlign ?? 'middle'),
-          transform: `translate(${(resolvedSettings.offsetX ?? 0).toFixed(1)}%, ${(resolvedSettings.offsetY ?? 0).toFixed(1)}%)`,
+          transform: isPerWordMode
+            ? undefined
+            : `translate(${(resolvedSettings.offsetX ?? 0).toFixed(1)}%, ${(resolvedSettings.offsetY ?? 0).toFixed(1)}%)`,
         }}
       >
         <div
           dir={textDirection}
           style={blockWrapperStyle}
         >
-          {animatePerWord
+          {isPerWordMode
+            ? (
+              <div style={perWordTextStyle}>
+                {perWordItems.map((item) => {
+                  const wordStrokeWidthPx = item.settings.strokeWidthPx ?? 0;
+                  const wordStrokeEnabled =
+                    item.settings.strokeEnabled === true &&
+                    wordStrokeWidthPx > 0;
+                  const wordTextPaintStyle: CSSProperties = {
+                    WebkitTextStroke: wordStrokeEnabled
+                      ? `${wordStrokeWidthPx.toFixed(2)}px ${item.settings.strokeColor}`
+                      : undefined,
+                    paintOrder: 'stroke fill',
+                  };
+                  const wordBaseDropShadow = buildBaseTextDropShadow(item.settings.animationIntensity);
+                  const wordStrokeShadowLayers = wordStrokeEnabled
+                    ? buildStrokeShadowLayers(
+                        wordStrokeWidthPx,
+                        item.settings.strokeColor,
+                      )
+                    : [];
+                  const wordTextStyle: CSSProperties = {
+                    display: 'inline-block',
+                    color: item.settings.textColor,
+                    fontWeight: item.settings.fontWeight,
+                    fontSize: `clamp(1.2rem, ${(item.settings.fontSizePercent ?? 12).toFixed(2)}cqw, 5.8rem)`,
+                    lineHeight: String(
+                      resolveDisplayLineHeight(item.settings, textDirection),
+                    ),
+                    letterSpacing: `${(item.settings.letterSpacingEm ?? 0.02).toFixed(3)}em`,
+                    textAlign: contentAlign,
+                    direction: textDirection,
+                    unicodeBidi: 'plaintext',
+                    maxWidth: '100%',
+                    fontFamily: resolvedFontFamily,
+                    textShadow: [...wordStrokeShadowLayers, wordBaseDropShadow].join(', '),
+                    ...wordTextPaintStyle,
+                    whiteSpace: 'pre-wrap',
+                  };
+                  const delayedWordElapsedMs = Math.max(
+                    0,
+                    animationElapsedMs - item.startDelayMs,
+                  );
+                  const animatedWordStyle = enableMotion
+                    ? getAnimatedTextStyle(
+                        item.effect,
+                        delayedWordElapsedMs,
+                        item.animationDurationMs,
+                        item.settings.animationIntensity ?? 0.82,
+                      )
+                    : null;
+                  const wordAnimatedStyle = mergeTextAnimationOffsetStyle(
+                    item.settings.offsetX,
+                    item.settings.offsetY,
+                    previewBounds.width,
+                    previewBounds.height,
+                    animatedWordStyle,
+                  );
+
+                  if (item.effect === 'typewriter') {
+                    const visibleText = item.typewriterGraphemes
+                      .slice(
+                        0,
+                        getTypewriterVisibleGraphemeCount(
+                          delayedWordElapsedMs,
+                          item.animationDurationMs,
+                          item.typewriterGraphemes.length,
+                        ),
+                      )
+                      .join('');
+
+                    return (
+                      <span
+                        key={item.key}
+                        style={{
+                          display: 'inline-block',
+                          position: 'relative',
+                          willChange: enableMotion
+                            ? 'transform, opacity, clip-path, filter'
+                            : undefined,
+                        }}
+                      >
+                        <span style={{ ...wordTextStyle, opacity: 0 }}>
+                          {item.displayText}
+                        </span>
+                        <span
+                          style={{
+                            ...wordTextStyle,
+                            ...(wordAnimatedStyle ?? null),
+                            position: 'absolute',
+                            inset: 0,
+                          }}
+                        >
+                          {visibleText}
+                        </span>
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <span
+                      key={item.key}
+                      style={{
+                        ...wordTextStyle,
+                        ...(wordAnimatedStyle ?? null),
+                        willChange: enableMotion
+                          ? 'transform, opacity, clip-path, filter'
+                          : undefined,
+                      }}
+                    >
+                      {item.displayText}
+                    </span>
+                  );
+                })}
+              </div>
+            )
+            : animatePerWord
             ? (
               <div style={perWordTextStyle}>
                 {words.map((word, sourceIndex) => {

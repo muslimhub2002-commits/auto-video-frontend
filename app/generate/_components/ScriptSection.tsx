@@ -692,7 +692,7 @@ export function ScriptSection(props: ScriptSectionProps) {
 
               {isScriptIdeasLoading ? (
                 <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {Array.from({ length: 5 }).map((_, index) => (
+                  {Array.from({ length: 6 }).map((_, index) => (
                     <div
                       key={index}
                       className="rounded-2xl border border-amber-100 bg-white/90 p-4"

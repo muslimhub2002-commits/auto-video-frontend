@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { signIn } from 'next-auth/react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
@@ -11,22 +10,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { authService } from '@/lib/auth';
+import { seedClientSession } from '@/lib/client-session';
 import { registerSchema, type RegisterFormData } from '@/lib/validations/auth';
 import { GoogleSignInButton } from './GoogleSignInButton';
-
-const readSignInError = (result: unknown) => {
-  if (!result || typeof result !== 'object') {
-    return null;
-  }
-
-  const code = 'code' in result && typeof result.code === 'string' ? result.code.trim() : '';
-  if (code) {
-    return decodeURIComponent(code);
-  }
-
-  const error = 'error' in result && typeof result.error === 'string' ? result.error.trim() : '';
-  return error || null;
-};
 
 export function SignupForm() {
   const router = useRouter();
@@ -46,20 +32,16 @@ export function SignupForm() {
     setError(null);
 
     try {
-      const { confirmPassword: _confirmPassword, ...registerData } = data;
-      await authService.register(registerData);
-
-      const result = await signIn('credentials', {
-        email: registerData.email,
-        password: registerData.password,
-        redirect: false,
-        callbackUrl: '/generate',
+      const registerData = {
+        email: data.email,
+        password: data.password,
+      };
+      const response = await authService.register(registerData);
+      seedClientSession({
+        user: response.user,
+        backendAccessToken: response.access_token,
+        authProvider: 'credentials',
       });
-
-      if (!result?.ok) {
-        setError(readSignInError(result) ?? 'Account created, but automatic sign-in failed');
-        return;
-      }
 
       router.replace('/generate');
       router.refresh();

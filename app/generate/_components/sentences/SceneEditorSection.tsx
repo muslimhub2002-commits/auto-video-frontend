@@ -13,6 +13,7 @@ import {
   Clapperboard,
   FolderOpen,
   Images,
+  LayoutGrid,
   ListFilter,
   Loader2,
   MapPin,
@@ -183,6 +184,7 @@ type SceneEditorSectionProps = {
   sentences: SentenceItem[];
   isShortVideo: boolean;
   sceneDurationSecondsByIndex: Array<number | null>;
+  onOpenTimelineEditor?: () => void;
   isGeneratingAllImages: boolean;
   onGenerateAllImages?: (() => void) | (() => Promise<void>);
   isApplyingBulkFeelingCues?: boolean;
@@ -978,6 +980,7 @@ export function SceneEditorSection({
   sentences,
   isShortVideo,
   sceneDurationSecondsByIndex,
+  onOpenTimelineEditor,
   isGeneratingAllImages,
   onGenerateAllImages,
   isApplyingBulkFeelingCues = false,
@@ -1292,6 +1295,18 @@ export function SceneEditorSection({
                 </div>
               </div>
             </div>
+
+            <Button
+              type="button"
+              size="sm"
+              onClick={onOpenTimelineEditor}
+              disabled={!onOpenTimelineEditor}
+              className="gap-2 h-11 px-5 rounded-xl bg-linear-to-r from-fuchsia-600 via-violet-600 to-indigo-600 text-white shadow-lg shadow-fuchsia-500/20 transition-all duration-200 hover:from-fuchsia-700 hover:via-violet-700 hover:to-indigo-700 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
+              title="Switch to the multi-lane timeline editor"
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="text-sm font-semibold">Open Timeline Editor</span>
+            </Button>
           </div>
 
           <div className="flex w-full flex-wrap items-stretch gap-3">

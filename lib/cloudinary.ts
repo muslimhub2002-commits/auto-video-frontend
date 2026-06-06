@@ -3,15 +3,23 @@ import { getBackendAccessToken } from './client-session';
 
 export type CloudinaryResourceType = 'image' | 'video' | 'audio';
 
+export type ManagedUploadProviderName =
+  | 'cloudinary'
+  | 'uploadcare'
+  | 'filestack'
+  | 'smash';
+
 export type CloudinaryUploadOptions = {
   resourceType: CloudinaryResourceType;
   folder: string;
+  excludedProviders?: ManagedUploadProviderName[];
 };
 
 export type EnsurePublicUrlOptions = {
   resourceType: CloudinaryResourceType;
   folder: string;
   filename?: string;
+  excludedProviders?: ManagedUploadProviderName[];
 };
 
 const UUID_REGEX =
@@ -106,6 +114,9 @@ export async function uploadManagedFile(
   form.append('file', file, file.name);
   form.append('folder', options.folder);
   form.append('resourceType', options.resourceType);
+  if (options.excludedProviders?.length) {
+    form.append('excludedProviders', options.excludedProviders.join(','));
+  }
 
   const response = await fetch(`${API_URL}/uploads/file`, {
     method: 'POST',
@@ -151,6 +162,9 @@ export async function ensureManagedPublicUrl(
       folder: options.folder,
       resourceType: options.resourceType,
       ...(options.filename ? { filename: options.filename } : {}),
+      ...(options.excludedProviders?.length
+        ? { excludedProviders: options.excludedProviders.join(',') }
+        : {}),
     }),
   });
 

@@ -53,6 +53,7 @@ export type SentenceItem = {
   imageEffectsMode?: 'quick' | 'detailed';
   alignSoundEffectsToSceneEnd?: boolean;
   textAnimationEffect?:
+    | 'none'
     | 'popInBounceHook'
     | 'slideCutFast'
     | 'typewriter'

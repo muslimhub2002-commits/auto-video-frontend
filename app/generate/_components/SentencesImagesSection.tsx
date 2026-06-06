@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  Suspense,
+  lazy,
   useState,
   type ChangeEvent,
   type Dispatch,
@@ -28,18 +30,23 @@ import {
 } from '@/components/ui/select';
 
 import type { SentenceItem } from '../_types/sentences';
+import type { TimelineDraftClip } from '../_types/timeline-editor';
+import { useTimelineEditorDraft } from '../_hooks/useTimelineEditorDraft';
 import { useSentenceEnhancement } from '../_hooks/useSentenceEnhancement';
 import { useEnhanceImagePrompt } from '../_hooks/useEnhanceImagePrompt';
 import { useImageModelOptions } from '../_hooks/useImageModelOptions';
 import { LlmModelSelect } from './LlmModelSelect';
 import { ImagePreviewOverlay } from './sentences/ImagePreviewOverlay';
+import { ImageEffectsDetailModal } from './sentences/ImageEffectsDetailModal';
 import { EnhanceWithPromptModal } from './sentences/EnhanceWithPromptModal';
 import { EnhanceImagePromptModal } from './sentences/EnhanceImagePromptModal';
 import { AddSuspenseSceneModal } from './sentences/AddSuspenseSceneModal';
 import { GenerateTestVideoModal } from './sentences/GenerateTestVideoModal';
 import { EmptyScenesState } from './sentences/EmptyScenesState';
-import { SceneEditorSection } from './sentences/SceneEditorSection';
-import { getDefaultImageMotionSpeed } from './sentences/ImageEffectPreview';
+import {
+  getDefaultImageMotionSpeed,
+  normalizeOverlaySettings,
+} from './sentences/ImageEffectPreview';
 import type { GenerateTestVideoRequest } from './sentences/test-video.types';
 import type {
   ImageFilterPresetDto,
@@ -53,6 +60,26 @@ import type {
   TextAnimationPresetDto,
   TextAnimationSettings,
 } from './sentences/TextAnimationPreview';
+import {
+  normalizeTextAnimationSettings,
+  resolveTextAnimationEffectFromSettings,
+  resolveTextAnimationText,
+} from './sentences/TextAnimationPreview';
+import { useManagedObjectUrl } from './sentences/useManagedObjectUrl';
+
+const LazySceneEditorSection = lazy(() =>
+  import('./sentences/SceneEditorSection').then((module) => ({
+    default: module.SceneEditorSection,
+  })),
+);
+
+const LazyTimelineEditorSection = lazy(() =>
+  import('./sentences/TimelineEditorSection').then((module) => ({
+    default: module.TimelineEditorSection,
+  })),
+);
+
+type EditorMode = 'scene' | 'timeline';
 
 type ScriptCharacter = {
   key: string;
@@ -74,10 +101,108 @@ type ShortsTabMeta = {
   count: number;
 };
 
+type TimelineSoundtrackSelection = {
+  label: string;
+  subtitle: string;
+  volumePercent: number;
+  canEdit: boolean;
+};
+
+type TimelineVoiceTrackSelection = {
+  label: string;
+  subtitle: string;
+  durationSeconds: number;
+  canEdit: boolean;
+};
+
+type TimelineDetailTab = 'visual' | 'motion' | 'text' | 'overlay';
+
+type TimelineEffectModalState = {
+  sentenceId: string;
+  activeTab: TimelineDetailTab;
+};
+
+function resolveTimelineFallbackSceneTab(
+  sentence: Pick<SentenceItem, 'mediaMode'>,
+): 'image' | 'video' {
+  return sentence.mediaMode === 'frames' ? 'video' : 'image';
+}
+
+function resolveTimelineSentenceSceneTab(
+  sentence: Pick<SentenceItem, 'sceneTab' | 'mediaMode'>,
+): NonNullable<SentenceItem['sceneTab']> {
+  if (
+    sentence.sceneTab === 'image' ||
+    sentence.sceneTab === 'video' ||
+    sentence.sceneTab === 'text' ||
+    sentence.sceneTab === 'overlay'
+  ) {
+    return sentence.sceneTab;
+  }
+
+  return sentence.mediaMode === 'frames' ? 'video' : 'image';
+}
+
+function getFirstNonEmptyTimelineUrl(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    const normalized = String(candidate ?? '').trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function buildClearedTimelineTextLayerPatch(): Partial<SentenceItem> {
+  return {
+    textAnimationEffect: null,
+    textAnimationText: null,
+    customTextAnimationId: null,
+    textAnimationSettings: null,
+    textSoundEffects: [],
+    textBackgroundImage: null,
+    textBackgroundImageUrl: null,
+    textBackgroundSavedImageId: null,
+    textBackgroundVideo: null,
+    textBackgroundVideoUrl: null,
+    textBackgroundSavedVideoId: null,
+  };
+}
+
+function buildClearedTimelineOverlayLayerPatch(): Partial<SentenceItem> {
+  return {
+    customOverlayId: null,
+    overlayFile: null,
+    overlayUrl: null,
+    overlayMimeType: null,
+    overlaySettings: null,
+    overlaySoundEffects: [],
+  };
+}
+
+function buildClearedTimelineVideoPatch(): Partial<SentenceItem> {
+  return {
+    video: null,
+    videoUrl: null,
+    savedVideoId: null,
+    framesVideoUrl: null,
+    framesSavedVideoId: null,
+    textVideoUrl: null,
+    textSavedVideoId: null,
+    referenceVideoUrl: null,
+    referenceSavedVideoId: null,
+  };
+}
+
 type SentencesImagesSectionProps = {
   sentences: SentenceItem[];
   isShortVideo: boolean;
   sceneDurationSecondsByIndex: Array<number | null>;
+  editorMode?: EditorMode;
+  onEditorModeChange?: (mode: EditorMode) => void;
   isLongForm?: boolean;
 
   shortsTabs?: ShortsTabMeta[];
@@ -211,6 +336,11 @@ type SentencesImagesSectionProps = {
     value: NonNullable<SentenceItem['transitionToNext']> | null,
   ) => void;
   onOpenTransitionSoundEditor: (index: number) => void;
+  timelineVoiceTrack?: TimelineVoiceTrackSelection | null;
+  onOpenTimelineVoiceEditor?: () => void;
+  onOpenSentenceVoiceEditor?: (sentenceId: string) => void;
+  timelineSoundtrack?: TimelineSoundtrackSelection | null;
+  onOpenTimelineSoundtrackEditor?: () => void;
   imagePromptModel: string;
   onImagePromptModelChange: (value: string) => void;
   imageModel: string;
@@ -307,6 +437,8 @@ export function SentencesImagesSection({
   sentences,
   isShortVideo,
   sceneDurationSecondsByIndex,
+  editorMode = 'scene',
+  onEditorModeChange,
   isGeneratingAllImages,
   onGenerateAllImages,
   isApplyingBulkFeelingCues = false,
@@ -373,6 +505,11 @@ export function SentencesImagesSection({
   onSentenceImageMotionSpeedChange,
   onTransitionToNextChange,
   onOpenTransitionSoundEditor,
+  timelineVoiceTrack = null,
+  onOpenTimelineVoiceEditor,
+  onOpenSentenceVoiceEditor,
+  timelineSoundtrack = null,
+  onOpenTimelineSoundtrackEditor,
   imagePromptModel,
   onImagePromptModelChange,
   imageModel,
@@ -429,6 +566,415 @@ export function SentencesImagesSection({
   apiUrl,
 }: SentencesImagesSectionProps) {
   const API_URL = apiUrl || 'http://localhost:3000';
+  const isTimelineEditorActive = editorMode === 'timeline';
+
+  const renderEditorLoadingState = () => (
+    <div className="flex min-h-64 items-center justify-center rounded-2xl border border-dashed border-indigo-200 bg-white/80 px-6 py-10 text-sm text-gray-600 shadow-sm">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-5 w-5 animate-spin text-indigo-500" />
+        <span>Loading editor workspace...</span>
+      </div>
+    </div>
+  );
+
+  const {
+    clips: timelineDraftClips,
+    selectedClipId: selectedTimelineClipId,
+    hasOverrides: hasTimelineDraftOverrides,
+    overrideCount: timelineDraftOverrideCount,
+    selectClip: handleTimelineClipSelect,
+    patchClip: handleTimelineClipPatch,
+    toggleClipLinked: handleTimelineClipLinkToggle,
+    resetClip: handleTimelineClipReset,
+    resetAllClips: handleTimelineDraftReset,
+  } = useTimelineEditorDraft({
+    sentences,
+    sceneDurationSecondsByIndex,
+  });
+
+  const [timelineEffectModalState, setTimelineEffectModalState] = useState<
+    TimelineEffectModalState | null
+  >(null);
+
+  const timelineDraftClipsWithEditors = timelineDraftClips.map((clip) => {
+    if (clip.kind === 'visual') {
+      return {
+        ...clip,
+        editorLabel: clip.sceneTab === 'video' ? 'Edit look' : 'Edit scene',
+      };
+    }
+
+    if (clip.kind === 'text') {
+      return {
+        ...clip,
+        editorLabel: 'Edit text',
+      };
+    }
+
+    if (clip.kind === 'overlay') {
+      return {
+        ...clip,
+        editorLabel: 'Edit overlay',
+      };
+    }
+
+    return clip;
+  });
+
+  const timelineDurationSeconds = timelineDraftClipsWithEditors.reduce(
+    (longest, clip) => Math.max(longest, clip.endSeconds),
+    0,
+  );
+  const voiceTimelineClip: TimelineDraftClip | null = timelineVoiceTrack
+    ? {
+        id: 'voice:merged',
+        sentenceId: '__merged-voice-over__',
+        sentenceIndex: -1,
+        kind: 'voice',
+        laneId: 'voice',
+        sceneTab: 'image',
+        label: timelineVoiceTrack.label,
+        subtitle: timelineVoiceTrack.subtitle,
+        textPreview: timelineVoiceTrack.subtitle,
+        startSeconds: 0,
+        durationSeconds: Math.max(0.35, timelineVoiceTrack.durationSeconds),
+        endSeconds: Math.max(0.35, timelineVoiceTrack.durationSeconds),
+        minDurationSeconds: 0.35,
+        linkedToSentence: false,
+        parentClipId: null,
+        linkedAnchor: 'start',
+        syncDurationWithParent: false,
+        allowsMove: false,
+        allowsResizeStart: false,
+        allowsResizeEnd: false,
+        isAudio: true,
+        toneClassName: 'border-emerald-300 bg-linear-to-r from-emerald-500 to-teal-500',
+        editorLabel: timelineVoiceTrack.canEdit ? 'Edit voice-over' : null,
+      }
+    : null;
+  const soundtrackTimelineClip: TimelineDraftClip | null = timelineSoundtrack
+    ? {
+        id: 'soundtrack:active',
+        sentenceId: '__background-soundtrack__',
+        sentenceIndex: -1,
+        kind: 'soundtrack',
+        laneId: 'soundtrack',
+        sceneTab: 'image',
+        label: timelineSoundtrack.label,
+        subtitle: `${timelineSoundtrack.subtitle} · ${timelineSoundtrack.volumePercent}% volume`,
+        textPreview: timelineSoundtrack.subtitle,
+        startSeconds: 0,
+        durationSeconds: Math.max(1, timelineDurationSeconds),
+        endSeconds: Math.max(1, timelineDurationSeconds),
+        minDurationSeconds: 1,
+        linkedToSentence: false,
+        parentClipId: null,
+        linkedAnchor: 'start',
+        syncDurationWithParent: false,
+        allowsMove: false,
+        allowsResizeStart: false,
+        allowsResizeEnd: false,
+        isAudio: true,
+        toneClassName: 'border-sky-300 bg-linear-to-r from-sky-600 to-indigo-500',
+        editorLabel: timelineSoundtrack.canEdit ? 'Edit soundtrack' : null,
+      }
+    : null;
+  const renderedTimelineClips = [
+    ...timelineDraftClipsWithEditors.filter((clip) => clip.kind !== 'voice'),
+    ...(voiceTimelineClip ? [voiceTimelineClip] : []),
+    ...(soundtrackTimelineClip ? [soundtrackTimelineClip] : []),
+  ];
+
+  const resolveTimelineClipSentenceIndex = (clip: TimelineDraftClip) => {
+    if (
+      clip.sentenceIndex >= 0 &&
+      sentences[clip.sentenceIndex]?.id === clip.sentenceId
+    ) {
+      return clip.sentenceIndex;
+    }
+
+    return sentences.findIndex((sentence) => sentence.id === clip.sentenceId);
+  };
+
+  const handleTimelineClipEditorOpen = (clip: TimelineDraftClip) => {
+    switch (clip.kind) {
+      case 'visual':
+        setTimelineEffectModalState({
+          sentenceId: clip.sentenceId,
+          activeTab: 'visual',
+        });
+        break;
+
+      case 'text':
+        setTimelineEffectModalState({
+          sentenceId: clip.sentenceId,
+          activeTab: 'text',
+        });
+        break;
+
+      case 'overlay':
+        setTimelineEffectModalState({
+          sentenceId: clip.sentenceId,
+          activeTab: 'overlay',
+        });
+        break;
+
+      case 'voice':
+        if (clip.id === 'voice:merged') {
+          onOpenTimelineVoiceEditor?.();
+          break;
+        }
+
+        onOpenSentenceVoiceEditor?.(clip.sentenceId);
+        break;
+      case 'sfx':
+        if (clip.sentenceIndex >= 0) {
+          onOpenSentenceSoundEffectsLibrary(clip.sentenceIndex);
+        }
+        break;
+      case 'transition':
+        if (clip.sentenceIndex >= 0) {
+          onOpenTransitionSoundEditor(clip.sentenceIndex);
+        }
+        break;
+      case 'soundtrack':
+        onOpenTimelineSoundtrackEditor?.();
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleTimelineTransitionTypeChange = (
+    sentenceId: string,
+    value: SentenceItem['transitionToNext'] | null,
+  ) => {
+    const sentenceIndex = sentences.findIndex((sentence) => sentence.id === sentenceId);
+    if (sentenceIndex < 0) {
+      return;
+    }
+
+    onTransitionToNextChange(
+      sentenceIndex,
+      value as NonNullable<SentenceItem['transitionToNext']> | null,
+    );
+  };
+
+  const activeTimelineEffectSentenceIndex = timelineEffectModalState
+    ? sentences.findIndex((sentence) => sentence.id === timelineEffectModalState.sentenceId)
+    : -1;
+  const activeTimelineEffectSentence =
+    activeTimelineEffectSentenceIndex >= 0
+      ? sentences[activeTimelineEffectSentenceIndex]
+      : null;
+  const activeTimelineEffectSceneTab = activeTimelineEffectSentence
+    ? resolveTimelineSentenceSceneTab(activeTimelineEffectSentence)
+    : 'image';
+
+  const timelineImagePreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.image ?? null,
+  );
+  const timelineVideoPreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.video ?? null,
+  );
+  const timelineSecondaryImagePreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.secondaryImage ?? null,
+  );
+  const timelineStartPreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.startImage ?? null,
+  );
+  const timelineEndPreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.endImage ?? null,
+  );
+  const timelineReferencePreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.referenceImage ?? null,
+  );
+  const timelineTextBackgroundPreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.textBackgroundImage ?? null,
+  );
+  const timelineTextBackgroundVideoPreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.textBackgroundVideo ?? null,
+  );
+  const timelineOverlayPreviewObjectUrl = useManagedObjectUrl(
+    activeTimelineEffectSentence?.overlayFile ?? null,
+  );
+
+  const timelineImagePreviewUrl =
+    timelineImagePreviewObjectUrl ?? activeTimelineEffectSentence?.imageUrl ?? null;
+  const timelineVideoPreviewUrl = getFirstNonEmptyTimelineUrl(
+    timelineVideoPreviewObjectUrl,
+    activeTimelineEffectSentence?.videoUrl,
+    activeTimelineEffectSentence?.framesVideoUrl,
+    activeTimelineEffectSentence?.textVideoUrl,
+    activeTimelineEffectSentence?.referenceVideoUrl,
+  );
+  const timelineSecondaryImagePreviewUrl =
+    timelineSecondaryImagePreviewObjectUrl ??
+    activeTimelineEffectSentence?.secondaryImageUrl ??
+    null;
+  const timelineStartPreviewUrl =
+    timelineStartPreviewObjectUrl ?? activeTimelineEffectSentence?.startImageUrl ?? null;
+  const timelineEndPreviewUrl =
+    timelineEndPreviewObjectUrl ?? activeTimelineEffectSentence?.endImageUrl ?? null;
+  const timelineReferencePreviewUrl =
+    timelineReferencePreviewObjectUrl ??
+    activeTimelineEffectSentence?.referenceImageUrl ??
+    null;
+  const timelineTextBackgroundPreviewUrl =
+    timelineTextBackgroundPreviewObjectUrl ??
+    activeTimelineEffectSentence?.textBackgroundImageUrl ??
+    null;
+  const timelineTextBackgroundVideoPreviewUrl =
+    timelineTextBackgroundVideoPreviewObjectUrl ??
+    activeTimelineEffectSentence?.textBackgroundVideoUrl ??
+    null;
+  const timelineOverlayPreviewUrl =
+    timelineOverlayPreviewObjectUrl ?? activeTimelineEffectSentence?.overlayUrl ?? null;
+  const timelineResolvedTextAnimationEffect = resolveTextAnimationEffectFromSettings(
+    activeTimelineEffectSentence?.textAnimationSettings ?? null,
+    activeTimelineEffectSentence?.textAnimationEffect ?? null,
+  );
+  const timelineResolvedTextAnimationValue = resolveTextAnimationText(
+    activeTimelineEffectSentence?.textAnimationText ?? null,
+    activeTimelineEffectSentence?.text ?? '',
+  );
+  const timelineResolvedTextAnimationSettings = normalizeTextAnimationSettings(
+    activeTimelineEffectSentence?.textAnimationSettings ?? null,
+    timelineResolvedTextAnimationEffect,
+    isShortVideo,
+    timelineResolvedTextAnimationValue,
+  );
+  const timelineTextPreviewBackgroundUrl =
+    timelineResolvedTextAnimationSettings.backgroundMode === 'image'
+      ? timelineTextBackgroundPreviewUrl
+      : timelineResolvedTextAnimationSettings.backgroundMode === 'inheritImage'
+        ? timelineImagePreviewUrl
+        : null;
+  const timelineTextPreviewBackgroundVideoUrl =
+    timelineResolvedTextAnimationSettings.backgroundMode === 'video'
+      ? timelineTextBackgroundVideoPreviewUrl
+      : timelineResolvedTextAnimationSettings.backgroundMode === 'inheritVideo'
+        ? timelineVideoPreviewUrl
+        : null;
+  const timelineRequestedDetailTab = timelineEffectModalState?.activeTab ?? 'visual';
+  const timelineVisualSceneKind =
+    activeTimelineEffectSceneTab === 'video' ||
+    activeTimelineEffectSentence?.mediaMode === 'frames' ||
+    Boolean(timelineVideoPreviewUrl)
+      ? 'video'
+      : 'image';
+  const timelineDetailSceneKind =
+    timelineRequestedDetailTab === 'text'
+      ? 'text'
+      : timelineRequestedDetailTab === 'overlay'
+        ? 'overlay'
+        : timelineVisualSceneKind;
+  const activeTimelineDetailEnabledTabs =
+    timelineRequestedDetailTab === 'text'
+      ? (['text'] as TimelineDetailTab[])
+      : timelineRequestedDetailTab === 'overlay'
+        ? (['overlay'] as TimelineDetailTab[])
+        : timelineDetailSceneKind === 'video'
+          ? (['visual'] as TimelineDetailTab[])
+          : (['visual', 'motion'] as TimelineDetailTab[]);
+  const timelineDetailPreviewUrl = getFirstNonEmptyTimelineUrl(
+    timelineImagePreviewUrl,
+    timelineSecondaryImagePreviewUrl,
+    timelineStartPreviewUrl,
+    timelineReferencePreviewUrl,
+    timelineEndPreviewUrl,
+  );
+  const timelineDetailImagePreviewUrl = timelineDetailSceneKind === 'video'
+    ? null
+    : timelineDetailPreviewUrl;
+  const timelineDetailVideoPreviewUrl = timelineDetailSceneKind === 'video'
+    ? timelineVideoPreviewUrl
+    : null;
+  const timelineResolvedOverlaySettings = normalizeOverlaySettings(
+    activeTimelineEffectSentence?.overlaySettings ?? null,
+    'image',
+  );
+
+  const handleTimelineClipDelete = (clip: TimelineDraftClip) => {
+    const sentenceIndex = resolveTimelineClipSentenceIndex(clip);
+    if (sentenceIndex < 0) {
+      return;
+    }
+
+    const sentence = sentences[sentenceIndex];
+    if (!sentence) {
+      return;
+    }
+
+    switch (clip.kind) {
+      case 'visual': {
+        if (clip.sceneTab === 'video') {
+          onSentencePatch(sentenceIndex, {
+            ...buildClearedTimelineVideoPatch(),
+            sceneTab: 'image',
+          });
+          return;
+        }
+
+        if (clip.sceneTab === 'text') {
+          onSentencePatch(sentenceIndex, {
+            ...buildClearedTimelineTextLayerPatch(),
+            sceneTab: resolveTimelineFallbackSceneTab(sentence),
+          });
+          return;
+        }
+
+        if (clip.sceneTab === 'overlay') {
+          onSentencePatch(sentenceIndex, {
+            ...buildClearedTimelineOverlayLayerPatch(),
+            sceneTab: resolveTimelineFallbackSceneTab(sentence),
+          });
+          return;
+        }
+
+        onRemoveSentenceImage(sentenceIndex, 'primary');
+        return;
+      }
+
+      case 'text': {
+        onSentencePatch(sentenceIndex, {
+          ...buildClearedTimelineTextLayerPatch(),
+          ...(clip.sceneTab === 'text'
+            ? { sceneTab: resolveTimelineFallbackSceneTab(sentence) }
+            : {}),
+        });
+        return;
+      }
+
+      case 'overlay': {
+        onSentencePatch(sentenceIndex, {
+          ...buildClearedTimelineOverlayLayerPatch(),
+          ...(clip.sceneTab === 'overlay'
+            ? { sceneTab: resolveTimelineFallbackSceneTab(sentence) }
+            : {}),
+        });
+        return;
+      }
+
+      case 'sfx': {
+        onSentencePatch(sentenceIndex, {
+          soundEffects: [],
+          alignSoundEffectsToSceneEnd: false,
+        });
+        return;
+      }
+
+      case 'transition': {
+        onSentencePatch(sentenceIndex, {
+          transitionSoundEffects: [],
+        });
+        return;
+      }
+
+      default:
+        return;
+    }
+  };
 
   const {
     enhanceError,
@@ -725,143 +1271,164 @@ export function SentencesImagesSection({
             </div>
           ) : null}
           {sentences.length > 0 ? (
-            <SceneEditorSection
-              sentences={sentences}
-              isShortVideo={isShortVideo}
-              sceneDurationSecondsByIndex={sceneDurationSecondsByIndex}
-              isGeneratingAllImages={isGeneratingAllImages}
-              onGenerateAllImages={onGenerateAllImages}
-              isApplyingBulkFeelingCues={isApplyingBulkFeelingCues}
-              onGenerateBulkFeelingCues={onGenerateBulkFeelingCues}
-              isApplyingBulkLookEffects={isApplyingBulkLookEffects}
-              onGenerateBulkLookEffects={onGenerateBulkLookEffects}
-              onOpenBulkLookPresetModal={onOpenBulkLookPresetModal}
-              onResetBulkLookEffects={onResetBulkLookEffects}
-              isApplyingBulkLookPreset={isApplyingBulkLookPreset}
-              isApplyingBulkMotionEffects={isApplyingBulkMotionEffects}
-              onGenerateBulkMotionEffects={onGenerateBulkMotionEffects}
-              onOpenBulkMotionPresetModal={onOpenBulkMotionPresetModal}
-              onResetBulkMotionEffects={onResetBulkMotionEffects}
-              isApplyingBulkMotionPreset={isApplyingBulkMotionPreset}
-              isSavingSceneSequence={isSavingSceneSequence}
-              isApplyingSavedSequence={isApplyingSavedSequence}
-              onOpenSaveSceneSequence={onOpenSaveSceneSequence}
-              onOpenLoadSceneSequence={onOpenLoadSceneSequence}
-              onSelectVideoFromLibrary={onSelectVideoFromLibrary}
-              onSaveSentenceVideoToLibrary={onSaveSentenceVideoToLibrary}
-              isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryBySentenceId}
-              videoModel={videoModel}
-
-              onOpenSentenceSoundEffectsLibrary={onOpenSentenceSoundEffectsLibrary}
-              onSentenceSoundEffectsChange={onSentenceSoundEffectsChange}
-              onSentenceAlignSoundEffectsToSceneEndChange={
-                onSentenceAlignSoundEffectsToSceneEndChange
-              }
-              onUploadSentenceSoundEffect={onUploadSentenceSoundEffect}
-              isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
-              onSaveSentenceSoundEffectsMix={onSaveSentenceSoundEffectsMix}
-              isSavingSentenceSfxMixBySentenceId={isSavingSentenceSfxMixBySentenceId}
-
-              scriptCharacters={scriptCharacters}
-              onScriptCharactersChange={onScriptCharactersChange}
-              onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
-              scriptLocations={scriptLocations}
-              onScriptLocationsChange={onScriptLocationsChange}
-              onSentenceForcedLocationKeyChange={onSentenceForcedLocationKeyChange}
-              imageFilterPresets={imageFilterPresets}
-              motionEffectPresets={motionEffectPresets}
-              textAnimationPresets={textAnimationPresets}
-              overlayPresets={overlayPresets}
-              isLoadingImageFilterPresets={isLoadingImageFilterPresets}
-              isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
-              isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
-              isLoadingOverlayPresets={isLoadingOverlayPresets}
-              onSentencePatch={onSentencePatch}
-              onSaveImageFilterPreset={onSaveImageFilterPreset}
-              onUpdateImageFilterPreset={onUpdateImageFilterPreset}
-              onDeleteImageFilterPreset={onDeleteImageFilterPreset}
-              onSaveMotionEffectPreset={onSaveMotionEffectPreset}
-              onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
-              onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
-              onSaveTextAnimationPreset={onSaveTextAnimationPreset}
-              onUpdateTextAnimationPreset={onUpdateTextAnimationPreset}
-              onDeleteTextAnimationPreset={onDeleteTextAnimationPreset}
-              onSaveOverlayPreset={onSaveOverlayPreset}
-              onDeleteOverlayPreset={onDeleteOverlayPreset}
-              onGenerateSingleImageLookWithAi={onGenerateSingleImageLookWithAi}
-              onGenerateSingleImageMotionWithAi={onGenerateSingleImageMotionWithAi}
-              onSentenceVisualEffectChange={onSentenceVisualEffectChange}
-              onSentenceImageMotionEffectChange={onSentenceImageMotionEffectChange}
-              onSentenceImageMotionSpeedChange={onSentenceImageMotionSpeedChange}
-              onTransitionToNextChange={onTransitionToNextChange}
-              onOpenTransitionSoundEditor={onOpenTransitionSoundEditor}
-              onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
-              onOpenAddSuspense={() => {
-                setSuspenseSelectedIndex(null);
-                setSuspenseModalOpen(true);
-              }}
-              onOpenGenerateTestVideo={() => {
-                setGenerateTestVideoModalOpen(true);
-              }}
-              enhanceError={enhanceError}
-              enhancingById={enhancingById}
-              enhanceMenuOpenById={enhanceMenuOpenById}
-              setEnhanceMenuOpenById={setEnhanceMenuOpenById}
-              isApplyingPrompt={isApplyingPrompt}
-              onAutoEnhance={handleEnhanceSentenceWithAi}
-              onCustomPrompt={openPromptEnhanceModal}
-              applyingImagePromptById={applyingImagePromptById}
-              imagePromptErrorById={imagePromptErrorById}
-              onOpenEnhanceImagePromptModal={openEnhanceImagePromptModal}
-              onMergeSentenceIntoPrevious={onMergeSentenceIntoPrevious}
-              onMergeSentenceIntoNext={onMergeSentenceIntoNext}
-              onRequestDelete={(index) => {
-                setDeleteSentenceIndex(index);
-                setIsDeleteSentenceOpen(true);
-              }}
-              onSentenceTextChange={onSentenceTextChange}
-              onSentenceMediaModeChange={onSentenceMediaModeChange}
-              onSentenceImageUpload={onSentenceImageUpload}
-              onSentenceVideoUpload={onSentenceVideoUpload}
-              onAddSentenceImageSlot={onAddSentenceImageSlot}
-              onSentenceFrameImageUpload={onSentenceFrameImageUpload}
-              onGenerateSentenceImage={onGenerateSentenceImage}
-              onGenerateSentenceReferenceImage={onGenerateSentenceReferenceImage}
-              onGenerateSentenceFrameImage={onGenerateSentenceFrameImage}
-              onGenerateSentenceVideo={onGenerateSentenceVideo}
-              onRemoveSentenceGeneratedVideoForMode={onRemoveSentenceGeneratedVideoForMode}
-              isGeneratingVideoBySentenceId={isGeneratingVideoBySentenceId}
-              setIsGeneratingVideoBySentenceId={setIsGeneratingVideoBySentenceId}
-              onSentenceVideoGenerationModeChange={
-                onSentenceVideoGenerationModeChange
-              }
-              onSentenceVideoPromptChange={onSentenceVideoPromptChange}
-              onGenerateSentenceVideoPrompt={onGenerateSentenceVideoPrompt}
-              isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
-              onSentenceReferenceImageUpload={onSentenceReferenceImageUpload}
-              onRemoveSentenceReferenceImage={onRemoveSentenceReferenceImage}
-              onSelectFromLibrary={onSelectFromLibrary}
-              onRemoveSentenceImage={onRemoveSentenceImage}
-              onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
-              onPreviewImage={(
-                url,
-                effect,
-                imageMotionEffect,
-                imageMotionSpeed,
-                imageFilterSettings,
-                imageMotionSettings,
-              ) => {
-                setIsPreviewClosing(false);
-                setPreviewImageUrl(url);
-                setPreviewVisualEffect(effect ?? null);
-                setPreviewImageMotionEffect(imageMotionEffect ?? 'default');
-                setPreviewImageMotionSpeed(
-                  imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
-                );
-                setPreviewImageFilterSettings(imageFilterSettings ?? null);
-                setPreviewImageMotionSettings(imageMotionSettings ?? null);
-              }}
-            />
+            <Suspense fallback={renderEditorLoadingState()}>
+              {isTimelineEditorActive ? (
+                <LazyTimelineEditorSection
+                  clips={renderedTimelineClips}
+                  sentences={sentences}
+                  selectedClipId={selectedTimelineClipId}
+                  hasDraftOverrides={hasTimelineDraftOverrides}
+                  draftOverrideCount={timelineDraftOverrideCount}
+                  isShortVideo={isShortVideo}
+                  onOpenSceneEditor={() => onEditorModeChange?.('scene')}
+                  onSelectClip={handleTimelineClipSelect}
+                  onPatchClip={handleTimelineClipPatch}
+                  onOpenClipEditor={handleTimelineClipEditorOpen}
+                  onDeleteClip={handleTimelineClipDelete}
+                  onChangeTransitionType={handleTimelineTransitionTypeChange}
+                  onToggleClipLinked={handleTimelineClipLinkToggle}
+                  onResetClip={handleTimelineClipReset}
+                  onResetAllClips={handleTimelineDraftReset}
+                />
+              ) : (
+                <LazySceneEditorSection
+                  sentences={sentences}
+                  isShortVideo={isShortVideo}
+                  sceneDurationSecondsByIndex={sceneDurationSecondsByIndex}
+                  isGeneratingAllImages={isGeneratingAllImages}
+                  onGenerateAllImages={onGenerateAllImages}
+                  isApplyingBulkFeelingCues={isApplyingBulkFeelingCues}
+                  onGenerateBulkFeelingCues={onGenerateBulkFeelingCues}
+                  isApplyingBulkLookEffects={isApplyingBulkLookEffects}
+                  onGenerateBulkLookEffects={onGenerateBulkLookEffects}
+                  onOpenBulkLookPresetModal={onOpenBulkLookPresetModal}
+                  onResetBulkLookEffects={onResetBulkLookEffects}
+                  isApplyingBulkLookPreset={isApplyingBulkLookPreset}
+                  isApplyingBulkMotionEffects={isApplyingBulkMotionEffects}
+                  onGenerateBulkMotionEffects={onGenerateBulkMotionEffects}
+                  onOpenBulkMotionPresetModal={onOpenBulkMotionPresetModal}
+                  onResetBulkMotionEffects={onResetBulkMotionEffects}
+                  isApplyingBulkMotionPreset={isApplyingBulkMotionPreset}
+                  isSavingSceneSequence={isSavingSceneSequence}
+                  isApplyingSavedSequence={isApplyingSavedSequence}
+                  onOpenSaveSceneSequence={onOpenSaveSceneSequence}
+                  onOpenLoadSceneSequence={onOpenLoadSceneSequence}
+                  onSelectVideoFromLibrary={onSelectVideoFromLibrary}
+                  onSaveSentenceVideoToLibrary={onSaveSentenceVideoToLibrary}
+                  isSavingSentenceVideoLibraryBySentenceId={isSavingSentenceVideoLibraryBySentenceId}
+                  videoModel={videoModel}
+                  onOpenSentenceSoundEffectsLibrary={onOpenSentenceSoundEffectsLibrary}
+                  onSentenceSoundEffectsChange={onSentenceSoundEffectsChange}
+                  onSentenceAlignSoundEffectsToSceneEndChange={
+                    onSentenceAlignSoundEffectsToSceneEndChange
+                  }
+                  onUploadSentenceSoundEffect={onUploadSentenceSoundEffect}
+                  isUploadingSentenceSfxBySentenceId={isUploadingSentenceSfxBySentenceId}
+                  onSaveSentenceSoundEffectsMix={onSaveSentenceSoundEffectsMix}
+                  isSavingSentenceSfxMixBySentenceId={isSavingSentenceSfxMixBySentenceId}
+                  scriptCharacters={scriptCharacters}
+                  onScriptCharactersChange={onScriptCharactersChange}
+                  onSentenceForcedCharacterKeysChange={onSentenceForcedCharacterKeysChange}
+                  scriptLocations={scriptLocations}
+                  onScriptLocationsChange={onScriptLocationsChange}
+                  onSentenceForcedLocationKeyChange={onSentenceForcedLocationKeyChange}
+                  imageFilterPresets={imageFilterPresets}
+                  motionEffectPresets={motionEffectPresets}
+                  textAnimationPresets={textAnimationPresets}
+                  overlayPresets={overlayPresets}
+                  isLoadingImageFilterPresets={isLoadingImageFilterPresets}
+                  isLoadingMotionEffectPresets={isLoadingMotionEffectPresets}
+                  isLoadingTextAnimationPresets={isLoadingTextAnimationPresets}
+                  isLoadingOverlayPresets={isLoadingOverlayPresets}
+                  onSentencePatch={onSentencePatch}
+                  onSaveImageFilterPreset={onSaveImageFilterPreset}
+                  onUpdateImageFilterPreset={onUpdateImageFilterPreset}
+                  onDeleteImageFilterPreset={onDeleteImageFilterPreset}
+                  onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+                  onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
+                  onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+                  onSaveTextAnimationPreset={onSaveTextAnimationPreset}
+                  onUpdateTextAnimationPreset={onUpdateTextAnimationPreset}
+                  onDeleteTextAnimationPreset={onDeleteTextAnimationPreset}
+                  onSaveOverlayPreset={onSaveOverlayPreset}
+                  onDeleteOverlayPreset={onDeleteOverlayPreset}
+                  onGenerateSingleImageLookWithAi={onGenerateSingleImageLookWithAi}
+                  onGenerateSingleImageMotionWithAi={onGenerateSingleImageMotionWithAi}
+                  onSentenceVisualEffectChange={onSentenceVisualEffectChange}
+                  onSentenceImageMotionEffectChange={onSentenceImageMotionEffectChange}
+                  onSentenceImageMotionSpeedChange={onSentenceImageMotionSpeedChange}
+                  onTransitionToNextChange={onTransitionToNextChange}
+                  onOpenTransitionSoundEditor={onOpenTransitionSoundEditor}
+                  onInsertEmptySentenceAfter={onInsertEmptySentenceAfter}
+                  onOpenAddSuspense={() => {
+                    setSuspenseSelectedIndex(null);
+                    setSuspenseModalOpen(true);
+                  }}
+                  onOpenGenerateTestVideo={() => {
+                    setGenerateTestVideoModalOpen(true);
+                  }}
+                  enhanceError={enhanceError}
+                  enhancingById={enhancingById}
+                  enhanceMenuOpenById={enhanceMenuOpenById}
+                  setEnhanceMenuOpenById={setEnhanceMenuOpenById}
+                  isApplyingPrompt={isApplyingPrompt}
+                  onAutoEnhance={handleEnhanceSentenceWithAi}
+                  onCustomPrompt={openPromptEnhanceModal}
+                  applyingImagePromptById={applyingImagePromptById}
+                  imagePromptErrorById={imagePromptErrorById}
+                  onOpenEnhanceImagePromptModal={openEnhanceImagePromptModal}
+                  onMergeSentenceIntoPrevious={onMergeSentenceIntoPrevious}
+                  onMergeSentenceIntoNext={onMergeSentenceIntoNext}
+                  onRequestDelete={(index) => {
+                    setDeleteSentenceIndex(index);
+                    setIsDeleteSentenceOpen(true);
+                  }}
+                  onSentenceTextChange={onSentenceTextChange}
+                  onSentenceMediaModeChange={onSentenceMediaModeChange}
+                  onSentenceImageUpload={onSentenceImageUpload}
+                  onSentenceVideoUpload={onSentenceVideoUpload}
+                  onAddSentenceImageSlot={onAddSentenceImageSlot}
+                  onSentenceFrameImageUpload={onSentenceFrameImageUpload}
+                  onGenerateSentenceImage={onGenerateSentenceImage}
+                  onGenerateSentenceReferenceImage={onGenerateSentenceReferenceImage}
+                  onGenerateSentenceFrameImage={onGenerateSentenceFrameImage}
+                  onGenerateSentenceVideo={onGenerateSentenceVideo}
+                  onRemoveSentenceGeneratedVideoForMode={onRemoveSentenceGeneratedVideoForMode}
+                  isGeneratingVideoBySentenceId={isGeneratingVideoBySentenceId}
+                  setIsGeneratingVideoBySentenceId={setIsGeneratingVideoBySentenceId}
+                  onSentenceVideoGenerationModeChange={
+                    onSentenceVideoGenerationModeChange
+                  }
+                  onSentenceVideoPromptChange={onSentenceVideoPromptChange}
+                  onGenerateSentenceVideoPrompt={onGenerateSentenceVideoPrompt}
+                  isGeneratingVideoPromptBySentenceId={isGeneratingVideoPromptBySentenceId}
+                  onSentenceReferenceImageUpload={onSentenceReferenceImageUpload}
+                  onRemoveSentenceReferenceImage={onRemoveSentenceReferenceImage}
+                  onSelectFromLibrary={onSelectFromLibrary}
+                  onRemoveSentenceImage={onRemoveSentenceImage}
+                  onRemoveSentenceFrameImage={onRemoveSentenceFrameImage}
+                  onPreviewImage={(
+                    url,
+                    effect,
+                    imageMotionEffect,
+                    imageMotionSpeed,
+                    imageFilterSettings,
+                    imageMotionSettings,
+                  ) => {
+                    setIsPreviewClosing(false);
+                    setPreviewImageUrl(url);
+                    setPreviewVisualEffect(effect ?? null);
+                    setPreviewImageMotionEffect(imageMotionEffect ?? 'default');
+                    setPreviewImageMotionSpeed(
+                      imageMotionSpeed ?? getDefaultImageMotionSpeed(isShortVideo),
+                    );
+                    setPreviewImageFilterSettings(imageFilterSettings ?? null);
+                    setPreviewImageMotionSettings(imageMotionSettings ?? null);
+                  }}
+                  onOpenTimelineEditor={() => onEditorModeChange?.('timeline')}
+                />
+              )}
+            </Suspense>
           ) : (
             <EmptyScenesState />
           )}
@@ -885,6 +1452,137 @@ export function SentencesImagesSection({
                   setPreviewImageMotionSettings(null);
                 }, 200);
               }}
+            />
+          ) : null}
+
+          {activeTimelineEffectSentence && timelineEffectModalState ? (
+            <ImageEffectsDetailModal
+              isOpen
+              isShortVideo={isShortVideo}
+              activeTab={timelineEffectModalState.activeTab}
+              enabledTabs={activeTimelineDetailEnabledTabs}
+              sceneKind={timelineDetailSceneKind}
+              previewImageUrl={timelineDetailImagePreviewUrl}
+              previewVideoUrl={timelineDetailVideoPreviewUrl}
+              previewTextInheritedImageUrl={timelineImagePreviewUrl}
+              previewTextInheritedVideoUrl={timelineVideoPreviewUrl}
+              previewOverlayInheritedImageUrl={timelineImagePreviewUrl}
+              previewOverlayInheritedVideoUrl={timelineVideoPreviewUrl}
+              sentenceText={activeTimelineEffectSentence.text}
+              visualEffect={activeTimelineEffectSentence.visualEffect}
+              imageMotionEffect={activeTimelineEffectSentence.imageMotionEffect}
+              imageMotionSpeed={activeTimelineEffectSentence.imageMotionSpeed}
+              textAnimationEffect={timelineResolvedTextAnimationEffect}
+              textAnimationText={activeTimelineEffectSentence.textAnimationText}
+              textSoundEffects={activeTimelineEffectSentence.textSoundEffects ?? []}
+              textBackgroundImage={activeTimelineEffectSentence.textBackgroundImage ?? null}
+              textBackgroundImageUrl={activeTimelineEffectSentence.textBackgroundImageUrl ?? null}
+              textBackgroundSavedImageId={activeTimelineEffectSentence.textBackgroundSavedImageId ?? null}
+              textBackgroundVideo={activeTimelineEffectSentence.textBackgroundVideo ?? null}
+              textBackgroundVideoUrl={activeTimelineEffectSentence.textBackgroundVideoUrl ?? null}
+              textBackgroundSavedVideoId={activeTimelineEffectSentence.textBackgroundSavedVideoId ?? null}
+              overlayFile={activeTimelineEffectSentence.overlayFile ?? null}
+              overlayUrl={timelineOverlayPreviewUrl}
+              overlayMimeType={activeTimelineEffectSentence.overlayMimeType ?? null}
+              overlaySoundEffects={activeTimelineEffectSentence.overlaySoundEffects ?? []}
+              customImageFilterId={activeTimelineEffectSentence.customImageFilterId ?? null}
+              customMotionEffectId={activeTimelineEffectSentence.customMotionEffectId ?? null}
+              customTextAnimationId={activeTimelineEffectSentence.customTextAnimationId ?? null}
+              customOverlayId={activeTimelineEffectSentence.customOverlayId ?? null}
+              imageFilterSettings={activeTimelineEffectSentence.imageFilterSettings ?? null}
+              imageMotionSettings={activeTimelineEffectSentence.imageMotionSettings ?? null}
+              textAnimationSettings={timelineResolvedTextAnimationSettings}
+              overlaySettings={timelineResolvedOverlaySettings}
+              imageFilterPresets={imageFilterPresets}
+              motionEffectPresets={motionEffectPresets}
+              textAnimationPresets={textAnimationPresets}
+              overlayPresets={overlayPresets}
+              onClose={() => setTimelineEffectModalState(null)}
+              onApply={({
+                visualEffect,
+                customImageFilterId,
+                imageFilterSettings,
+                imageMotionEffect,
+                customMotionEffectId,
+                imageMotionSettings,
+                imageMotionSpeed,
+                textAnimationEffect,
+                customTextAnimationId,
+                textAnimationSettings,
+                textAnimationText,
+                textSoundEffects,
+                textBackgroundImage,
+                textBackgroundImageUrl,
+                textBackgroundSavedImageId,
+                textBackgroundVideo,
+                textBackgroundVideoUrl,
+                textBackgroundSavedVideoId,
+                customOverlayId,
+                overlayFile,
+                overlayUrl,
+                overlayMimeType,
+                overlaySettings,
+                overlaySoundEffects,
+              }) => {
+                if (activeTimelineEffectSentenceIndex < 0) {
+                  return;
+                }
+
+                onSentencePatch(activeTimelineEffectSentenceIndex, {
+                  ...(timelineEffectModalState.activeTab === 'text'
+                    ? {
+                        sceneTab: 'text' as const,
+                        mediaMode: 'single' as const,
+                      }
+                    : timelineEffectModalState.activeTab === 'overlay'
+                      ? {
+                          sceneTab: 'overlay' as const,
+                          mediaMode: 'single' as const,
+                        }
+                      : {}),
+                  visualEffect,
+                  customImageFilterId,
+                  imageFilterSettings,
+                  imageMotionEffect,
+                  customMotionEffectId,
+                  imageMotionSettings,
+                  imageMotionSpeed,
+                  textAnimationEffect,
+                  customTextAnimationId,
+                  textAnimationSettings,
+                  textAnimationText,
+                  textSoundEffects,
+                  textBackgroundImage,
+                  textBackgroundImageUrl,
+                  textBackgroundSavedImageId,
+                  textBackgroundVideo,
+                  textBackgroundVideoUrl,
+                  textBackgroundSavedVideoId,
+                  customOverlayId,
+                  overlayFile,
+                  overlayUrl,
+                  overlayMimeType,
+                  overlaySettings,
+                  overlaySoundEffects,
+                });
+              }}
+              onSaveImageFilterPreset={onSaveImageFilterPreset}
+              onUpdateImageFilterPreset={onUpdateImageFilterPreset}
+              onDeleteImageFilterPreset={onDeleteImageFilterPreset}
+              onSaveMotionEffectPreset={onSaveMotionEffectPreset}
+              onUpdateMotionEffectPreset={onUpdateMotionEffectPreset}
+              onDeleteMotionEffectPreset={onDeleteMotionEffectPreset}
+              onSaveTextAnimationPreset={onSaveTextAnimationPreset}
+              onUpdateTextAnimationPreset={onUpdateTextAnimationPreset}
+              onDeleteTextAnimationPreset={onDeleteTextAnimationPreset}
+              onSaveOverlayPreset={onSaveOverlayPreset}
+              onDeleteOverlayPreset={onDeleteOverlayPreset}
+              onGenerateLookWithAi={(params) =>
+                onGenerateSingleImageLookWithAi(activeTimelineEffectSentence.id, params)
+              }
+              onGenerateMotionWithAi={(params) =>
+                onGenerateSingleImageMotionWithAi(activeTimelineEffectSentence.id, params)
+              }
             />
           ) : null}
         </div>

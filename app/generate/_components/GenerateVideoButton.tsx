@@ -9,8 +9,6 @@ interface GenerateVideoButtonProps {
   isGenerating: boolean;
   videoJobStatus: string | null;
   script: string;
-  voiceOver: File | null;
-  voicePreviewUrl?: string | null;
   onGenerate: () => void;
   onUploadVideo: (file: File) => Promise<void> | void;
   isUploadingVideo: boolean;
@@ -21,8 +19,6 @@ export function GenerateVideoButton({
   isGenerating,
   videoJobStatus,
   script,
-  voiceOver,
-  voicePreviewUrl,
   onGenerate,
   onUploadVideo,
   user,
@@ -31,13 +27,11 @@ export function GenerateVideoButton({
   const MAX_UPLOAD_MB = 250;
   const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
-  const hasVoiceSource = Boolean(voiceOver || String(voicePreviewUrl ?? '').trim());
   const isJobInProgress = !!videoJobStatus && videoJobStatus !== 'completed';
   const isDisabled = user?.email !== 'ahmedever80@gmail.com' ||
     isGenerating ||
     isJobInProgress ||
-    !script.trim() ||
-    !hasVoiceSource;
+    !script.trim();
 
   const [selectedVideo, setSelectedVideo] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
