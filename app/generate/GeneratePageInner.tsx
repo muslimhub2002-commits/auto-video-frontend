@@ -1889,6 +1889,21 @@ type GenerateLibrariesBootstrapState = {
 type TransitionSoundDraftItem = NonNullable<SentenceItem['transitionSoundEffects']>;
 type SentenceImageSlot = 'primary' | 'secondary';
 
+const LAST_SAVED_SCRIPT_SIGNATURE_KEY = 'avgen_last_saved_script_signature';
+
+/**
+ * Returns a normalised string made of the first 3 non-empty lines of a script.
+ * Used to detect whether the script body has changed enough to warrant a new DB row.
+ */
+function getScriptFirstLinesSignature(scriptText: string): string {
+  return scriptText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 3)
+    .join('\n');
+}
+
 export function GeneratePageInner() {
   const IMAGE_STYLE_PRESETS = [
     {
@@ -3559,7 +3574,6 @@ export function GeneratePageInner() {
     const materializeSentenceSoundEffectsForRender = async (
       items: SentenceSoundEffectItem[] | null | undefined,
     ): Promise<SentenceSoundEffectItem[]> => {
-      console.log(items,'dsadasdsaasdas')
       if (!Array.isArray(items) || items.length === 0) return [];
 
       return await mapWithConcurrency(
@@ -3611,7 +3625,6 @@ export function GeneratePageInner() {
     const materializeTransitionSoundEffectsForRender = async (
       items: SentenceItem['transitionSoundEffects'],
     ) => {
-      console.log(items,'dsdasasasdsa')
       if (!Array.isArray(items) || items.length === 0) return [];
 
       return await mapWithConcurrency(
@@ -3619,7 +3632,7 @@ export function GeneratePageInner() {
         RENDER_SOUND_EFFECT_MATERIALIZATION_CONCURRENCY,
         async (item) => {
           const sourceUrl = String(item?.url ?? '').trim();
-          if (sourceUrl) return item;
+          if (!sourceUrl) return item;
 
           const effectiveAudioSettings = normalizeSoundEffectAudioSettings(
             item.audioSettings,
@@ -12800,6 +12813,21 @@ export function GeneratePageInner() {
 
       const existingFullId = String(fullScriptId ?? fullSnapshot.scriptId ?? '').trim() || null;
 
+      // Compare the first 3 non-empty lines of the current script against the last
+      // saved signature stored in localStorage. When they differ it means the script
+      // content has changed significantly, so we create a brand-new DB row instead
+      // of overwriting the existing draft.
+      const currentScriptSignature = getScriptFirstLinesSignature(script);
+      const storedScriptSignature =
+        typeof window !== 'undefined'
+          ? localStorage.getItem(LAST_SAVED_SCRIPT_SIGNATURE_KEY)
+          : null;
+      const isNewScriptContent =
+        existingFullId !== null &&
+        storedScriptSignature !== null &&
+        currentScriptSignature !== storedScriptSignature;
+      const effectiveFullId = isNewScriptContent ? null : existingFullId;
+
       const payload: {
         script: string;
         voice_id?: string;
@@ -12859,7 +12887,7 @@ export function GeneratePageInner() {
           styleInstructions: aiStudioStyleInstructions,
           elevenLabsSettings: elevenLabsGlobalSettings,
         }),
-        video_url: existingFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
+        video_url: effectiveFullId ? undefined : fullSnapshot.videoUrl ?? undefined,
         characters: scriptCharacters.length ? scriptCharacters : undefined,
         locations: scriptLocations.length ? scriptLocations : undefined,
         sentences: fullSentencePayload.length > 0 ? fullSentencePayload : undefined,
@@ -12875,8 +12903,8 @@ export function GeneratePageInner() {
         shorts_script_ids: shouldSendShorts ? (shortsScriptIdsToLink ?? []) : undefined,
       };
 
-      const upserted = existingFullId
-        ? await api.patch(`/scripts/${encodeURIComponent(existingFullId)}`, payload)
+      const upserted = effectiveFullId
+        ? await api.patch(`/scripts/${encodeURIComponent(effectiveFullId)}`, payload)
         : await api.post('/scripts', payload);
 
       const upsertedScript = upserted.data as {
@@ -12992,7 +13020,12 @@ export function GeneratePageInner() {
         }
       }
 
-      showAlert(existingFullId ? 'Draft updated successfully.' : 'Draft saved successfully.', {
+      // Persist the signature of what was just saved so the next save can compare.
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(LAST_SAVED_SCRIPT_SIGNATURE_KEY, currentScriptSignature);
+      }
+
+      showAlert(effectiveFullId ? 'Draft updated successfully.' : 'Draft saved successfully.', {
         type: 'success',
       });
     } catch (error) {
