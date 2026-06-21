@@ -29,7 +29,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-import type { SentenceItem } from '../_types/sentences';
+import {
+  KLING_IMAGE_TO_VIDEO_MODEL_OPTIONS,
+  KLING_TEXT_TO_VIDEO_MODEL_OPTIONS,
+} from '../_types/sentences';
+import type {
+  KlingVideoModel,
+  SentenceItem,
+  VideoProvider,
+} from '../_types/sentences';
 import type { TimelineDraftClip } from '../_types/timeline-editor';
 import { useTimelineEditorDraft } from '../_hooks/useTimelineEditorDraft';
 import { useSentenceEnhancement } from '../_hooks/useSentenceEnhancement';
@@ -121,6 +129,20 @@ type TimelineEffectModalState = {
   sentenceId: string;
   activeTab: TimelineDetailTab;
 };
+
+const KLING_MODEL_OPTIONS = Array.from(
+  new Set([
+    ...KLING_TEXT_TO_VIDEO_MODEL_OPTIONS,
+    ...KLING_IMAGE_TO_VIDEO_MODEL_OPTIONS,
+  ]),
+);
+
+function formatKlingModelLabel(model: string) {
+  return model
+    .split('-')
+    .map((part) => part.toUpperCase())
+    .join(' ');
+}
 
 function resolveTimelineFallbackSceneTab(
   sentence: Pick<SentenceItem, 'mediaMode'>,
@@ -348,8 +370,10 @@ type SentencesImagesSectionProps = {
   imageStyle: string;
   onImageStyleChange: (value: string) => void;
 
-  videoModel: 'gemini' | 'grok';
-  onVideoModelChange: (value: 'gemini' | 'grok') => void;
+  videoModel: VideoProvider;
+  onVideoModelChange: (value: VideoProvider) => void;
+  klingModel: KlingVideoModel;
+  onKlingModelChange: (value: KlingVideoModel) => void;
   onInsertEmptySentenceAfter: (index: number) => string;
   onSentenceTextChange: (index: number, next: string) => void;
   onSentenceMediaModeChange: (index: number, mode: 'single' | 'frames') => void;
@@ -518,6 +542,8 @@ export function SentencesImagesSection({
   onImageStyleChange,
   videoModel,
   onVideoModelChange,
+  klingModel,
+  onKlingModelChange,
   onInsertEmptySentenceAfter,
   onSentenceTextChange,
   onSentenceMediaModeChange,
@@ -1120,8 +1146,27 @@ export function SentencesImagesSection({
                 <SelectContent>
                   <SelectItem value="gemini">Gemini</SelectItem>
                   <SelectItem value="grok">Grok</SelectItem>
+                  <SelectItem value="kling">Kling AI</SelectItem>
                 </SelectContent>
               </Select>
+
+              {videoModel === 'kling' ? (
+                <Select
+                  value={klingModel}
+                  onValueChange={(value) => onKlingModelChange(value as KlingVideoModel)}
+                >
+                  <SelectTrigger label="Kling Model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {KLING_MODEL_OPTIONS.map((model) => (
+                      <SelectItem key={model} value={model}>
+                        {formatKlingModelLabel(model)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
 
               <Select
                 value={selectedProvider}

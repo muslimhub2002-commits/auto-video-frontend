@@ -68,8 +68,14 @@ import { useToast } from '@/components/ui/toast';
 import type {
   ElevenLabsModel,
   ElevenLabsVoiceSettings,
+  KlingVideoModel,
+  VideoProvider,
   SentenceItem,
   SentenceSoundEffectItem,
+} from './_types/sentences';
+import {
+  KLING_IMAGE_TO_VIDEO_MODEL_OPTIONS,
+  KLING_TEXT_TO_VIDEO_MODEL_OPTIONS,
 } from './_types/sentences';
 import type { SavedSequenceDetailDto } from './_types/saved-sequences';
 import type { GenerateTestVideoRequest } from './_components/sentences/test-video.types';
@@ -1734,6 +1740,8 @@ type SavedVideoLibraryRecord = {
 };
 
 const VIDEO_LIBRARY_MANAGED_FOLDER = 'auto-video-generator/videos-library';
+const DEFAULT_KLING_TEXT_MODEL: KlingVideoModel = 'kling-v2-6';
+const DEFAULT_KLING_IMAGE_MODEL: KlingVideoModel = 'kling-v2-6';
 
 const getActiveSentenceVideoMode = (
   sentence: SentenceItem,
@@ -2016,7 +2024,8 @@ export function GeneratePageInner() {
     },
     [setImageAspectRatioWithRef],
   );
-  const [videoModel, setVideoModel] = useState<'gemini' | 'grok'>('gemini');
+  const [videoModel, setVideoModel] = useState<VideoProvider>('gemini');
+  const [klingModel, setKlingModel] = useState<KlingVideoModel>(DEFAULT_KLING_IMAGE_MODEL);
   const [images, setImages] = useState<File[]>([]);
   const [voiceOver, setVoiceOver] = useState<File | null>(null);
   const [voiceOverChunks, setVoiceOverChunks] = useState<VoiceOverChunkState[]>([]);
@@ -10174,10 +10183,22 @@ export function GeneratePageInner() {
         return;
       }
 
+      const resolvedKlingModel =
+        videoModel === 'kling' &&
+        (KLING_TEXT_TO_VIDEO_MODEL_OPTIONS as readonly string[]).includes(klingModel)
+          ? klingModel
+          : DEFAULT_KLING_TEXT_MODEL;
+
       const res = await api.post('/ai/generate-video-from-text', {
         prompt,
         aspectRatio: effectiveAspectRatio,
         ...(videoModel === 'grok' ? { model: 'grok-imagine-video' } : {}),
+        ...(videoModel === 'kling'
+          ? {
+              model: resolvedKlingModel,
+              durationSeconds: sentence.klingDurationSeconds ?? 5,
+            }
+          : {}),
       });
 
       const url = (res.data as { videoUrl?: string })?.videoUrl ?? null;
@@ -10191,6 +10212,12 @@ export function GeneratePageInner() {
         savedVideoId: null,
         textVideoUrl: url,
         textSavedVideoId: null,
+        videoProvider: videoModel,
+        klingModel: videoModel === 'kling' ? resolvedKlingModel : sentence.klingModel ?? null,
+        klingDurationSeconds:
+          videoModel === 'kling'
+            ? (sentence.klingDurationSeconds ?? 5)
+            : (sentence.klingDurationSeconds ?? null),
       });
 
       showToast('Sentence video generated.', 'success');
@@ -10239,12 +10266,21 @@ export function GeneratePageInner() {
         return;
       }
 
+      const resolvedKlingModel =
+        videoModel === 'kling' &&
+        (KLING_IMAGE_TO_VIDEO_MODEL_OPTIONS as readonly string[]).includes(klingModel)
+          ? klingModel
+          : DEFAULT_KLING_IMAGE_MODEL;
+
       const form = new FormData();
       form.append('referenceImage', referenceImage);
       form.append('prompt', prompt);
       form.append('aspectRatio', effectiveAspectRatio);
       if (videoModel === 'grok') {
         form.append('model', 'grok-imagine-video');
+      } else if (videoModel === 'kling') {
+        form.append('model', resolvedKlingModel);
+        form.append('durationSeconds', String(sentence.klingDurationSeconds ?? 5));
       }
 
       const res = await api.post('/ai/generate-video-from-reference-image', form, {
@@ -10264,6 +10300,12 @@ export function GeneratePageInner() {
         savedVideoId: null,
         referenceVideoUrl: url,
         referenceSavedVideoId: null,
+        videoProvider: videoModel,
+        klingModel: videoModel === 'kling' ? resolvedKlingModel : sentence.klingModel ?? null,
+        klingDurationSeconds:
+          videoModel === 'kling'
+            ? (sentence.klingDurationSeconds ?? 5)
+            : (sentence.klingDurationSeconds ?? null),
       });
 
       showToast('Sentence video generated.', 'success');
@@ -11327,7 +11369,7 @@ export function GeneratePageInner() {
     showToast,
   ]);
 
-  const handleVideoModelChange = (next: 'gemini' | 'grok') => {
+  const handleVideoModelChange = (next: VideoProvider) => {
     setVideoModel(next);
     if (next !== 'grok') return;
 
@@ -11353,6 +11395,10 @@ export function GeneratePageInner() {
       }),
     );
   };
+
+  const handleKlingModelChange = useCallback((next: KlingVideoModel) => {
+    setKlingModel(next);
+  }, []);
 
   const handleSaveSentenceImage = async (index: number) => {
     const target = sentences[index];
@@ -13542,6 +13588,8 @@ export function GeneratePageInner() {
                     onImageStyleChange={handleImageStyleChange}
                     videoModel={videoModel}
                     onVideoModelChange={handleVideoModelChange}
+                    klingModel={klingModel}
+                    onKlingModelChange={handleKlingModelChange}
                     scriptCharacters={scriptCharacters}
                     onScriptCharactersChange={handleScriptCharactersChange}
                     onSentenceForcedCharacterKeysChange={handleSentenceForcedCharacterKeysChange}

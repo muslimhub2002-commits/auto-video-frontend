@@ -1,5 +1,40 @@
 import type { SoundEffectAudioSettings } from './sound-effect-audio';
 
+export type VideoProvider = 'gemini' | 'grok' | 'kling';
+
+export const KLING_TEXT_TO_VIDEO_MODEL_OPTIONS = [
+  'kling-v1',
+  'kling-v1-6',
+  'kling-v2-master',
+  'kling-v2-1-master',
+  'kling-v2-5-turbo',
+  'kling-v2-6',
+  'kling-v3',
+] as const;
+
+export const KLING_IMAGE_TO_VIDEO_MODEL_OPTIONS = [
+  'kling-v1',
+  'kling-v1-5',
+  'kling-v1-6',
+  'kling-v2-master',
+  'kling-v2-1',
+  'kling-v2-1-master',
+  'kling-v2-5-turbo',
+  'kling-v2-6',
+  'kling-v3',
+] as const;
+
+export const KLING_DURATION_OPTIONS = [
+  3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+] as const;
+
+export type KlingTextToVideoModel =
+  (typeof KLING_TEXT_TO_VIDEO_MODEL_OPTIONS)[number];
+export type KlingImageToVideoModel =
+  (typeof KLING_IMAGE_TO_VIDEO_MODEL_OPTIONS)[number];
+export type KlingVideoModel = KlingTextToVideoModel | KlingImageToVideoModel;
+export type KlingDurationSeconds = (typeof KLING_DURATION_OPTIONS)[number];
+
 export type SentenceSoundEffectTimingMode = 'withPrevious' | 'afterPreviousEnds';
 
 export type SentenceSoundEffectItem = {
@@ -111,6 +146,9 @@ export type SentenceItem = {
   forcedLocationKey?: string | null;
 
   videoGenerationMode?: 'frames' | 'text' | 'referenceImage';
+  videoProvider?: VideoProvider | null;
+  klingModel?: KlingVideoModel | null;
+  klingDurationSeconds?: KlingDurationSeconds | null;
   videoPrompt?: string | null;
   referenceImage?: File | null;
   referenceImageUrl?: string | null;

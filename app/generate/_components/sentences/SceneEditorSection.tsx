@@ -26,7 +26,7 @@ import {
   Video as VideoIcon,
 } from 'lucide-react';
 
-import type { SentenceItem } from '../../_types/sentences';
+import type { SentenceItem, VideoProvider } from '../../_types/sentences';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import {
   BulkSceneAssignmentModal,
@@ -222,7 +222,7 @@ type SceneEditorSectionProps = {
   onSaveSentenceSoundEffectsMix: (index: number) => void | Promise<void>;
   isSavingSentenceSfxMixBySentenceId: Record<string, boolean>;
 
-  videoModel: 'gemini' | 'grok';
+  videoModel: VideoProvider;
 
   scriptCharacters: ScriptCharacter[];
   onScriptCharactersChange: (next: ScriptCharacter[]) => void;
@@ -436,7 +436,7 @@ type SentenceRowProps = {
   onSaveSentenceSoundEffectsMix: (index: number) => void | Promise<void>;
   onSelectVideoFromLibrary?: (index: number) => void;
   onSaveSentenceVideoToLibrary?: (index: number) => void | Promise<void>;
-  videoModel: 'gemini' | 'grok';
+  videoModel: VideoProvider;
   scriptCharacters: ScriptCharacter[];
   onSentenceForcedCharacterKeysChange: (index: number, next: string[] | null) => void;
   scriptLocations: ScriptLocation[];

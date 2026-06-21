@@ -119,6 +119,8 @@ import {
   resolveSoundEffectTrimWindow,
   type SoundEffectAudioSettings,
 } from '../../_types/sound-effect-audio';
+import { KLING_DURATION_OPTIONS } from '../../_types/sentences';
+import type { VideoProvider } from '../../_types/sentences';
 import { useManagedObjectUrl } from './useManagedObjectUrl';
 
 import type { SentenceItem, SentenceSoundEffectItem } from '../../_types/sentences';
@@ -422,7 +424,7 @@ type SentenceEditorCardProps = {
   onSaveVideoToLibrary?: () => void | Promise<void>;
   isSavingVideoToLibrary?: boolean;
 
-  videoModel: 'gemini' | 'grok';
+  videoModel: VideoProvider;
 
   scriptCharacters: ScriptCharacter[];
   onForcedCharacterKeysChange: (next: string[] | null) => void;
@@ -1180,9 +1182,11 @@ function SentenceEditorCardComponent({
   const [isImageEffectsDetailModalOpen, setIsImageEffectsDetailModalOpen] = useState(false);
   const [isTextPreviewOverlayOpen, setIsTextPreviewOverlayOpen] = useState(false);
   const [isTextPreviewOverlayClosing, setIsTextPreviewOverlayClosing] = useState(false);
+  const [isKlingDurationModalOpen, setIsKlingDurationModalOpen] = useState(false);
   const isUploadingSoundEffectActive = isUploadingSoundEffect || isUploadingSoundEffectLocal;
   const imageEffectsMode = item.imageEffectsMode ?? 'quick';
   const shouldAnimateImagePreview = isImageSceneTab;
+  const klingDurationSeconds = item.klingDurationSeconds ?? 5;
 
   useEffect(() => {
     if (isOverlaySceneTab) {
@@ -3999,6 +4003,20 @@ function SentenceEditorCardComponent({
                             ) : null}
                           </div>
 
+                          {videoModel === 'kling' ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsKlingDurationModalOpen(true);
+                              }}
+                              className="h-10 w-10 rounded-xl bg-white text-indigo-700 border border-indigo-200 shadow-md hover:shadow-lg hover:bg-indigo-50 transition-all flex items-center justify-center"
+                              title={`Kling duration: ${klingDurationSeconds}s`}
+                            >
+                              <Clock className="h-4 w-4" />
+                            </button>
+                          ) : null}
+
                           <Button
                             type="button"
                             size="sm"
@@ -4135,6 +4153,20 @@ function SentenceEditorCardComponent({
                           </div>
                         ) : null}
                       </div>
+
+                      {videoModel === 'kling' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsKlingDurationModalOpen(true);
+                          }}
+                          className="h-10 w-10 rounded-xl bg-white text-indigo-700 border border-indigo-200 shadow-md hover:shadow-lg hover:bg-indigo-50 transition-all flex items-center justify-center"
+                          title={`Kling duration: ${klingDurationSeconds}s`}
+                        >
+                          <Clock className="h-4 w-4" />
+                        </button>
+                      ) : null}
 
                       <Button
                         type="button"
@@ -4573,6 +4605,71 @@ function SentenceEditorCardComponent({
             isPreviewClosing={isTextPreviewOverlayClosing}
             onRequestClose={closeTextPreviewOverlay}
           />
+        ) : null}
+
+        {isKlingDurationModalOpen ? (
+          <div
+            className="fixed inset-0 z-40 min-h-screen flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-in fade-in duration-200"
+            onClick={() => setIsKlingDurationModalOpen(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-3xl shadow-2xl border border-gray-200/80 overflow-hidden bg-white animate-in fade-in zoom-in-95 duration-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-8 py-6 border-b border-gray-200/80 bg-linear-to-r from-indigo-50 via-purple-50 to-pink-50">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-linear-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-md shadow-blue-500/20">
+                      <Clock className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 tracking-tight">
+                        Kling Duration
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-0.5">
+                        Choose the clip length for this sentence
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsKlingDurationModalOpen(false)}
+                    className="h-9 w-9 p-0 rounded-full hover:bg-gray-100 transition-colors"
+                  >
+                    <X className="h-4 w-4 text-gray-500" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="px-6 py-5 space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  {KLING_DURATION_OPTIONS.map((duration) => {
+                    const isSelected = klingDurationSeconds === duration;
+                    return (
+                      <button
+                        key={duration}
+                        type="button"
+                        onClick={() => {
+                          onSentencePatch({ klingDurationSeconds: duration });
+                          setIsKlingDurationModalOpen(false);
+                        }}
+                        className={
+                          isSelected
+                            ? 'rounded-2xl border border-indigo-300 bg-linear-to-r from-indigo-50 to-purple-50 px-4 py-3 text-sm font-bold text-indigo-900 shadow-sm'
+                            : 'rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50'
+                        }
+                      >
+                        {duration}s
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </div>
