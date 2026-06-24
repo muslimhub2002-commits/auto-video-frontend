@@ -2171,7 +2171,6 @@ export function GeneratePageInner() {
     handleInsertEmptySentenceAfter,
     handleAddSuspenseScene,
   } = useSentencesEditor();
-  const [sceneEditorMode, setSceneEditorMode] = useState<'scene' | 'timeline'>('scene');
   const patchSentenceById = useCallback(
     (sentenceId: string, patch: Partial<SentenceItem>) => {
       updateSentenceById(sentenceId, (sentence) => ({
@@ -7408,97 +7407,6 @@ export function GeneratePageInner() {
     const resolved = resolveRawBackgroundMusicSrcForRender();
     if (!resolved || resolved === '__none__') return null;
     return resolved;
-  };
-
-  const timelineBackgroundSoundtrack = (() => {
-    if (!addBackgroundSoundtrack) return null;
-
-    const normalizedVolumePercent = Math.max(
-      0,
-      Math.min(300, Number(backgroundSoundtrackVolumePercent ?? 100) || 100),
-    );
-    const value = String(selectedBackgroundSoundtrackValue ?? '').trim();
-
-    if (value === '__none__') {
-      return null;
-    }
-
-    if (selectedBackgroundSoundtrackLibraryItem) {
-      return {
-        label:
-          String(selectedBackgroundSoundtrackLibraryItem.title ?? '').trim() ||
-          'Background soundtrack',
-        subtitle: 'Library soundtrack',
-        volumePercent: normalizedVolumePercent,
-        canEdit: true,
-      };
-    }
-
-    if (value === '__oneoff__') {
-      return {
-        label: 'One-off soundtrack',
-        subtitle: 'Uploaded once for this render',
-        volumePercent: normalizedVolumePercent,
-        canEdit: false,
-      };
-    }
-
-    return {
-      label: 'Default soundtrack',
-      subtitle: 'Default background soundtrack',
-      volumePercent: normalizedVolumePercent,
-      canEdit: false,
-    };
-  })();
-
-  const timelineVoiceTrack = String(voiceOverPreviewUrl ?? '').trim()
-    ? {
-        label: 'Merged voice-over',
-        subtitle: 'Full narration track',
-        durationSeconds:
-          typeof voiceDuration === 'number' && Number.isFinite(voiceDuration) && voiceDuration > 0
-            ? voiceDuration
-            : 0.35,
-        canEdit: true,
-      }
-    : null;
-
-  const handleOpenTimelineSentenceVoiceEditor = (sentenceId: string) => {
-    const normalizedSentenceId = String(sentenceId ?? '').trim();
-    if (!normalizedSentenceId) return;
-
-    if (sentenceVoiceCandidateById[normalizedSentenceId]) {
-      showAlert(
-        'Resolve the pending preview for this sentence before editing its committed voice.',
-        { type: 'warning' },
-      );
-      return;
-    }
-
-    const sentence = sentences.find((item) => item.id === normalizedSentenceId);
-    if (!sentence || !hasSentenceVoiceOver(sentence)) {
-      showAlert('No committed sentence voice is available to edit.', {
-        type: 'warning',
-      });
-      return;
-    }
-
-    setIsSentenceVoiceManagerOpen(false);
-    setIsChunkVoiceManagerOpen(false);
-    setSentenceVoiceEditActionError(null);
-    setActiveSentenceVoiceEditorSentenceId(normalizedSentenceId);
-  };
-
-  const handleOpenTimelineBackgroundSoundtrackEditor = () => {
-    if (!selectedBackgroundSoundtrackLibraryItem) {
-      showAlert(
-        'Select a saved library soundtrack to edit it from the timeline.',
-        { type: 'warning' },
-      );
-      return;
-    }
-
-    handleOpenBackgroundSoundtrackEditor(selectedBackgroundSoundtrackLibraryItem.id);
   };
 
   const activeSentenceVoiceEditorTarget = activeSentenceVoiceEditorSentenceId
@@ -13510,8 +13418,6 @@ export function GeneratePageInner() {
                       sentences,
                       voiceDuration,
                     )}
-                    editorMode={sceneEditorMode}
-                    onEditorModeChange={setSceneEditorMode}
                     isLongForm={isLongForm}
                     shortsTabs={(shortRanges.length
                       ? shortRanges
@@ -13627,11 +13533,6 @@ export function GeneratePageInner() {
                     }
                     onTransitionToNextChange={handleTransitionToNextChange}
                     onOpenTransitionSoundEditor={handleOpenTransitionSoundEditor}
-                    timelineVoiceTrack={timelineVoiceTrack}
-                    onOpenTimelineVoiceEditor={() => setIsVoiceOverEditorOpen(true)}
-                    onOpenSentenceVoiceEditor={handleOpenTimelineSentenceVoiceEditor}
-                    timelineSoundtrack={timelineBackgroundSoundtrack}
-                    onOpenTimelineSoundtrackEditor={handleOpenTimelineBackgroundSoundtrackEditor}
                     onInsertEmptySentenceAfter={handleInsertEmptySentenceAfter}
                     onSentenceImageUpload={handleSentenceImageUpload}
                     onSentenceVideoUpload={handleSentenceVideoUpload}

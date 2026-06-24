@@ -1630,6 +1630,7 @@ export function ImageEffectsDetailModal({
   useEffect(() => {
     if (isOpen) {
       setIsRendered(true);
+      setIsClosing(false);
       return;
     }
 
