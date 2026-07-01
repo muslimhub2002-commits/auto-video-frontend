@@ -4,7 +4,6 @@ import {
   Music4,
   type LucideIcon,
 } from 'lucide-react';
-import { API_URL } from '@/lib/api-config';
 
 export type SocialAccountProvider = 'youtube' | 'meta' | 'tiktok';
 
@@ -199,11 +198,11 @@ export const socialAccountSections: readonly SocialAccountSection[] = [
     setupNotes: [
       {
         label: 'Authorized origin',
-        value: API_URL,
+        value: 'https://auto-video-backend.vercel.app',
       },
       {
         label: 'Redirect URI',
-        value: `${API_URL}/youtube/oauth2callback`,
+        value: 'https://auto-video-backend.vercel.app/youtube/oauth2callback',
       },
     ],
     implementationNotes: [
@@ -221,7 +220,7 @@ export const socialAccountSections: readonly SocialAccountSection[] = [
       },
       {
         title: 'Register the backend origin and callback exactly',
-        body: `Add ${API_URL} as an authorized JavaScript origin and add ${API_URL}/youtube/oauth2callback as the redirect URI. Both values must match exactly.`,
+        body: 'Add https://auto-video-backend.vercel.app as an authorized JavaScript origin and add https://auto-video-backend.vercel.app/youtube/oauth2callback as the redirect URI. Both values must match exactly.',
       },
       {
         title: 'Copy the client credentials into Social Accounts',
@@ -299,7 +298,7 @@ export const socialAccountSections: readonly SocialAccountSection[] = [
     setupNotes: [
       {
         label: 'Redirect URI',
-        value: `${API_URL}/tiktok/oauth2callback`,
+        value: 'https://auto-video-backend.vercel.app/tiktok/oauth2callback',
       },
       {
         label: 'Posting flow',
@@ -317,7 +316,7 @@ export const socialAccountSections: readonly SocialAccountSection[] = [
       },
       {
         title: 'Register the callback URL exactly',
-        body: `Set the redirect URI to ${API_URL}/tiktok/oauth2callback so the backend can complete the PKCE OAuth flow for the saved account.`,
+        body: 'Set the redirect URI to https://auto-video-backend.vercel.app/tiktok/oauth2callback so the backend can complete the PKCE OAuth flow for the saved account.',
       },
       {
         title: 'Copy the client key and client secret',

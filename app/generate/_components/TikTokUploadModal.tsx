@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { API_URL, api, youtubeApi } from '@/lib/api';
+import { api, youtubeApi } from '@/lib/api';
 import { getBackendAccessToken } from '@/lib/client-session';
 import { ensureManagedPublicUrl } from '@/lib/cloudinary';
 import {
@@ -152,7 +152,7 @@ export function TikTokUploadModal({
   const TIKTOK_API_URL =
     process.env.NEXT_PUBLIC_TIKTOK_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    API_URL;
+    'https://auto-video-backend.vercel.app';
 
   useEffect(() => {
     if (isOpen) {

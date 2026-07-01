@@ -1,9 +1,10 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
   ArrowUpRight,
   KeyRound,
   ShieldCheck,
 } from 'lucide-react';
+import { auth } from '@/auth';
 import {
   normalizeSocialAccountProvider,
   socialAccountSectionMap,
@@ -18,6 +19,12 @@ type SocialAccountGuidePageProps = {
 export default async function SocialAccountGuidePage({
   params,
 }: SocialAccountGuidePageProps) {
+  const session = await auth();
+
+  if (!session?.user) {
+    redirect('/login');
+  }
+
   const resolvedParams = await params;
   const provider = normalizeSocialAccountProvider(resolvedParams.provider);
 

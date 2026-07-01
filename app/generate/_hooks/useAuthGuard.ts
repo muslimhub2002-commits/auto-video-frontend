@@ -2,13 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { authService, type User } from '@/lib/auth';
-import {
-  clearClientSessionCache,
-  getCachedClientSession,
-  getClientSession,
-  seedClientSession,
-} from '@/lib/client-session';
+import { clearClientSessionCache, seedClientSession } from '@/lib/client-session';
 
 // Simple in-memory cache so auth is only resolved once
 // per session and subsequent pages don't show a loader
@@ -18,39 +14,31 @@ let hasLoadedUser = false;
 
 export function useAuthGuard() {
   const router = useRouter();
-  const initialSession = getCachedClientSession();
-  const [user, setUser] = useState<User | null>(cachedUser ?? initialSession?.user ?? null);
-  const [authStatus, setAuthStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>(
-    initialSession?.backendAccessToken ? 'authenticated' : 'loading',
-  );
-  const [isLoading, setIsLoading] = useState(!hasLoadedUser);
+  const { data: session, status } = useSession();
+  const [user, setUser] = useState<User | null>(cachedUser ?? session?.user ?? null);
+  const [isLoading, setIsLoading] = useState(status === 'loading' || !hasLoadedUser);
 
   useEffect(() => {
-    const resolveSession = async () => {
-      const session = await getClientSession();
-      if (session?.backendAccessToken && session.user) {
-        seedClientSession(session);
+    if (status === 'authenticated') {
+      seedClientSession(session ?? null);
+      if (session?.user) {
         setUser(session.user);
-        setAuthStatus('authenticated');
-        return;
       }
+      return;
+    }
 
+    if (status === 'unauthenticated') {
       cachedUser = null;
       hasLoadedUser = false;
       clearClientSessionCache();
-      setAuthStatus('unauthenticated');
       setIsLoading(false);
       router.replace('/login');
-    };
-
-    if (authStatus === 'loading') {
-      void resolveSession();
     }
-  }, [authStatus, router]);
+  }, [router, session, status]);
 
   useEffect(() => {
     const loadUser = async () => {
-      if (authStatus !== 'authenticated') {
+      if (status !== 'authenticated') {
         return;
       }
 
@@ -68,14 +56,7 @@ export function useAuthGuard() {
         cachedUser = userData;
         hasLoadedUser = true;
         setUser(userData);
-        const session = await getClientSession();
-        if (session?.backendAccessToken) {
-          seedClientSession({
-            ...session,
-            user: userData,
-          });
-        }
-      } catch {
+      } catch (error) {
         cachedUser = null;
         hasLoadedUser = false;
         clearClientSessionCache();
@@ -86,7 +67,7 @@ export function useAuthGuard() {
     };
 
     void loadUser();
-  }, [authStatus]);
+  }, [router, status]);
 
   const handleLogout = async () => {
     cachedUser = null;
@@ -97,7 +78,7 @@ export function useAuthGuard() {
 
   return {
     user,
-    isLoading: authStatus === 'loading' || isLoading,
+    isLoading: status === 'loading' || isLoading,
     handleLogout,
   };
 }
